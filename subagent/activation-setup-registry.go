@@ -49,7 +49,11 @@ type setupTransaction struct {
 type ActivationSetupRegistry struct {
 	mu            sync.Mutex
 	registrations map[*setupRegistration]struct{}
-	byChild       map[*cordis.Context]map[*installation]struct{}
+	// order keeps the registration sequence: Apply installs in registration
+	// order (the source's Set iteration), which Go map iteration does not
+	// provide.
+	order   []*setupRegistration
+	byChild map[*cordis.Context]map[*installation]struct{}
 }
 
 // NewActivationSetupRegistry builds one empty registry.
@@ -70,6 +74,7 @@ func (r *ActivationSetupRegistry) Register(contribution ContinuableSetupContribu
 	}
 	r.mu.Lock()
 	r.registrations[registration] = struct{}{}
+	r.order = append(r.order, registration)
 	r.mu.Unlock()
 	return func() {
 		r.mu.Lock()
@@ -81,6 +86,12 @@ func (r *ActivationSetupRegistry) Register(contribution ContinuableSetupContribu
 		// after revocation reports completion.
 		registration.removed = true
 		delete(r.registrations, registration)
+		for index, candidate := range r.order {
+			if candidate == registration {
+				r.order = append(r.order[:index], r.order[index+1:]...)
+				break
+			}
+		}
 		live := make([]*installation, 0, len(registration.installations))
 		for candidate := range registration.installations {
 			live = append(live, candidate)
@@ -104,8 +115,8 @@ func (r *ActivationSetupRegistry) Apply(childCtx *cordis.Context) (commit agent.
 		}
 	}()
 	r.mu.Lock()
-	live := make([]*setupRegistration, 0, len(r.registrations))
-	for registration := range r.registrations {
+	live := make([]*setupRegistration, 0, len(r.order))
+	for _, registration := range r.order {
 		live = append(live, registration)
 	}
 	r.mu.Unlock()

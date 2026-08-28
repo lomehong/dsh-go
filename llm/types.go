@@ -99,6 +99,10 @@ type MessageSource struct {
 	ReplayState json.RawMessage `json:"replayState,omitempty"`
 	// Tool source: the call this result answers.
 	CallID ToolCallID `json:"callId,omitempty"`
+	// User-rpc source: the request that delivered the message and the
+	// Host-canonicalized browser zone reported by that request.
+	RPCID          string `json:"rpcId,omitempty"`
+	ClientTimeZone string `json:"clientTimeZone,omitempty"`
 	// Plugin context form and the fields that form requires.
 	Form     string                   `json:"form,omitempty"`
 	Sections []ContextSnapshotSection `json:"sections,omitempty"`
