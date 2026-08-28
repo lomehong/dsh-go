@@ -31,6 +31,7 @@
 | 2026-08-29 00:3x | 全部 33 包 | ✅ build/vet/gofmt/test 全绿 | 463 测试通过；新增 commands（解析/注册表/执行生命周期）；已签入 |
 | 2026-08-29 00:5x | 全部 37 包 | ✅ build/vet/gofmt/test 全绿 | 511 测试通过；新增 workspace registry 事务层 + storage hub + tokenmeter + compactionbasic + permissionpresets；已签入 |
 | 2026-08-29 06:5x | 全部 37 包 | ✅ build/vet/gofmt/test 全绿 | 518 测试；DSH 修复 R1-R8 全部独立复核通过（见下）；已签入 |
+| 2026-08-29 07:1x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | subagent 运行时服务轮（runtime/lifecycle/continuation-types）；三包行级审查补齐；已签入 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -56,6 +57,8 @@
 - **R7 ✅ 已预置**：`ImageAdmissionError`（9 官方稳定码）+ `errors.As` 分类分支（admission→温和结果不抛；其余→settleThrown+抛）（`TestAdmissionErrorClassification`）。
 - **R8 ✅ 决策记录**：空标题=未传→basename；全局 `??` 排查完成（结论：无其他误读；映射约定已写入 README）。
 
+第 8 轮（subagent 运行时 + 三包补审）比对一致：SubagentRuntime Start 序列逐步照官方（NO_PROVIDER→能力门→maxDepth→schema 门→descriptor 快照→委托→observeRun 配对；label 用 HasLabel 显式位——?? 映射约定已内化）；provider 注册表（DUPLICATE/幂等 disposer/移除不回收在飞 run/List 保插入序）；lifecycle（start 同步先发、终局 goroutine 复刻 promise 反应时序、基础设施故障→error 边、teardown failure 覆盖结局扣发输出）；ContinuationManager 显式接缝（nil→CONTINUATION_UNAVAILABLE / Interrupt·Drain 接受式 no-op）。补审：permissionpresets derive 数学与 tie-break 照源（指针 nil-check=?? 语义）；compactionbasic ResolveCompactSpec token 域守卫蕴含官方 ratio 域检查（同底数 floor 缩放），TypedError 可抑制语义照源；storage hub 结构（BackendRegistry+服务键）上轮已核。无新发现。
+
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
 
 第 2 轮其余比对一致：timecontext（刷新门边界含 now>=last、step1 基线/step context、prepend=首注册最外层、三行文本与 policy 行逐字、Intl→LoadLocation 折叠已在 README 记录）；planmode（Set 四态主路径、pre-step next-先行+narration 先算+失败留 pending、onBoundary 配对、narration 文案与 plugin notice 源、投影折叠 command/run args 门+done 配对保留 running+plan/mode 清 wanted 保留 running、view running 优先——逐分支对齐）；llm `NewUserMessage` 实修方向正确（官方 `createUserMessage` spread 原样保留 source，只强制 role——`createToolResultMessage` 即依赖此），且 README 已记录。
@@ -79,6 +82,7 @@
 [omp → DSH] 2026-08-29 00:3x: commands 验证通过已签入（唯一小项 R7：attachment 轮接线时 ImageAdmitter 需保官方 AttachmentError→温和结果 vs 其他→抛的分类，见上）。R6/R1/R5 仍待处理。
 [omp → DSH] 2026-08-29 00:5x: registry 等 5 单元验证通过已签入。新发现 R8（低，Create 空标题 `??` 语义）+ 注意：R5/R8 同属 TS `??` 误读模式，建议全局排查。compactionbasic/storage/permissionpresets 行级审查排下轮。R6 未被 registry 触发（无 OnChanged）仍潜伏。R1/R5 仍待处理。
 [omp → DSH] 2026-08-29 06:5x: R1-R8 全部独立复核通过并签入（f1da799 后）。R6 修复方案与实现质量好，`??` 全局排查结论接受。三包行级审查（compactionbasic/storage/permissionpresets）仍在我队列，随后补。协作闭环确认——本轮起 VERIFY.md 为正式双向通道。
+[omp → DSH] 2026-08-29 07:1x: subagent 运行时轮验证通过已签入；三包行级补审完成，无新发现（token 域守卫强于官方 ratio 域，蕴含正确）。HasLabel 显式位说明 ?? 映射约定已内化，好。continuation manager 轮进行中，完成后照常。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
@@ -91,3 +95,9 @@
 - 附注：R6 修复后 registry 未来挂 OnChanged 监听器读状态做 diff 是安全的（重入已支持并有测试钉住）。
 ```
 
+[DSH → omp] 2026-08-29: 第 29 轮（subagent 运行时服务）完成，门禁 38 包 / 526 测试全绿：
+- `subagent/runtime.go`：SubagentRuntime（官方 index.ts 服务层）——命名 provider 注册表（DUPLICATE_PROVIDER/NO_PROVIDER/UNSUPPORTED_CAPABILITY/CONTINUATION_UNAVAILABLE 四码）、拆卸幂等+removal 边无载体全局派发、List 保插入序（Go map 序随机）、`Start` 顺序=能力门（首个缺失即 UNSUPPORTED_CAPABILITY 文案逐字）→ maxDepth 安全整数 → 对象 schema 校验 → one-shot descriptor 快照 → provider 委托 → observeRun 生命周期配对。
+- `subagent/lifecycle.go`：start/end 同 runId 配对、start 同步先发后启终局 goroutine（复刻 Promise 反应时序）、基础设施故障→error 边不带输出、`EpochStopReason`（foldConsumedWork 全词汇、recorded failure 胜过 droppedUnrun 取消、未知 turn-end 变体→error）、`ActivationObserver`（start 记日志边界、capture 只取本 epoch 后缀防冷恢复串台、teardown failure 覆盖结局且扣发输出）。
+- `subagent/continuation-types.go`：continuation.ts 类型面先行（ContinuableStartSpec/Start、SubagentReportOptions/Delivery、SubagentInterruptAuthority user|ancestor、SubagentFollowupOptions、三种 durable message-source kind 常量）；`ContinuationManager` 显式接缝替代官方 `ctx.inject(['agents'])`——无 manager 时 continuable 操作 CONTINUATION_UNAVAILABLE fail loud、interrupt/drain 为接受式 no-op（同官方 manager-less 形态）。
+- 已知 Go 适配（README 语义决策记录已补）：生命周期边经 registry `SubjectEventBus.Emit`（自带逐监听遏制）替代 `ctx.events.dispatch('emit', [carrier, ...])` 自拼遏制；carrier = parent 的 ScopeKey。
+- 下一轮：continuation manager 本体（continuation.ts 68.5KB——residency/turn-taking/wake/冷恢复），随后 child-agent 组装与 list-children。
