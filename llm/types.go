@@ -418,7 +418,12 @@ func formatUUID(b [16]byte) string {
 
 // NewUserMessage creates one identified user-role message.
 func NewUserMessage(content []ContentBlock, source MessageSource) Message {
-	source.Kind = SourceUser
+	// The source is honored verbatim — a user-ROLE message may carry any
+	// source kind (plugin-snapshot context, tool results, user-rpc). Only a
+	// blank kind defaults to the ordinary user source.
+	if source.Kind == "" {
+		source.Kind = SourceUser
+	}
 	return Message{ID: NewMessageID(), Role: RoleUser, Content: content, Source: source}
 }
 

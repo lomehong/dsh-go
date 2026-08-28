@@ -1,6 +1,7 @@
 package timecontext
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -89,6 +90,9 @@ func RenderBrowserTimeZoneContext(context BrowserTimeZoneContext) string {
 
 // jsonArray renders the source's JSON.stringify of the zone list.
 func jsonArray(values []string) string {
-	encoded, _ := jsonMarshal(values)
-	return encoded
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return "[]"
+	}
+	return string(encoded)
 }

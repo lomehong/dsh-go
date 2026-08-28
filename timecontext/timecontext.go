@@ -3,12 +3,16 @@ package timecontext
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"dshgo/agent"
 	"dshgo/cordis"
 	"dshgo/llm"
 	"dshgo/session"
 )
+
+// nowMillis is the clock seam; tests override it.
+var nowMillis = func() int64 { return time.Now().UnixMilli() }
 
 // Name is the cordis plugin name used by loader diagnostics and as the
 // plugin-source attribution on every durable reading.
@@ -151,7 +155,7 @@ func requestMessages(sess *session.Session, turn int64, proposed []llm.Message) 
 // renderText composes one durable reading: the sampled clock, the
 // browser-zone policy line, and the elapsed time since the preceding
 // model-visible message (step 1) or step context (later steps).
-func renderText(now int64, turn int64, step int64, previous int64, hasPrevious bool, timeZone string, loc timestampLocation, browser BrowserTimeZoneContext) string {
+func renderText(now int64, turn int64, step int64, previous int64, hasPrevious bool, timeZone string, loc *time.Location, browser BrowserTimeZoneContext) string {
 	elapsed := "unavailable"
 	if hasPrevious {
 		elapsed = formatDuration(now - previous)
@@ -161,7 +165,7 @@ func renderText(now int64, turn int64, step int64, previous int64, hasPrevious b
 		baseline = "model-visible message"
 	}
 	return fmt.Sprintf("Time sampled while preparing turn %d, step %d: %s\n%s\nElapsed since the preceding %s: %s.",
-		turn, step, FormatTimestamp(now, loc.location, timeZone), RenderBrowserTimeZoneContext(browser), baseline, elapsed)
+		turn, step, FormatTimestamp(now, loc, timeZone), RenderBrowserTimeZoneContext(browser), baseline, elapsed)
 }
 
 // Register validates the config and registers a prepended agent/pre-step
@@ -184,7 +188,10 @@ func Register(ctx *cordis.Context, agents *agent.AgentRegistry, config Config) (
 	}
 	fallbackTimeZone := config.TimeZone
 	if fallbackTimeZone == "" {
-		fallbackTimeZone = processZoneLabel(fallbackFormatter)
+		// Go adaptation: the fallback bracket label is the location's name —
+		// the IANA string for LoadLocation zones, "Local" for the process
+		// zone when no name is recoverable.
+		fallbackTimeZone = fallbackFormatter.String()
 	}
 	undo := agents.Events().OnWaterfall(agent.EventPreStep, nil, func(payload any, next func(any) any) any {
 		preStep, ok := payload.(agent.PreStepPayload)
@@ -200,31 +207,31 @@ func Register(ctx *cordis.Context, agents *agent.AgentRegistry, config Config) (
 		}
 		now := nowMillis()
 		if config.RefreshIntervalMs != nil && *config.RefreshIntervalMs > 0 {
-			if lastInjection, ok := latestInjectionTime(preStep.Agent.Session()); ok && now >= lastInjection && now-lastInjection < *config.RefreshIntervalMs {
+			if lastInjection, ok := latestInjectionTime(preStep.Agent.Session); ok && now >= lastInjection && now-lastInjection < *config.RefreshIntervalMs {
 				return decision
 			}
 		}
 		var previous int64
 		var hasPrevious bool
 		if preStep.Step == 1 {
-			previous, hasPrevious = precedingMessageTime(preStep.Agent.Session())
+			previous, hasPrevious = precedingMessageTime(preStep.Agent.Session)
 		} else {
-			previous, hasPrevious = precedingStepContextTime(preStep.Agent.Session(), preStep.Turn)
+			previous, hasPrevious = precedingStepContextTime(preStep.Agent.Session, preStep.Turn)
 		}
-		messages := requestMessages(preStep.Agent.Session(), preStep.Turn, decision.Messages)
+		messages := requestMessages(preStep.Agent.Session, preStep.Turn, decision.Messages)
 		browser, err := DeriveBrowserTimeZoneContext(messages)
 		if err != nil {
 			return agent.PreStepReject()
 		}
 		selectedTimeZone := fallbackTimeZone
-		loc := timestampLocation{location: fallbackFormatter}
+		loc := fallbackFormatter
 		if browser.Kind == "resolved" {
 			selectedTimeZone = browser.TimeZone
 			created, err := CreateTimestampFormatter(selectedTimeZone)
 			if err != nil {
 				return agent.PreStepReject()
 			}
-			loc = timestampLocation{location: created}
+			loc = created
 		}
 		text := renderText(now, preStep.Turn, preStep.Step, previous, hasPrevious, selectedTimeZone, loc, browser)
 		appended := llm.NewUserMessage(
