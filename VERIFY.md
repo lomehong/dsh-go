@@ -32,6 +32,7 @@
 | 2026-08-29 00:5x | 全部 37 包 | ✅ build/vet/gofmt/test 全绿 | 511 测试通过；新增 workspace registry 事务层 + storage hub + tokenmeter + compactionbasic + permissionpresets；已签入 |
 | 2026-08-29 06:5x | 全部 37 包 | ✅ build/vet/gofmt/test 全绿 | 518 测试；DSH 修复 R1-R8 全部独立复核通过（见下）；已签入 |
 | 2026-08-29 07:1x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | subagent 运行时服务轮（runtime/lifecycle/continuation-types）；三包行级审查补齐；已签入 |
+| 2026-08-29 07:3x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 536 测试；subagent 组装层（child-agent 全量）+ continuation manager 核心切片；已签入 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -59,6 +60,8 @@
 
 第 8 轮（subagent 运行时 + 三包补审）比对一致：SubagentRuntime Start 序列逐步照官方（NO_PROVIDER→能力门→maxDepth→schema 门→descriptor 快照→委托→observeRun 配对；label 用 HasLabel 显式位——?? 映射约定已内化）；provider 注册表（DUPLICATE/幂等 disposer/移除不回收在飞 run/List 保插入序）；lifecycle（start 同步先发、终局 goroutine 复刻 promise 反应时序、基础设施故障→error 边、teardown failure 覆盖结局扣发输出）；ContinuationManager 显式接缝（nil→CONTINUATION_UNAVAILABLE / Interrupt·Drain 接受式 no-op）。补审：permissionpresets derive 数学与 tie-break 照源（指针 nil-check=?? 语义）；compactionbasic ResolveCompactSpec token 域守卫蕴含官方 ratio 域检查（同底数 floor 缩放），TypedError 可抑制语义照源；storage hub 结构（BackendRegistry+服务键）上轮已核。无新发现。
 
+第 9 轮（child-agent + manager 核心切片）比对一致：resolveChildAgentOptions 逐点等价（request header 持有路由/effort、创建 maxTokens 存续、覆盖合并按 ""↔undefined 约定、路由变更未点名 effort 清除规则）、ResolveChildDepth（SubagentDepthError 文案、cap 允许等于）、ChildSessionMeta（preset 从父 LIVE 域——冷恢复正确性关键）、ApplyChildComposition 顺序（join preset→delegation context→persona 段→工具限制）。continuation 核心切片结构合理（ChildLock 通道链=官方 promise 尾、stateOf 三态、authorizeLineage、Interrupt 授权矩阵）——manager 本体（materialize/create-resume/submit/watchSettlement/drain）下轮交付后一并深审。ancestry 指针集合替代 WeakSet（保留祖先对象）的适配已记录。无新发现。
+
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
 
 第 2 轮其余比对一致：timecontext（刷新门边界含 now>=last、step1 基线/step context、prepend=首注册最外层、三行文本与 policy 行逐字、Intl→LoadLocation 折叠已在 README 记录）；planmode（Set 四态主路径、pre-step next-先行+narration 先算+失败留 pending、onBoundary 配对、narration 文案与 plugin notice 源、投影折叠 command/run args 门+done 配对保留 running+plan/mode 清 wanted 保留 running、view running 优先——逐分支对齐）；llm `NewUserMessage` 实修方向正确（官方 `createUserMessage` spread 原样保留 source，只强制 role——`createToolResultMessage` 即依赖此），且 README 已记录。
@@ -83,6 +86,7 @@
 [omp → DSH] 2026-08-29 00:5x: registry 等 5 单元验证通过已签入。新发现 R8（低，Create 空标题 `??` 语义）+ 注意：R5/R8 同属 TS `??` 误读模式，建议全局排查。compactionbasic/storage/permissionpresets 行级审查排下轮。R6 未被 registry 触发（无 OnChanged）仍潜伏。R1/R5 仍待处理。
 [omp → DSH] 2026-08-29 06:5x: R1-R8 全部独立复核通过并签入（f1da799 后）。R6 修复方案与实现质量好，`??` 全局排查结论接受。三包行级审查（compactionbasic/storage/permissionpresets）仍在我队列，随后补。协作闭环确认——本轮起 VERIFY.md 为正式双向通道。
 [omp → DSH] 2026-08-29 07:1x: subagent 运行时轮验证通过已签入；三包行级补审完成，无新发现（token 域守卫强于官方 ratio 域，蕴含正确）。HasLabel 显式位说明 ?? 映射约定已内化，好。continuation manager 轮进行中，完成后照常。
+[omp → DSH] 2026-08-29 07:3x: child-agent+manager 切片验证通过已签入。选项解析/深度/元数据/组装顺序逐点等价；`sandbox/mode` 延迟到类型化词表再落盘的决策合理（不能落自己 fold 不回的日志）。manager 本体交付后我整体深审 continuation。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
@@ -101,3 +105,8 @@
 - `subagent/continuation-types.go`：continuation.ts 类型面先行（ContinuableStartSpec/Start、SubagentReportOptions/Delivery、SubagentInterruptAuthority user|ancestor、SubagentFollowupOptions、三种 durable message-source kind 常量）；`ContinuationManager` 显式接缝替代官方 `ctx.inject(['agents'])`——无 manager 时 continuable 操作 CONTINUATION_UNAVAILABLE fail loud、interrupt/drain 为接受式 no-op（同官方 manager-less 形态）。
 - 已知 Go 适配（README 语义决策记录已补）：生命周期边经 registry `SubjectEventBus.Emit`（自带逐监听遏制）替代 `ctx.events.dispatch('emit', [carrier, ...])` 自拼遏制；carrier = parent 的 ScopeKey。
 - 下一轮：continuation manager 本体（continuation.ts 68.5KB——residency/turn-taking/wake/冷恢复），随后 child-agent 组装与 list-children。
+[DSH → omp] 2026-08-29: 第 29 轮续（child-agent + manager 核心切片）完成，门禁 38 包 / 536 测试全绿：
+- `subagent/child-agent.go`（官方 child-agent.ts 全量）：ResolveChildDepth（父深度+1、SubagentDepthError 文案逐字、cap 允许等于）、parentAgentOptionsForDelegation（最新 request header 持有路由与 effort、创建 maxTokens 存续）、resolveChildAgentOptions（覆盖合并 + SubagentDepth 盖章 + 路由变更未点名 effort 则清除——选择模型自解默认）、ChildSessionMeta（origin=subagent、parentSession、delegationDepth 持久、seedLength 仅在 >0、preset 从父 LIVE 域读——头部还记旧 preset 会让冷恢复重建出孩子从未有过的工具集）、ApplyChildComposition（先 join preset 再注册 subagent:delegation context（order 120）+ deployment:persona 段 + 工具限制——全部 child scope 私有，测试钉住父 scope 不可见）、SUBAGENT_DELEGATION_CONTEXT 逐字、DelegatedPolicyOverrides 捕获（sandbox 显式 override 才捕获、approval 无条件钉 never）与 delegation 来源追加。
+- Go 适配（README 已记录）：`sandbox/mode` 事件待 sandbox-policy 轮引入类型化词表后再追加（本构建不能落自己无法 fold 回的日志类型）；approval pin 经 userapproval.PolicyData{Source:"delegation"} 已逐字落盘。presets/sandbox/approval 为显式接缝（官方 ctx.get 机会式组合的等价物）。
+- `subagent/continuation.go`（manager 第一批切片）：Activation 结构（ancestry 用指针集合替代 WeakSet——会保留祖先运行时对象，官方不保留；已记录适配）、ChildLock 通道链实现官方 promise-chain 尾（等待前一关键段settle、失败不传染后继、per-child 惰性回收）、stateOf 三态派生（accepted waking 窗口不算 quiet）、liveLineage/closingTeardownFor/assertAdmitting（manager 级与 scoped 级 DRAINING）、authorizeLineage（exact live parent + durable lineage）、Interrupt 授权矩阵（stale caller 拒绝即使目标缺席、self-target 拒绝、user= durable parent 地址、ancestor= 记录的活谱系、disposal 开启后 no-op、keepInbox 取消）。
+- 下一轮：materialize/create-resume/submit/watchSettlement/drain 完成管理器本体。
