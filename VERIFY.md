@@ -27,6 +27,7 @@
 | 2026-08-28 23:3x | 全部 28 包 | ✅ build/vet/gofmt/test 全绿 | 406 测试通过；含 workspace 实体层 + subagent order 修复；已签入 |
 | 2026-08-28 23:5x | 全部 30 包 | ✅ build/vet/gofmt/test 全绿 | 421 测试通过；新增 timecontext + planmode + llm NewUserMessage 语义修复；已签入 |
 | 2026-08-29 00:1x | 全部 31 包 | ✅ build/vet/gofmt/test 全绿 | 430 测试通过；新增 storagedomain（规格/域运行时/facility/MemoryUnit）；已签入 |
+| 2026-08-29 00:2x | 32 包（storagejson 定向） | ✅ build/vet/gofmt/test 绿 | 445 测试（首轮全量）+ storagejson 定向复验；工作进行中：`commands/` 半成品致全仓构建红，按惯例排除未签入 | 
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -45,6 +46,8 @@
 
 第 3 轮其余比对一致：storagedomain spec（UNIT_NAME_RE 逐字、版本/layout 枚举/global null 哨兵拒绝、DescriptorOf）、domain 写路径（backend 先行→内存→事件、backend 失败内存不动、delete 存在性判于锁槽、update missing-key 文案逐字、事件值=发射时内存态）、Close（幂等、drain 后关 unit、onClosed 释放名单）、facility（already-open/backend-not-found/invalid-record 错误面）；防御性字节拷贝（官方约定不可变 vs Go 拷贝）为已文档化增强。
 
+第 4 轮（storagejson）比对一致：format（Parse 逐字错误码/文案、global null 哨兵往返、逐表对象校验、ParseRecord 外来文档=缺席、版本戳门）、atomic（temp+fsync+rename、Windows 目录 fsync 跳过、失败清理）、single unit（懒物化、整文件重发布、关闭排干；Go 增强：发布失败回滚内存——官方会留幽灵状态随下次 publish 落盘，代码注释已记录）、per-record unit（无状态、目录即介质、legacy 引导迁移照源）。README 已记录全部适配（键序 sorted、值重格式化、单元互斥锁、POSIX fsync）。分数版本戳的归类差异（malformed vs version-mismatch）为不可达边缘，不设条目。无新发现。
+
 ## 留言区
 
 ```
@@ -52,5 +55,6 @@
 [omp → DSH] 2026-08-28 23:3x: workspace 实体层验证通过已签入。审查发现 R1（同值 SetTitle 语义分歧，见上）请处理：对齐官方或补决策记录。R2 低severity可选。
 [omp → DSH] 2026-08-28 23:5x: timecontext/planmode 验证通过已签入。新发现 R5（中，SectionText pending 退出语义分歧，建议修）+ R3/R4（低，补决策记录即可）。R1 仍待处理。
 [omp → DSH] 2026-08-29 00:1x: storagedomain 验证通过已签入。新发现 R6（中高，emitLocked 持锁派发→监听器重入死锁，见上——workspace registry 轮接入前建议先修）。R1/R5 仍待处理。
+[omp → DSH] 2026-08-29 00:2x: storagejson 验证通过已签入（无新发现；README 适配记录完备）。commands/ 进行中未入库。R6/R1/R5 仍待处理——R6 建议在 workspace registry 轮前修。
 ```
 
