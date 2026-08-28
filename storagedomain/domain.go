@@ -33,6 +33,16 @@ type DomainChanged struct {
 // leaves memory untouched (no divergence between reads and the medium), and
 // events carry values that equal the in-memory state at emission, in write
 // order.
+//
+// Listener dispatch runs OUTSIDE the state mutex: the official single-
+// threaded emit lets a listener synchronously reenter the domain (read a
+// snapshot, even enqueue another write), so Go dispatches from a queue
+// while the mutex is released — listeners may call any Domain method
+// freely, and a nested write's event rides the same queue so every event
+// still arrives in commit order. Go adaptation: under concurrent writers a
+// listener reading memory mid-dispatch can observe a later commit earlier
+// than the official in-line emit would show it; the event payload itself
+// stays the committed value.
 type Domain struct {
 	spec DomainSpec
 	unit KvUnit
@@ -42,6 +52,11 @@ type Domain struct {
 	records   map[string]map[string]json.RawMessage
 	global    json.RawMessage // nil = never written
 	hasGlobal bool
+
+	// emitQueue and emitting serialize out-of-lock listener dispatch in
+	// commit order. Guarded by mu.
+	emitQueue []DomainChanged
+	emitting  bool
 
 	listenersMu sync.Mutex
 	listeners   map[int]func(DomainChanged)
@@ -89,7 +104,7 @@ func (g Global) Set(value json.RawMessage) error {
 		return err
 	}
 	d.global = append(json.RawMessage(nil), value...)
-	d.emitLocked(DomainChanged{Domain: d.spec.Name, Table: "", Key: "", Operation: "put", Value: d.global})
+	d.afterCommitLocked(DomainChanged{Domain: d.spec.Name, Table: "", Key: "", Operation: "put", Value: d.global})
 	return nil
 }
 
@@ -148,7 +163,7 @@ func (t Table) Put(key string, value json.RawMessage) error {
 	}
 	stored := append(json.RawMessage(nil), value...)
 	d.records[t.name][key] = stored
-	d.emitLocked(DomainChanged{Domain: d.spec.Name, Table: t.name, Key: key, Operation: "put", Value: stored})
+	d.afterCommitLocked(DomainChanged{Domain: d.spec.Name, Table: t.name, Key: key, Operation: "put", Value: stored})
 	return nil
 }
 
@@ -168,7 +183,7 @@ func (t Table) Delete(key string) (bool, error) {
 		return false, err
 	}
 	delete(d.records[t.name], key)
-	d.emitLocked(DomainChanged{Domain: d.spec.Name, Table: t.name, Key: key, Operation: "deleted"})
+	d.afterCommitLocked(DomainChanged{Domain: d.spec.Name, Table: t.name, Key: key, Operation: "deleted"})
 	return true, nil
 }
 
@@ -193,7 +208,7 @@ func (t Table) Update(key string, fn func(current json.RawMessage) json.RawMessa
 	}
 	stored := append(json.RawMessage(nil), next...)
 	d.records[t.name][key] = stored
-	d.emitLocked(DomainChanged{Domain: d.spec.Name, Table: t.name, Key: key, Operation: "put", Value: stored})
+	d.afterCommitLocked(DomainChanged{Domain: d.spec.Name, Table: t.name, Key: key, Operation: "put", Value: stored})
 	return stored, nil
 }
 
@@ -240,18 +255,35 @@ func (d *Domain) OnChanged(listener func(DomainChanged)) func() {
 	}
 }
 
-// emitLocked dispatches one change to every live listener after the write
-// completed. Caller holds d.mu.
-func (d *Domain) emitLocked(change DomainChanged) {
-	d.listenersMu.Lock()
-	handlers := make([]func(DomainChanged), 0, len(d.listeners))
-	for _, listener := range d.listeners {
-		handlers = append(handlers, listener)
+// afterCommitLocked enqueues one change and drains the dispatch queue with
+// d.mu RELEASED during listener calls, so a listener may synchronously
+// reenter any Domain method — read a snapshot or land another write — the
+// way the official single-threaded emit allows. A nested write's event
+// rides the same queue, so every event still arrives in commit order.
+// Caller holds d.mu; it is re-held on return (the write paths' deferred
+// unlock stays balanced).
+func (d *Domain) afterCommitLocked(change DomainChanged) {
+	d.emitQueue = append(d.emitQueue, change)
+	if d.emitting {
+		return
 	}
-	d.listenersMu.Unlock()
-	for _, handler := range handlers {
-		d.dispatch(handler, change)
+	d.emitting = true
+	for len(d.emitQueue) > 0 {
+		next := d.emitQueue[0]
+		d.emitQueue = d.emitQueue[1:]
+		handlers := make([]func(DomainChanged), 0, len(d.listeners))
+		d.listenersMu.Lock()
+		for _, listener := range d.listeners {
+			handlers = append(handlers, listener)
+		}
+		d.listenersMu.Unlock()
+		d.mu.Unlock()
+		for _, handler := range handlers {
+			d.dispatch(handler, next)
+		}
+		d.mu.Lock()
 	}
+	d.emitting = false
 }
 
 // dispatch contains one listener failure so it cannot starve the others.

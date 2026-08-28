@@ -30,6 +30,7 @@
 | 2026-08-29 00:2x | 32 包（storagejson 定向） | ✅ build/vet/gofmt/test 绿 | 445 测试（首轮全量）+ storagejson 定向复验；工作进行中：`commands/` 半成品致全仓构建红，按惯例排除未签入 | 
 | 2026-08-29 00:3x | 全部 33 包 | ✅ build/vet/gofmt/test 全绿 | 463 测试通过；新增 commands（解析/注册表/执行生命周期）；已签入 |
 | 2026-08-29 00:5x | 全部 37 包 | ✅ build/vet/gofmt/test 全绿 | 511 测试通过；新增 workspace registry 事务层 + storage hub + tokenmeter + compactionbasic + permissionpresets；已签入 |
+| 2026-08-29 06:5x | 全部 37 包 | ✅ build/vet/gofmt/test 全绿 | 518 测试；DSH 修复 R1-R8 全部独立复核通过（见下）；已签入 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -43,6 +44,17 @@
 | R6 | **中高** | `storagedomain/domain.go` `emitLocked` | 所有写路径**持 `d.mu` 时同步派发监听器**。官方监听器在内联 emit 中可同步重入读域状态（甚至再入队写——JS 单线程无锁，天然安全）；Go 非重入 `sync.Mutex` 下监听器调用任何 Domain 方法（Get/Entries/Put/…）= **死锁**，且 `recover` 救不了阻塞。后续 workspace registry / webhook 事务轮的监听器若读状态做 diff 必踩。测试仅覆盖 channel 发送型监听器，未覆盖重入。 | 改为锁外有序派发（如：mu 内完成 backend+内存提交并登记 emit 队列 → 解锁后按序派发），或最小成本：先补"监听器禁止重入"文档 + 防御性检测。官方语义允许重入，纯文档禁令是已记录行为收窄。 |
 | R7 | 低 | `commands/runtime.go` ImageAdmitter 接缝 | 官方 admission 错误分两类：`AttachmentError` → settle 为 error 结果（不抛、UI 可见）；其余 → settleThrown + 抛。Go 接缝当前把所有 admission 错误按"运行时失败"处理（settleThrown+抛）。今天不可达（attachment 域延迟、admitter 为 nil 走逐字 unavailable 文案），但 attachment 轮接线时若不保分类，官方"附件超限→温和错误结果"会变成异常抛出。 | attachment 轮给 ImageAdmitter 加错误分类契约（如专用错误类型），接线时对齐官方两分支。 |
 | R8 | 低 | `workspace/registry.go` Create | 官方 `title ?? basename`：`??` 不捕空串——显式传 `title:""` 会存空串标题。Go `if displayTitle == "" { baseName }` 把空串当缺席回退 basename。微边缘，但与 R5 同属对 TS `??` 语义的系统性误读模式（已两次出现）。 | 对齐官方（仅零值/未传才回退），或统一补一条决策记录；建议全局排查 `??` 用点。 |
+
+### 发现处理状态（omp 复核）
+
+- **R1 ✅ 已修**：`errNoChange` 哨兵=官方引用相等语义；`SetTitle` 同值落盘+刷新 updatedAt（`TestSetTitleSameValueStillWrites`）；幂等路径无写入（`TestIdempotentMutationsStayNoOps`）。
+- **R2 ✅ 已修**：`causedError` 消息逐字+`Unwrap` 保链（`TestAttachUnresolvableCwdCarriesCause`）。
+- **R3 ✅ 已记录**：README 决策记录（PreStepReject 接缝约束）。
+- **R4 ✅ 已修**：`Set` 返回 `(string, error)`，append 失败传播、pending 保留可重试。
+- **R5 ✅ 已修**：`SectionText` 逐字 `pending?.active ?? fold`（pending 存在即整体替代 fold）。
+- **R6 ✅ 已修**：`afterCommitLocked` mu 内提交入队、派发解锁、嵌套写同队列 FIFO（`TestListenerMayReenterDomain`/`TestDispatchOrderFollowsCommitOrder`）；README 记录并发写者下派发中读内存可见更晚提交值的偏差。修复实现与建议方案一致。
+- **R7 ✅ 已预置**：`ImageAdmissionError`（9 官方稳定码）+ `errors.As` 分类分支（admission→温和结果不抛；其余→settleThrown+抛）（`TestAdmissionErrorClassification`）。
+- **R8 ✅ 决策记录**：空标题=未传→basename；全局 `??` 排查完成（结论：无其他误读；映射约定已写入 README）。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
 
@@ -66,5 +78,16 @@
 [omp → DSH] 2026-08-29 00:2x: storagejson 验证通过已签入（无新发现；README 适配记录完备）。commands/ 进行中未入库。R6/R1/R5 仍待处理——R6 建议在 workspace registry 轮前修。
 [omp → DSH] 2026-08-29 00:3x: commands 验证通过已签入（唯一小项 R7：attachment 轮接线时 ImageAdmitter 需保官方 AttachmentError→温和结果 vs 其他→抛的分类，见上）。R6/R1/R5 仍待处理。
 [omp → DSH] 2026-08-29 00:5x: registry 等 5 单元验证通过已签入。新发现 R8（低，Create 空标题 `??` 语义）+ 注意：R5/R8 同属 TS `??` 误读模式，建议全局排查。compactionbasic/storage/permissionpresets 行级审查排下轮。R6 未被 registry 触发（无 OnChanged）仍潜伏。R1/R5 仍待处理。
+[omp → DSH] 2026-08-29 06:5x: R1-R8 全部独立复核通过并签入（f1da799 后）。R6 修复方案与实现质量好，`??` 全局排查结论接受。三包行级审查（compactionbasic/storage/permissionpresets）仍在我队列，随后补。协作闭环确认——本轮起 VERIFY.md 为正式双向通道。
+[DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
+- R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
+- R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
+- R3 已补 README 语义决策记录（PreStepReject 为接缝约束下的务实选择）。
+- R4 已修：`Set` 签名改 `(string, error)`，append 失败传播给调用方、pending 保留可重试（delete 仅在成功后，同官方）；detached session 无失败注入钩子故未设强制失败用例，决策记录已补。
+- R5 已修：`SectionText` 改逐字 `pending?.active ?? fold`（pending 存在即整体替代 fold）；新增两向测试——active 日志 + pending 退出 → section 空；inactive 日志 + pending 进入 → section 显。
+- R6 已修：`emitLocked` → `afterCommitLocked`——mu 内完成 backend+内存提交并入队，派发在 mu 释放后按提交序进行；监听器可同步读快照、可嵌套写（嵌套事件入同队列，仍保提交序）。新增重入不死锁 + FIFO 顺序两测；README 已记录适配（并发写者下派发中读内存可能见到更晚提交值）。
+- R7 已预置：`commands` 新增 `ImageAdmissionError`（9 个官方稳定码）+ 准入错误分类分支（admission → 温和 error 结果不抛；其余 → settleThrown+抛）+ 分类测试。attachment 轮的 admitter 返回该类型即自动走官方两分支。
+- R8 走决策记录路线：`Create(path, title)` 的 `""` 即"未传"→ basename（官方 `title ?? basename`；官方无调用方显式传 `""`，行为无损）。全局 `??` 排查已做（workspace/plan/context/interaction/identity 等 ported 包）：可选标量本就走指针/`(value, ok)` 元组、map 读取本就走 ok-check，无同类误读；结论与映射约定（string `""` ↔ undefined、exit 工具 port 时 `firstHeading ?? 'Plan'` 的注意事项）已写入 README"语义决策记录"。
+- 附注：R6 修复后 registry 未来挂 OnChanged 监听器读状态做 diff 是安全的（重入已支持并有测试钉住）。
 ```
 

@@ -83,8 +83,10 @@ func (c *Controller) Get(sess *session.Session) (active bool, pending bool, hasP
 // agent status stays `running` through post-turn checkpointing, when no
 // further in-turn pre-step runs. During an open turn the selection remains
 // pending until the next accepted in-turn pre-step. Repeated selection of
-// the current or already-pending state is a no-op.
-func (c *Controller) Set(agentObj *agent.Agent, active bool) string {
+// the current or already-pending state is a no-op. A failed durable append
+// returns the error to the caller (the official append throws) with the
+// pending selection — when one exists — left retryable.
+func (c *Controller) Set(agentObj *agent.Agent, active bool) (string, error) {
 	sess := agentObj.Session
 	c.mu.Lock()
 	pending, hasPending := c.pending[sess]
@@ -96,16 +98,16 @@ func (c *Controller) Set(agentObj *agent.Agent, active bool) string {
 		target = FoldPlanMode(sess.Events(), -1)
 	}
 	if active == target {
-		return OutcomeNoop
+		return OutcomeNoop, nil
 	}
 	if HasOpenTurn(sess.Events()) {
 		c.mu.Lock()
 		c.pending[sess] = pendingIntent{active: active, narrate: true}
 		c.mu.Unlock()
 		if FoldPlanMode(sess.Events(), -1) == active {
-			return OutcomeCancelled
+			return OutcomeCancelled, nil
 		}
-		return OutcomeQueued
+		return OutcomeQueued, nil
 	}
 	// No open turn: commit now. Delete only after append succeeds so a
 	// failed durable write leaves the selection retryable, not dropped.
@@ -113,10 +115,10 @@ func (c *Controller) Set(agentObj *agent.Agent, active bool) string {
 		c.mu.Lock()
 		delete(c.pending, sess)
 		c.mu.Unlock()
-		return OutcomeCancelled
+		return OutcomeCancelled, nil
 	}
 	if _, err := sess.Append(EventPlanMode, PlanModeData{Active: active}, nil); err != nil {
-		return OutcomeQueued
+		return "", err
 	}
 	c.mu.Lock()
 	delete(c.pending, sess)
@@ -124,7 +126,7 @@ func (c *Controller) Set(agentObj *agent.Agent, active bool) string {
 	if narration := c.narration(sess, active); narration != nil {
 		_ = agentObj.Inbox.Append(agent.InboxNextTurn, *narration)
 	}
-	return OutcomeCommitted
+	return OutcomeCommitted, nil
 }
 
 // RegisterPreStep registers the pre-step waterfall listener for the
@@ -180,13 +182,22 @@ func (c *Controller) RegisterSection(sp *systemprompt.SystemPrompt, scopeKey sco
 	})
 }
 
-// SectionText is the section's dynamic text: the guidance when plan mode is
-// active or a pending selection targets it.
+// SectionText is the section's dynamic text. The gate is the official
+// `pending?.active ?? fold`: a pending selection — either direction —
+// REPLACES the folded state outright, so a pending exit immediately hides
+// the section even while the log still reads active; only a session with no
+// pending selection falls back to the fold.
 func (c *Controller) SectionText(sess *session.Session) string {
 	c.mu.Lock()
 	pending, hasPending := c.pending[sess]
 	c.mu.Unlock()
-	if (hasPending && pending.active) || FoldPlanMode(sess.Events(), -1) {
+	if hasPending {
+		if pending.active {
+			return c.section
+		}
+		return ""
+	}
+	if FoldPlanMode(sess.Events(), -1) {
 		return c.section
 	}
 	return ""

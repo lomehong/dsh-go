@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -37,6 +38,40 @@ func (l *commandLayer) isEmpty() bool { return l.commands.IsEmpty() }
 // is the `attachments` service seam: absent (nil) when no attachment store
 // is composed.
 type ImageAdmitter func(images []any) ([]ImageAttachment, error)
+
+// ImageAdmissionErrorCode is a stable, caller-correctable attachment
+// failure code: the proposed image content or batch can be corrected and
+// resubmitted (the official AttachmentError code vocabulary).
+type ImageAdmissionErrorCode string
+
+// The official image-admission code set. Storage faults never use these.
+const (
+	AdmissionTooManyImages       ImageAdmissionErrorCode = "TOO_MANY_IMAGES"
+	AdmissionImagesTooLarge      ImageAdmissionErrorCode = "IMAGES_TOO_LARGE"
+	AdmissionUnsupportedImgType  ImageAdmissionErrorCode = "UNSUPPORTED_IMAGE_TYPE"
+	AdmissionInvalidImageBase64  ImageAdmissionErrorCode = "INVALID_IMAGE_BASE64"
+	AdmissionInvalidImage        ImageAdmissionErrorCode = "INVALID_IMAGE"
+	AdmissionImageTypeMismatch   ImageAdmissionErrorCode = "IMAGE_TYPE_MISMATCH"
+	AdmissionImageTooLarge       ImageAdmissionErrorCode = "IMAGE_TOO_LARGE"
+	AdmissionImageTooManyPixels  ImageAdmissionErrorCode = "IMAGE_TOO_MANY_PIXELS"
+	AdmissionImageDimensionLarge ImageAdmissionErrorCode = "IMAGE_DIMENSION_TOO_LARGE"
+)
+
+// ImageAdmissionError marks a caller-correctable image admission failure.
+// The command execution settles it as a gentle error result (visible in the
+// UI, no throw); any other admission failure is a runtime failure that
+// settles thrown and propagates. Mirrors the official
+// `error instanceof AttachmentError` branch so the attachment round's
+// admitter keeps the official two-way classification.
+type ImageAdmissionError struct {
+	// Message is the human-readable failure description without raw bytes
+	// or host paths — the settled error-result text.
+	Message string
+	// Code is the stable machine-routing code.
+	Code ImageAdmissionErrorCode
+}
+
+func (e *ImageAdmissionError) Error() string { return e.Message }
 
 // CommandRuntime is the human-command registry. Scoped registrations shadow
 // globals for their agent; names are unique per layer. Go adaptation: the
@@ -228,8 +263,13 @@ func (r *CommandRuntime) Execute(ctx context.Context, scopeKey scope.ScopeKey, s
 		}
 		refs, err := admit(images)
 		if err != nil {
-			// An admission failure that is not an attachment-domain error is
-			// a runtime failure: settle error and propagate loud.
+			// A caller-correctable admission failure settles as a gentle
+			// error result (the official AttachmentError branch); anything
+			// else is a runtime failure: settle thrown and propagate loud.
+			var admissionErr *ImageAdmissionError
+			if errors.As(err, &admissionErr) {
+				return settle(CommandResult{Kind: ResultError, HasText: true, Text: admissionErr.Message})
+			}
 			r.settleThrown(sess, parsed.Name, commandID, err)
 			return nil, err
 		}

@@ -127,8 +127,8 @@ func TestSetCommitsBetweenTurnsAndNarrates(t *testing.T) {
 	if _, err := sess.Append(session.EventRequestHeader, json.RawMessage(`{}`), nil); err != nil {
 		t.Fatalf("append header: %v", err)
 	}
-	if outcome := controller.Set(agentObj, true); outcome != OutcomeCommitted {
-		t.Fatalf("outcome = %s, want committed", outcome)
+	if outcome, err := controller.Set(agentObj, true); err != nil || outcome != OutcomeCommitted {
+		t.Fatalf("outcome = %s err = %v, want committed", outcome, err)
 	}
 	if !FoldPlanMode(sess.Events(), -1) {
 		t.Fatal("the logged state must flip to active")
@@ -143,11 +143,11 @@ func TestSetCommitsBetweenTurnsAndNarrates(t *testing.T) {
 	}
 
 	// Re-selecting the current state is a noop; turning off narrates back.
-	if outcome := controller.Set(agentObj, true); outcome != OutcomeNoop {
-		t.Fatalf("outcome = %s, want noop", outcome)
+	if outcome, err := controller.Set(agentObj, true); err != nil || outcome != OutcomeNoop {
+		t.Fatalf("outcome = %s err = %v, want noop", outcome, err)
 	}
-	if outcome := controller.Set(agentObj, false); outcome != OutcomeCommitted {
-		t.Fatalf("outcome = %s, want committed", outcome)
+	if outcome, err := controller.Set(agentObj, false); err != nil || outcome != OutcomeCommitted {
+		t.Fatalf("outcome = %s err = %v, want committed", outcome, err)
 	}
 	// Turning off does not narrate: the last header described the default
 	// mode, so there is nothing to correct.
@@ -156,8 +156,8 @@ func TestSetCommitsBetweenTurnsAndNarrates(t *testing.T) {
 		t.Fatalf("off narration = %+v, want no new narration", off)
 	}
 	// Turning off while already inactive (no header) is a noop.
-	if outcome := controller.Set(agentObj, false); outcome != OutcomeNoop {
-		t.Fatalf("outcome = %s, want noop", outcome)
+	if outcome, err := controller.Set(agentObj, false); err != nil || outcome != OutcomeNoop {
+		t.Fatalf("outcome = %s err = %v, want noop", outcome, err)
 	}
 }
 
@@ -183,8 +183,8 @@ func TestSetQueuesDuringOpenTurnAndPreStepCommits(t *testing.T) {
 	}
 
 	// During an open turn the selection queues.
-	if outcome := controller.Set(agentObj, true); outcome != OutcomeQueued {
-		t.Fatalf("outcome = %s, want queued", outcome)
+	if outcome, err := controller.Set(agentObj, true); err != nil || outcome != OutcomeQueued {
+		t.Fatalf("outcome = %s err = %v, want queued", outcome, err)
 	}
 	if FoldPlanMode(sess.Events(), -1) {
 		t.Fatal("a queued selection must not be logged yet")
@@ -227,12 +227,12 @@ func TestSetCancelClearsOppositePending(t *testing.T) {
 	if _, err := sess.Append(session.EventTurnStart, session.TurnStartData{Turn: 1}, nil); err != nil {
 		t.Fatalf("turn/start: %v", err)
 	}
-	if outcome := controller.Set(agentObj, true); outcome != OutcomeQueued {
-		t.Fatalf("outcome = %s, want queued", outcome)
+	if outcome, err := controller.Set(agentObj, true); err != nil || outcome != OutcomeQueued {
+		t.Fatalf("outcome = %s err = %v, want queued", outcome, err)
 	}
 	// The opposite selection while queued: cancelled, and nothing logged.
-	if outcome := controller.Set(agentObj, false); outcome != OutcomeCancelled {
-		t.Fatalf("outcome = %s, want cancelled", outcome)
+	if outcome, err := controller.Set(agentObj, false); err != nil || outcome != OutcomeCancelled {
+		t.Fatalf("outcome = %s err = %v, want cancelled", outcome, err)
 	}
 	if FoldPlanMode(sess.Events(), -1) {
 		t.Fatal("cancelled selection must leave the log unchanged")
@@ -243,11 +243,11 @@ func TestSetCancelClearsOppositePending(t *testing.T) {
 		t.Fatal("the cleared selection must not read as pending")
 	}
 	// Repeating the queued state is a noop (already pending active).
-	if outcome := controller.Set(agentObj, true); outcome != OutcomeQueued {
-		t.Fatalf("re-queue = %s, want queued", outcome)
+	if outcome, err := controller.Set(agentObj, true); err != nil || outcome != OutcomeQueued {
+		t.Fatalf("re-queue = %s err = %v, want queued", outcome, err)
 	}
-	if outcome := controller.Set(agentObj, true); outcome != OutcomeNoop {
-		t.Fatalf("outcome = %s, want noop (already pending)", outcome)
+	if outcome, err := controller.Set(agentObj, true); err != nil || outcome != OutcomeNoop {
+		t.Fatalf("outcome = %s err = %v, want noop (already pending)", outcome, err)
 	}
 }
 
@@ -265,6 +265,46 @@ func TestSectionTextFollowsState(t *testing.T) {
 	}
 	if got := controller.SectionText(sess); got != "plan guidance section" {
 		t.Fatalf("active section text = %q", got)
+	}
+}
+
+func TestSectionTextPendingExitHidesImmediately(t *testing.T) {
+	controller, err := NewController("plan guidance section")
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	agentObj, sess := newPlanAgent(t, "plan-section-pending")
+	// Log active, then queue an EXIT inside an open turn: the section hides
+	// immediately (official `pending?.active ?? fold` — a pending selection
+	// replaces the fold, it does not OR with it).
+	if _, err := sess.Append(EventPlanMode, PlanModeData{Active: true}, nil); err != nil {
+		t.Fatalf("append active: %v", err)
+	}
+	if _, err := sess.Append(session.EventTurnStart, session.TurnStartData{Turn: 1}, nil); err != nil {
+		t.Fatalf("turn/start: %v", err)
+	}
+	if got := controller.SectionText(sess); got != "plan guidance section" {
+		t.Fatalf("pre-selection section text = %q", got)
+	}
+	if outcome, err := controller.Set(agentObj, false); err != nil || outcome != OutcomeQueued {
+		t.Fatalf("outcome = %s err = %v, want queued exit", outcome, err)
+	}
+	if got := controller.SectionText(sess); got != "" {
+		t.Fatalf("pending exit must hide the section despite the active log, got %q", got)
+	}
+	// A pending ENTER on an inactive log shows it immediately.
+	if _, err := sess.Append(EventPlanMode, PlanModeData{Active: false}, nil); err != nil {
+		t.Fatalf("append inactive: %v", err)
+	}
+	controller2, err := NewController("plan guidance section")
+	if err != nil {
+		t.Fatalf("NewController: %v", err)
+	}
+	if outcome, err := controller2.Set(agentObj, true); err != nil || outcome != OutcomeQueued {
+		t.Fatalf("outcome = %s err = %v, want queued enter", outcome, err)
+	}
+	if got := controller2.SectionText(sess); got != "plan guidance section" {
+		t.Fatalf("pending enter must show the section despite the inactive log, got %q", got)
 	}
 }
 

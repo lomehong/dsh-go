@@ -98,6 +98,13 @@ func (t *Table) Put(id WorkspaceID, record WorkspaceRecord) {
 // record needs no change; only the mutate write path observes it.
 var errUnchanged = errors.New("workspace record unchanged (internal sentinel)")
 
+// errNoChange is the mutator's verbatim-return signal: the fn found the
+// mutation already satisfied and returns the input record unchanged. The
+// official source expresses this by returning the same object reference;
+// Go values cannot carry reference identity, so the sentinel stands in for
+// `changed === current`. Only the mutate write path observes it.
+var errNoChange = errors.New("workspace record already satisfied (internal sentinel)")
+
 // Entity is the single Workspace implementation; constructed only by the
 // registry. It holds a record snapshot that is swapped after each durable
 // mutation; every write funnels through mutate so updatedAt stamping and
@@ -170,7 +177,10 @@ func (e *Entity) SessionIDs() []session.SessionID {
 }
 
 // SetTitle replaces the display title durably. Any string is legal;
-// duplicates across workspaces are allowed.
+// duplicates across workspaces are allowed. Every call writes — including a
+// same-value replace: the official `{ ...record, title }` always produces a
+// new record, so updatedAt refreshes and the change event fires (reference
+// equality, not value equality, decides the no-op).
 func (e *Entity) SetTitle(title string) error {
 	return e.mutate(func(record WorkspaceRecord) (WorkspaceRecord, error) {
 		record.Title = title
@@ -204,9 +214,14 @@ func (e *Entity) AttachSession(sessionID session.SessionID) error {
 		}
 		cwd, err := RealpathNormalize(header.CWD)
 		if err != nil {
-			return fmt.Errorf(
-				"cannot attach session '%s' to workspace '%s': its cwd '%s' does not resolve, so it cannot be validated",
-				sessionID, path, header.CWD)
+			// The official error carries the resolve failure as {cause};
+			// keep the message verbatim and preserve the chain.
+			return &causedError{
+				message: fmt.Sprintf(
+					"cannot attach session '%s' to workspace '%s': its cwd '%s' does not resolve, so it cannot be validated",
+					sessionID, path, header.CWD),
+				cause: err,
+			}
 		}
 		if !dirExists(cwd) {
 			return fmt.Errorf(
@@ -222,7 +237,7 @@ func (e *Entity) AttachSession(sessionID session.SessionID) error {
 	}
 	return e.mutate(func(record WorkspaceRecord) (WorkspaceRecord, error) {
 		if contains(record.SessionIDs, sessionID) {
-			return record, nil
+			return WorkspaceRecord{}, errNoChange
 		}
 		record.SessionIDs = append([]session.SessionID{sessionID}, record.SessionIDs...)
 		return record, nil
@@ -250,7 +265,7 @@ func (e *Entity) InsertSessionBefore(sessionID session.SessionID, beforeSessionI
 					sessionID, beforeSessionID, record.Path)}
 		}
 		if beforeSessionID == sessionID {
-			return record, nil
+			return WorkspaceRecord{}, errNoChange
 		}
 		without := make([]session.SessionID, 0, len(record.SessionIDs))
 		for _, id := range record.SessionIDs {
@@ -267,7 +282,7 @@ func (e *Entity) InsertSessionBefore(sessionID session.SessionID, beforeSessionI
 		sessionIDs = append(sessionIDs, sessionID)
 		sessionIDs = append(sessionIDs, without[at:]...)
 		if equalSlices(sessionIDs, record.SessionIDs) {
-			return record, nil
+			return WorkspaceRecord{}, errNoChange
 		}
 		record.SessionIDs = sessionIDs
 		return record, nil
@@ -281,7 +296,7 @@ func (e *Entity) InsertSessionBefore(sessionID session.SessionID, beforeSessionI
 func (e *Entity) DetachSession(sessionID session.SessionID) error {
 	return e.mutate(func(record WorkspaceRecord) (WorkspaceRecord, error) {
 		if !contains(record.SessionIDs, sessionID) {
-			return record, nil
+			return WorkspaceRecord{}, errNoChange
 		}
 		kept := make([]session.SessionID, 0, len(record.SessionIDs)-1)
 		for _, id := range record.SessionIDs {
@@ -312,15 +327,23 @@ func (e *Entity) Status() string {
 // pass the id-plus-canonical-cwd membership check, then swap the snapshot.
 //
 // fn sees the value current at its chain slot, so membership decisions
-// (attach/detach idempotence) are race-free against queued writes; a fn
-// signalling no change by returning current verbatim aborts the slot
-// through the sentinel when pruning also finds nothing, so a no-op neither
-// rewrites the medium nor emits a change event.
+// (attach/detach idempotence) are race-free against queued writes. The
+// official no-op gate is reference equality: `changed === current` — a fn
+// returning its input verbatim. Go mirrors that with errNoChange: a fn
+// signalling verbatim-return aborts the slot through the sentinel when
+// pruning also finds nothing, so a no-op neither rewrites the medium nor
+// emits a change event. A fn that builds a record — including SetTitle with
+// an unchanged value — always writes.
 func (e *Entity) mutate(fn func(record WorkspaceRecord) (WorkspaceRecord, error)) error {
 	next, err := e.table().Update(e.id, func(current WorkspaceRecord) (WorkspaceRecord, error) {
 		changed, err := fn(current)
+		verbatim := false
 		if err != nil {
-			return WorkspaceRecord{}, err
+			if !errors.Is(err, errNoChange) {
+				return WorkspaceRecord{}, err
+			}
+			changed = current
+			verbatim = true
 		}
 		sessionIDs := make([]session.SessionID, 0, len(changed.SessionIDs))
 		for _, id := range changed.SessionIDs {
@@ -328,8 +351,7 @@ func (e *Entity) mutate(fn func(record WorkspaceRecord) (WorkspaceRecord, error)
 				sessionIDs = append(sessionIDs, id)
 			}
 		}
-		unchanged := sameRecordIdentity(changed, current) && len(sessionIDs) == len(current.SessionIDs)
-		if unchanged {
+		if verbatim && len(sessionIDs) == len(current.SessionIDs) {
 			return WorkspaceRecord{}, errUnchanged
 		}
 		changed.SessionIDs = sessionIDs
@@ -351,12 +373,18 @@ func (e *Entity) mutate(fn func(record WorkspaceRecord) (WorkspaceRecord, error)
 // table resolves the open table through the host seam.
 func (e *Entity) table() TableStore { return e.host.Table() }
 
-// sameRecordIdentity reports whether the fn's change touched nothing but
-// the fields mutate itself stamps.
-func sameRecordIdentity(a, b WorkspaceRecord) bool {
-	return a.Path == b.Path && a.Title == b.Title && a.CreatedAt == b.CreatedAt &&
-		equalSlices(a.SessionIDs, b.SessionIDs)
+// causedError carries an underlying failure without altering the message
+// text — the official errors take options `{ cause }` while the text stays
+// verbatim.
+type causedError struct {
+	message string
+	cause   error
 }
+
+func (e *causedError) Error() string { return e.message }
+
+// Unwrap preserves the cause chain for errors.Is/As inspection.
+func (e *causedError) Unwrap() error { return e.cause }
 
 func contains(ids []session.SessionID, needle session.SessionID) bool {
 	return indexOf(ids, needle) >= 0
