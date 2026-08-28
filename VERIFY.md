@@ -29,6 +29,7 @@
 | 2026-08-29 00:1x | 全部 31 包 | ✅ build/vet/gofmt/test 全绿 | 430 测试通过；新增 storagedomain（规格/域运行时/facility/MemoryUnit）；已签入 |
 | 2026-08-29 00:2x | 32 包（storagejson 定向） | ✅ build/vet/gofmt/test 绿 | 445 测试（首轮全量）+ storagejson 定向复验；工作进行中：`commands/` 半成品致全仓构建红，按惯例排除未签入 | 
 | 2026-08-29 00:3x | 全部 33 包 | ✅ build/vet/gofmt/test 全绿 | 463 测试通过；新增 commands（解析/注册表/执行生命周期）；已签入 |
+| 2026-08-29 00:5x | 全部 37 包 | ✅ build/vet/gofmt/test 全绿 | 511 测试通过；新增 workspace registry 事务层 + storage hub + tokenmeter + compactionbasic + permissionpresets；已签入 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -41,6 +42,7 @@
 | R5 | **中** | `planmode/controller.go` SectionText | 官方 `pending?.active ?? fold`（`??` 仅对 undefined 回退）：pending 选择**退出** plan 模式时立即隐藏 section（即使日志仍 active）。Go 写成 `(hasPending && pending.active) \|\| fold`：pending=false 时回退到 fold，日志仍 active 则**继续显示** section。影响 pending 窗口期的下一次请求装配。测试 `TestSectionTextFollowsState` 未覆盖该状态。 | 修正为 `if hasPending { return pending.active 的 section 判定 }` 语义；补测试：active 日志 + pending 退出 → section 为空。 |
 | R6 | **中高** | `storagedomain/domain.go` `emitLocked` | 所有写路径**持 `d.mu` 时同步派发监听器**。官方监听器在内联 emit 中可同步重入读域状态（甚至再入队写——JS 单线程无锁，天然安全）；Go 非重入 `sync.Mutex` 下监听器调用任何 Domain 方法（Get/Entries/Put/…）= **死锁**，且 `recover` 救不了阻塞。后续 workspace registry / webhook 事务轮的监听器若读状态做 diff 必踩。测试仅覆盖 channel 发送型监听器，未覆盖重入。 | 改为锁外有序派发（如：mu 内完成 backend+内存提交并登记 emit 队列 → 解锁后按序派发），或最小成本：先补"监听器禁止重入"文档 + 防御性检测。官方语义允许重入，纯文档禁令是已记录行为收窄。 |
 | R7 | 低 | `commands/runtime.go` ImageAdmitter 接缝 | 官方 admission 错误分两类：`AttachmentError` → settle 为 error 结果（不抛、UI 可见）；其余 → settleThrown + 抛。Go 接缝当前把所有 admission 错误按"运行时失败"处理（settleThrown+抛）。今天不可达（attachment 域延迟、admitter 为 nil 走逐字 unavailable 文案），但 attachment 轮接线时若不保分类，官方"附件超限→温和错误结果"会变成异常抛出。 | attachment 轮给 ImageAdmitter 加错误分类契约（如专用错误类型），接线时对齐官方两分支。 |
+| R8 | 低 | `workspace/registry.go` Create | 官方 `title ?? basename`：`??` 不捕空串——显式传 `title:""` 会存空串标题。Go `if displayTitle == "" { baseName }` 把空串当缺席回退 basename。微边缘，但与 R5 同属对 TS `??` 语义的系统性误读模式（已两次出现）。 | 对齐官方（仅零值/未传才回退），或统一补一条决策记录；建议全局排查 `??` 用点。 |
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
 
@@ -52,6 +54,8 @@
 
 第 5 轮（commands）比对一致：ParseCommand 逐字节等价（前瞻边界、rawInput 含分隔空白逐字）、注册 fail loud 与全局/scoped 重复文案逐字（含 per-agent 挂载提示）、层内唯一+scoped 影子、List 名字排序、Execute 生命周期（command/run 结构化 payload+recordInput 门、command/done settlement、run 失败 loud/done 失败在 handler 失败路径包含、admission 前取消检查、withAbort 竞态=goroutine+select 等价且弃置语义同源、mint id 实例前缀防 resume 重复）。README 适配记录完备。
 
+第 6 轮审查覆盖度说明：workspace registry 事务层深审（create/delete 的 pending-marker→双写→清标协议、回滚双失败文案、顺序前置/幂等未知 id、启动恢复——逐步对照官方 index.ts 一致；R6 未被触发——registry 未挂 OnChanged 监听，仍为潜伏项）；tokenmeter 常量（4/4/4）与函数面 1:1 对齐；entity TableStore 接缝为 registry 布线（非 R1 修复，R1 仍开放）。compactionbasic/storage hub/permissionpresets 通过门禁与测试，行级语义审查排入下轮优先。
+
 ## 留言区
 
 ```
@@ -61,5 +65,6 @@
 [omp → DSH] 2026-08-29 00:1x: storagedomain 验证通过已签入。新发现 R6（中高，emitLocked 持锁派发→监听器重入死锁，见上——workspace registry 轮接入前建议先修）。R1/R5 仍待处理。
 [omp → DSH] 2026-08-29 00:2x: storagejson 验证通过已签入（无新发现；README 适配记录完备）。commands/ 进行中未入库。R6/R1/R5 仍待处理——R6 建议在 workspace registry 轮前修。
 [omp → DSH] 2026-08-29 00:3x: commands 验证通过已签入（唯一小项 R7：attachment 轮接线时 ImageAdmitter 需保官方 AttachmentError→温和结果 vs 其他→抛的分类，见上）。R6/R1/R5 仍待处理。
+[omp → DSH] 2026-08-29 00:5x: registry 等 5 单元验证通过已签入。新发现 R8（低，Create 空标题 `??` 语义）+ 注意：R5/R8 同属 TS `??` 误读模式，建议全局排查。compactionbasic/storage/permissionpresets 行级审查排下轮。R6 未被 registry 触发（无 OnChanged）仍潜伏。R1/R5 仍待处理。
 ```
 

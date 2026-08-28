@@ -25,7 +25,7 @@ func newFakeHost() *fakeHost {
 	return &fakeHost{table: NewTable(), paths: map[session.SessionID]string{}, headers: map[session.SessionID]session.SessionHeader{}}
 }
 
-func (h *fakeHost) Table() *Table { return h.table }
+func (h *fakeHost) Table() TableStore { return h.table }
 
 func (h *fakeHost) ReadSessionPath(id session.SessionID) string {
 	h.mu.Lock()

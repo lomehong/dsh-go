@@ -16,6 +16,15 @@ type WorkspaceMoveInvalidError struct{ Message string }
 
 func (e *WorkspaceMoveInvalidError) Error() string { return e.Message }
 
+// TableStore is the open workspaces table seam the entity mutates through.
+// Update applies fn to the value current at the caller's chain slot and
+// stores the result. The entity-layer Table is the in-memory seam (tests and
+// pre-bootstrap use); the registry provides the domain-backed store.
+type TableStore interface {
+	Get(id WorkspaceID) (WorkspaceRecord, bool)
+	Update(id WorkspaceID, fn func(current WorkspaceRecord) (WorkspaceRecord, error)) (WorkspaceRecord, error)
+}
+
 // EntityHost is the registry-owned machinery an entity mutates through.
 // Entities never see the registry itself — only the open table, the
 // canonical session-path index backing the SessionIDs projection, and
@@ -25,7 +34,7 @@ type EntityHost interface {
 	// the host rather than the entity so construction can precede registry
 	// start; Go adaptation resolves it once at entity construction instead,
 	// which preserves the entity's ignorance of the registry.
-	Table() *Table
+	Table() TableStore
 	// ReadSessionPath reads a session's canonical directory from the
 	// registry's header index: the canonical directory, or "" when the
 	// header is missing or its cwd cannot identify an existing directory.
@@ -340,7 +349,7 @@ func (e *Entity) mutate(fn func(record WorkspaceRecord) (WorkspaceRecord, error)
 }
 
 // table resolves the open table through the host seam.
-func (e *Entity) table() *Table { return e.host.Table() }
+func (e *Entity) table() TableStore { return e.host.Table() }
 
 // sameRecordIdentity reports whether the fn's change touched nothing but
 // the fields mutate itself stamps.
