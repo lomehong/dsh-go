@@ -107,6 +107,9 @@ type MessageSource struct {
 	Form     string                   `json:"form,omitempty"`
 	Sections []ContextSnapshotSection `json:"sections,omitempty"`
 	Summary  string                   `json:"summary,omitempty"`
+	// Relay sources: the session id of the agent whose tool call produced the
+	// message (coordinator relay, subagent report, subagent settled notice).
+	SenderSessionID string `json:"senderSessionId,omitempty"`
 }
 
 // Message is the one immutable message representation shared by delivery,

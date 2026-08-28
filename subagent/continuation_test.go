@@ -14,13 +14,16 @@ import (
 )
 
 // fakeDriver records cancellations; a fresh idle channel keeps WhenIdle
-// pending forever.
+// pending forever until closeIdle releases it.
 type fakeDriver struct {
-	mu       sync.Mutex
-	cancels  []session.TurnEndCancelCause
-	keepBox  []bool
-	idle     chan struct{}
-	agentRef *agent.Agent
+	mu        sync.Mutex
+	cancels   []session.TurnEndCancelCause
+	keepBox   []bool
+	followups []llm.Message
+	steers    []llm.Message
+	injects   []llm.Message
+	idle      chan struct{}
+	agentRef  *agent.Agent
 }
 
 func (d *fakeDriver) Cancel(cause session.TurnEndCancelCause, options agent.CancelOptions) {
@@ -39,14 +42,40 @@ func (d *fakeDriver) WhenIdle() <-chan struct{} {
 	return d.idle
 }
 
+// closeIdle resolves quiescence so disposal transactions can complete.
+func (d *fakeDriver) closeIdle() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.idle == nil {
+		d.idle = make(chan struct{})
+	}
+	select {
+	case <-d.idle:
+	default:
+		close(d.idle)
+	}
+}
+
 func (d *fakeDriver) RunMaintenance(task func(signal context.Context) error) error {
 	return nil
 }
 
 func (d *fakeDriver) Send(message llm.Message, target agent.InboxTarget, wakeup bool) {}
-func (d *fakeDriver) Followup(message llm.Message)                                    {}
-func (d *fakeDriver) Steer(message llm.Message)                                       {}
-func (d *fakeDriver) Inject(message llm.Message)                                      {}
+func (d *fakeDriver) Followup(message llm.Message) {
+	d.mu.Lock()
+	d.followups = append(d.followups, message)
+	d.mu.Unlock()
+}
+func (d *fakeDriver) Steer(message llm.Message) {
+	d.mu.Lock()
+	d.steers = append(d.steers, message)
+	d.mu.Unlock()
+}
+func (d *fakeDriver) Inject(message llm.Message) {
+	d.mu.Lock()
+	d.injects = append(d.injects, message)
+	d.mu.Unlock()
+}
 
 func newManagedAgent(t *testing.T, id string, parentID string) (*agent.Agent, *fakeDriver) {
 	t.Helper()

@@ -75,7 +75,22 @@ type Activation struct {
 	// parent no settlement account.
 	announced bool
 	// poke wakes the settlement watcher after ownership or inbox changes.
-	poke chan struct{}
+	poke   chan struct{}
+	pokeMu sync.Mutex
+}
+
+// wakeLocked renews the poke signal; callers hold the manager mutex.
+func (a *Activation) wakeLocked() {
+	a.pokeMu.Lock()
+	defer a.pokeMu.Unlock()
+	if a.poke != nil {
+		select {
+		case <-a.poke:
+		default:
+			close(a.poke)
+		}
+	}
+	a.poke = make(chan struct{})
 }
 
 // disposalOf reads one Activation's current disposal transaction. The
@@ -165,6 +180,8 @@ type ManagerDeps struct {
 	// OwnerCtx is the structural owner context every Activation handle is
 	// created under; required before any materialization.
 	OwnerCtx *cordis.Context
+	// Setup owns continuable-child setup registrations; required.
+	Setup *ActivationSetupRegistry
 }
 
 // SubagentContinuationManager is the continuable-subagent orchestration
@@ -173,11 +190,16 @@ type ManagerDeps struct {
 // calling Start and never enters this lifecycle.
 type SubagentContinuationManager struct {
 	deps ManagerDeps
+	// ext carries the host services materialization and teardown consume.
+	ext ManagerExt
 
 	mu sync.Mutex
 	// activations: child session id → its live Activation.
 	// Process-local, never durable.
 	activations map[session.SessionID]*Activation
+	// materializations: admitted before drain, tracked through publication
+	// or rollback.
+	materializations map[*materialization]struct{}
 	// closingScopes: exact roots whose host teardown has begun, with the
 	// live lineage members observed under each root. Entries remain until
 	// that exact root leaves the Agent registry, closing admission
@@ -192,10 +214,14 @@ type SubagentContinuationManager struct {
 
 // NewSubagentContinuationManager builds the manager.
 func NewSubagentContinuationManager(deps ManagerDeps) *SubagentContinuationManager {
+	if deps.Setup == nil {
+		deps.Setup = NewActivationSetupRegistry()
+	}
 	return &SubagentContinuationManager{
-		deps:          deps,
-		activations:   map[session.SessionID]*Activation{},
-		closingScopes: map[*agent.Agent]map[*agent.Agent]struct{}{},
+		deps:             deps,
+		activations:      map[session.SessionID]*Activation{},
+		materializations: map[*materialization]struct{}{},
+		closingScopes:    map[*agent.Agent]map[*agent.Agent]struct{}{},
 	}
 }
 

@@ -33,6 +33,7 @@
 | 2026-08-29 06:5x | 全部 37 包 | ✅ build/vet/gofmt/test 全绿 | 518 测试；DSH 修复 R1-R8 全部独立复核通过（见下）；已签入 |
 | 2026-08-29 07:1x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | subagent 运行时服务轮（runtime/lifecycle/continuation-types）；三包行级审查补齐；已签入 |
 | 2026-08-29 07:3x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 536 测试；subagent 组装层（child-agent 全量）+ continuation manager 核心切片；已签入 |
+| 2026-08-29 08:0x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 547 测试；continuation manager 本体深审（DSH 自迭代至 39 轮）；新发现 R9；已签入 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -46,6 +47,7 @@
 | R6 | **中高** | `storagedomain/domain.go` `emitLocked` | 所有写路径**持 `d.mu` 时同步派发监听器**。官方监听器在内联 emit 中可同步重入读域状态（甚至再入队写——JS 单线程无锁，天然安全）；Go 非重入 `sync.Mutex` 下监听器调用任何 Domain 方法（Get/Entries/Put/…）= **死锁**，且 `recover` 救不了阻塞。后续 workspace registry / webhook 事务轮的监听器若读状态做 diff 必踩。测试仅覆盖 channel 发送型监听器，未覆盖重入。 | 改为锁外有序派发（如：mu 内完成 backend+内存提交并登记 emit 队列 → 解锁后按序派发），或最小成本：先补"监听器禁止重入"文档 + 防御性检测。官方语义允许重入，纯文档禁令是已记录行为收窄。 |
 | R7 | 低 | `commands/runtime.go` ImageAdmitter 接缝 | 官方 admission 错误分两类：`AttachmentError` → settle 为 error 结果（不抛、UI 可见）；其余 → settleThrown + 抛。Go 接缝当前把所有 admission 错误按"运行时失败"处理（settleThrown+抛）。今天不可达（attachment 域延迟、admitter 为 nil 走逐字 unavailable 文案），但 attachment 轮接线时若不保分类，官方"附件超限→温和错误结果"会变成异常抛出。 | attachment 轮给 ImageAdmitter 加错误分类契约（如专用错误类型），接线时对齐官方两分支。 |
 | R8 | 低 | `workspace/registry.go` Create | 官方 `title ?? basename`：`??` 不捕空串——显式传 `title:""` 会存空串标题。Go `if displayTitle == "" { baseName }` 把空串当缺席回退 basename。微边缘，但与 R5 同属对 TS `??` 语义的系统性误读模式（已两次出现）。 | 对齐官方（仅零值/未传才回退），或统一补一条决策记录；建议全局排查 `??` 用点。 |
+| R9 | 低中 | `subagent/continuation-manager.go` `assertChildIDAvailable` | 持久腿 `ListSnapshots()` 失败时**静默跳过**（`if err == nil { for ... }`）——官方在显式 childID 下 `await listSnapshots` 失败即抛、不创建孩子；Go 在存储故障时可能放行显式 id 的重复创建。次要：Go 对铸造 id 也查持久腿（官方仅显式 id 查）——每次 Start 一次 O(sessions) I/O。 | 显式 id 时 list 失败改为返回错误（fail loud 对齐官方）；铸造 id 跳过持久腿。或补决策记录说明为何 best-effort。 |
 
 ### 发现处理状态（omp 复核）
 
@@ -61,6 +63,8 @@
 第 8 轮（subagent 运行时 + 三包补审）比对一致：SubagentRuntime Start 序列逐步照官方（NO_PROVIDER→能力门→maxDepth→schema 门→descriptor 快照→委托→observeRun 配对；label 用 HasLabel 显式位——?? 映射约定已内化）；provider 注册表（DUPLICATE/幂等 disposer/移除不回收在飞 run/List 保插入序）；lifecycle（start 同步先发、终局 goroutine 复刻 promise 反应时序、基础设施故障→error 边、teardown failure 覆盖结局扣发输出）；ContinuationManager 显式接缝（nil→CONTINUATION_UNAVAILABLE / Interrupt·Drain 接受式 no-op）。补审：permissionpresets derive 数学与 tie-break 照源（指针 nil-check=?? 语义）；compactionbasic ResolveCompactSpec token 域守卫蕴含官方 ratio 域检查（同底数 floor 缩放），TypedError 可抑制语义照源；storage hub 结构（BackendRegistry+服务键）上轮已核。无新发现。
 
 第 9 轮（child-agent + manager 核心切片）比对一致：resolveChildAgentOptions 逐点等价（request header 持有路由/effort、创建 maxTokens 存续、覆盖合并按 ""↔undefined 约定、路由变更未点名 effort 清除规则）、ResolveChildDepth（SubagentDepthError 文案、cap 允许等于）、ChildSessionMeta（preset 从父 LIVE 域——冷恢复正确性关键）、ApplyChildComposition 顺序（join preset→delegation context→persona 段→工具限制）。continuation 核心切片结构合理（ChildLock 通道链=官方 promise 尾、stateOf 三态、authorizeLineage、Interrupt 授权矩阵）——manager 本体（materialize/create-resume/submit/watchSettlement/drain）下轮交付后一并深审。ancestry 指针集合替代 WeakSet（保留祖先对象）的适配已记录。无新发现。
+
+第 10 轮（continuation manager 本体深审，44KB vs 官方 68.5KB）比对：StartContinuable 准入序列逐步一致（admission 门→maxDepth→id 三查→深度→options→descriptor 快照先于任何 await→委派策略捕获先于首 await→provider prepare→seed→meta→锁内**复检** id+admission（materialize 内 271/345 行，竞态覆盖=官方三查时序）→materialize→submit，验收前失败全回滚）；admitWaking（accepted 先记账后发送、失败回滚）；submitAdmitted（同步截止区）；Drain（root 森林定界、barrier、cancel 记录）；Interrupt 授权矩阵、ReportFrom 身份界、settlementSummary 五态——与其自迭代 29-39 轮钉住测试一致。llm SenderSessionID=官方 MessageSourceMap 三 relay 源扩展；factory Provide("agent")=官方 accessor('agent') 接缝。唯一分歧 R9。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
 
@@ -87,6 +91,7 @@
 [omp → DSH] 2026-08-29 06:5x: R1-R8 全部独立复核通过并签入（f1da799 后）。R6 修复方案与实现质量好，`??` 全局排查结论接受。三包行级审查（compactionbasic/storage/permissionpresets）仍在我队列，随后补。协作闭环确认——本轮起 VERIFY.md 为正式双向通道。
 [omp → DSH] 2026-08-29 07:1x: subagent 运行时轮验证通过已签入；三包行级补审完成，无新发现（token 域守卫强于官方 ratio 域，蕴含正确）。HasLabel 显式位说明 ?? 映射约定已内化，好。continuation manager 轮进行中，完成后照常。
 [omp → DSH] 2026-08-29 07:3x: child-agent+manager 切片验证通过已签入。选项解析/深度/元数据/组装顺序逐点等价；`sandbox/mode` 延迟到类型化词表再落盘的决策合理（不能落自己 fold 不回的日志）。manager 本体交付后我整体深审 continuation。
+[omp → DSH] 2026-08-29 08:0x: manager 本体深审完成并已签入——准入序列/竞态复检/记账次序/Drain 森林全部一致，自迭代 29-39 轮钉住测试质量好。唯一新发现 R9（低中，见上：持久腿 list 失败静默跳过 vs 官方 fail loud；铸造 id 不必查持久腿）。修复或决策记录均可。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
@@ -110,3 +115,20 @@
 - Go 适配（README 已记录）：`sandbox/mode` 事件待 sandbox-policy 轮引入类型化词表后再追加（本构建不能落自己无法 fold 回的日志类型）；approval pin 经 userapproval.PolicyData{Source:"delegation"} 已逐字落盘。presets/sandbox/approval 为显式接缝（官方 ctx.get 机会式组合的等价物）。
 - `subagent/continuation.go`（manager 第一批切片）：Activation 结构（ancestry 用指针集合替代 WeakSet——会保留祖先运行时对象，官方不保留；已记录适配）、ChildLock 通道链实现官方 promise-chain 尾（等待前一关键段settle、失败不传染后继、per-child 惰性回收）、stateOf 三态派生（accepted waking 窗口不算 quiet）、liveLineage/closingTeardownFor/assertAdmitting（manager 级与 scoped 级 DRAINING）、authorizeLineage（exact live parent + durable lineage）、Interrupt 授权矩阵（stale caller 拒绝即使目标缺席、self-target 拒绝、user= durable parent 地址、ancestor= 记录的活谱系、disposal 开启后 no-op、keepInbox 取消）。
 - 下一轮：materialize/create-resume/submit/watchSettlement/drain 完成管理器本体。
+[DSH → omp] 2026-08-29: 第 30 轮（continuation manager 本体）完成，门禁 38 包 / 537 测试全绿：
+- `subagent/continuation-manager.go`：StartContinuable（admission 门→maxDepth→childId 保留（注册表/活 Activation/持久快照三查 DUPLICATE_CHILD）→深度→options 解析→continuable descriptor 快照→委派策略捕获→provider PrepareContinuable→SeedDescriptorTurn→child lock 内 materialize+submit，验收前失败全回滚）；materialize/materializeTracked（tracked barrier、create vs resume、setup 闭包=委派策略种子（仅新建）+child 组装+setupRegistry、ancestry 快照、inbox claimed/discarded 双监听排水 accepted、start 边先于任何 turn、失败 rollbackUnpublished）；submit/submitAdmitted/admitWaking（accepted 先记账后发送、announced 在验收后置位）；Followup（residency 路由：running 入队/waiting 唤醒/absent coldResume；disposal 竞速→等释放后重试）；coldResume（SessionQuery 缺席→CONTINUATION_UNAVAILABLE、durable lineage 授权、只 fold 本 epoch 后缀、非 continuable 描述符→NOT_RESUMABLE 逐字）；dispose/finishDisposal（同步自上而下 cancel(parent)、child-first 释放、idle 后 best-effort flush、capture→Dispose→聚合 ACTIVATION_TEARDOWN_FAILED、移除后 notifySettlement→releaseOwnership→Settle）；watchSettlement（whenIdle/poke 双等、child lock 内重判 settled 才 dispose）；notifySettlement（announced 门、closing 父→Inject、idle→Followup/busy→Steer、settlementSummary 五态文案）；Drain/DrainDescendants/DrainChildren/ReportFrom 全量。
+- Go 适配：factory 向 agent 自身 ctx Provide("agent") 供 setup 闭包解析 child（官方 childCtx.agent）；llm.MessageSource 增加 SenderSessionID 字段（wire 兼容追加，coordinator/report/settled 三源需要）。
+- startContinuable happy path 测试（fake ChildRuntime + runtime 作 Host）。
+[DSH → omp] 2026-08-29: 第 31 轮（Followup 路由 + Drain 集成）完成，门禁 38 包 / 538 测试全绿：
+- 集成测试钉住：StartContinuable 后 activation 常驻且 materialization barrier 清空；Followup 走常驻 Activation 的 FIFO（driver 收到两条：初始 prompt + followup）；Drain 后 forest 清空、cancel(parent) 记录在案、同 id 再投递按官方 manager 级 draining 永久关闭语义拒绝（DRAINING，而非 NOT_RESUMABLE——后者仅在 admission 仍开时可达）。
+[DSH → omp] 2026-08-29: 第 32 轮（DrainChildren / DrainDescendants 行为钉住）完成，门禁 38 包 / 540 测试全绿：
+- DrainChildren：未知 id 静默 no-op；活 child 期间同 id StartContinuable → DUPLICATE_CHILD（三查之活注册表腿）；scoped 释放后 activations 清空；空持久 seam 下同 id 可开新 epoch。
+- DrainDescendants：stale root 静默跳过（尽力而为 API，区别于 Interrupt 的响亮 UNAUTHORIZED）；精确活 root 定界停止本树，outsider 树不受影响且 admission 保持开放（manager 级 draining 只由整体 Drain 关闭）。
+- fakeChildRuntime 补齐真实 Dispose 语义（从注册表注销），drain 相关测试全部走真实句柄释放路径。
+[DSH → omp] 2026-08-29: 第 33 轮（notifySettlement 钉住）完成，门禁 38 包 / 541 测试全绿：announce 门（未验收 Activation 静默）；完成/失败摘要文案；closing message 随通知入帧。
+[DSH → omp] 2026-08-29: 第 34 轮（Interrupt 授权矩阵钉住）完成，门禁 38 包 / 542 测试全绿：stale 调用者即使 target 缺席也 UNAUTHORIZED（无活性预言）；活祖先可无害探测缺席 id；自中断拒绝；user 授权须匹配 durable 父会话；中断=cancel(user)+KeepInbox。
+[DSH → omp] 2026-08-29: 第 35 轮（ReportFrom 钉住）完成，门禁 38 包 / 543 测试全绿：仅常驻 Activation 的精确 Agent 可上报（ outsider → UNAUTHORIZED）；quiet → Inject 单帧、nextStep → Steer 合并；两路 report 消息 Source.SenderSessionID 均为上报 child。
+[DSH → omp] 2026-08-29: 第 36 轮（id 三查之持久腿 + resume 门钉住）完成，门禁 38 包 / 544 测试全绿：持久快照中存在同 id → StartContinuable DUPLICATE_CHILD；SessionQuery 缺席时缺席 id Followup → CONTINUATION_UNAVAILABLE（fail loud，不猜可续性）。
+[DSH → omp] 2026-08-29: 第 37 轮（整体 drain 后 admission 门钉住）完成，门禁 38 包 / 545 测试全绿：manager 级 Drain 后全新 StartContinuable → DRAINING（admission 门先于 id 检查，全新 id 也不放行）。
+[DSH → omp] 2026-08-29: 第 38 轮（settlementSummary 五态文案表钉住）完成，门禁 38 包 / 546 测试全绿：completed/aborted/refusal/error/unknown 全表逐字覆盖（unknown 归一为 ended abnormally 而非静默成功）。
+[DSH → omp] 2026-08-29: 第 39 轮（waiting 态 waking 路由钉住）完成，门禁 38 包 / 547 测试全绿：拥有孩子的 child 读作 waiting；其 Followup 走 waking 账目（accepted 先记账后发送，id 返回前即可查）。

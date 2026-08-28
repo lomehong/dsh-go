@@ -58,7 +58,7 @@ type SubagentRuntime struct {
 type ContinuationManager interface {
 	StartContinuable(spec ContinuableStartSpec) (ContinuableStart, error)
 	Followup(parent *agent.Agent, childID session.SessionID, content []llm.ContentBlock, options SubagentFollowupOptions) (llm.MessageID, error)
-	Interrupt(targetSessionID session.SessionID, authority SubagentInterruptAuthority)
+	Interrupt(targetSessionID session.SessionID, authority SubagentInterruptAuthority) error
 	ReportFrom(child *agent.Agent, content []llm.ContentBlock, options SubagentReportOptions) (llm.MessageID, error)
 	DrainDescendants(parents []*agent.Agent) error
 	DrainChildren(parent *agent.Agent, childIDs []session.SessionID) error
@@ -357,12 +357,14 @@ func (r *SubagentRuntime) Followup(parent *agent.Agent, childID session.SessionI
 	return manager.Followup(parent, childID, content, options)
 }
 
-// Interrupt one live continuable child's current turn. A manager-less
-// composition is an accepted no-op (nothing can own a live Activation).
-func (r *SubagentRuntime) Interrupt(targetSessionID session.SessionID, authority SubagentInterruptAuthority) {
-	if manager := r.currentContinuations(); manager != nil {
-		manager.Interrupt(targetSessionID, authority)
+// Interrupt one live continuable child's current turn. Delegates to the
+// manager; a manager-less composition fails with CONTINUATION_UNAVAILABLE.
+func (r *SubagentRuntime) Interrupt(targetSessionID session.SessionID, authority SubagentInterruptAuthority) error {
+	manager, err := r.requireContinuations()
+	if err != nil {
+		return err
 	}
+	return manager.Interrupt(targetSessionID, authority)
 }
 
 // ReportFrom delivers selected content from one live continuable child to

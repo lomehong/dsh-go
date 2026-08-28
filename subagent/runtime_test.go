@@ -431,7 +431,12 @@ func TestContinuationUnavailableAndDelegation(t *testing.T) {
 		asCode(err) != CodeContinuationUnavailable {
 		t.Fatalf("report = %v, want CONTINUATION_UNAVAILABLE", err)
 	}
-	runtime.Interrupt("c", SubagentInterruptAuthority{})
+	// Interrupt without a manager fails loud (the official runtime requires
+	// the agents service for every continuable operation).
+	if err := runtime.Interrupt("c", SubagentInterruptAuthority{}); err == nil ||
+		asCode(err) != CodeContinuationUnavailable {
+		t.Fatalf("interrupt without manager = %v, want CONTINUATION_UNAVAILABLE", err)
+	}
 	if err := runtime.DrainContinuableDescendants(nil); err != nil {
 		t.Fatalf("drain without manager: %v", err)
 	}
@@ -486,8 +491,9 @@ func (s *stubContinuations) Followup(parent *agent.Agent, childID session.Sessio
 	return "m", nil
 }
 
-func (s *stubContinuations) Interrupt(targetSessionID session.SessionID, authority SubagentInterruptAuthority) {
+func (s *stubContinuations) Interrupt(targetSessionID session.SessionID, authority SubagentInterruptAuthority) error {
 	s.interrupted = true
+	return nil
 }
 
 func (s *stubContinuations) ReportFrom(child *agent.Agent, content []llm.ContentBlock, options SubagentReportOptions) (llm.MessageID, error) {

@@ -138,6 +138,10 @@ func (l *AgentLoop) prepare(id session.SessionID, options agent.AgentOptions, se
 		Inbox:   inbox,
 	}, l.Registry.Events())
 	prepared.agent = built
+	// Publish the built agent into its own context so creation-window setup
+	// closures (delegation policy seeding, per-child composition) can reach
+	// the child's session and scope.
+	built.Ctx.Provide("agent", built)
 	notifications.mu.Lock()
 	prepared.driver = NewReactLoopAgent(l, built)
 	notifications.mu.Unlock()
