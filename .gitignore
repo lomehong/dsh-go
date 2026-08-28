@@ -1,0 +1,23 @@
+# Go 构建产物
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+
+# 测试与覆盖率
+coverage.txt
+coverage.html
+
+# 编辑器/IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 操作系统
+Thumbs.db
+.DS_Store
