@@ -100,7 +100,8 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		"session-persistence-jsonl", "user-questions", "user-approval",
 		"permission-presets", "system-prompt", "agent-loop", "subagent",
 		"skill", "tool-skill", "tool-todo", "jobs-local", "tool-jobs",
-		"plan-mode", "repeat-tool-reminder",
+		"plan-mode", "repeat-tool-reminder", "token-meter",
+		"compaction-basic", "command-compact",
 	} {
 		entries = append(entries, runtimeSpec(name))
 	}
@@ -124,7 +125,7 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 	if fork.Capabilities().OutputSchema {
 		t.Fatal("fork must not advertise outputSchema before the structured round")
 	}
-	for _, service := range []string{ServiceSkills, ServiceJobs, ServicePlanMode} {
+	for _, service := range []string{ServiceSkills, ServiceJobs, ServicePlanMode, ServiceTokenMeter, ServiceCompaction} {
 		if root.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
 		}

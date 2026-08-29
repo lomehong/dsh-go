@@ -577,3 +577,10 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 集成测试分层：17 条目测试保持原服务断言；25 条目测试增 skills/jobs/planMode 断言+spawn/fork provider 契约验证（fork 不得虚报 outputSchema）。
 - 批次复用基建：inProcessProviderSpec 参数化构造 spawn/fork 两 spec；init() 合并 builder 分表并 panic 防重名。
 - 下一轮：重件按依赖序（compaction coordinator+/compact 命令、tool-fs 家族、web 家族）或 ACP/list-children。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 8（② compaction-pruner 与 /compact 命令接线），门禁 69 包 / 969 测试全绿：
+- 新接线 3/86（累计 30）：dsh-token-meter（tokenmeter.NewMeter 单例计量器；图片路由定价缝按官方文档缺省 nil→估算）/dsh-compaction-basic（compactionbasic.NewEngine 组合期 fail-loud：LLM=llm runtime、Meter=token-meter、ModelInfo=同 runtime 的 ResolveModelInfo、Flusher=persistence Coordinator.FlushSession；Engine provide 为 compaction 服务）/dsh-command-compact（RegisterCompactCommand 挂 commands runtime）。
+- 契约修正（compactionbasic 内部）：compactStarter 原签名 (signal, cmdID) 丢失 /compact 的接收方 agent——改为携带 commands.Invocation，handler 传 invocation；两个既有测试 starter 同步适配。理由：官方 /compact 对"接收 agent"做手动压缩，Go 的 Invocation.Agent 正是这一信息，不该在 starter 边界丢弃。
+- maintenanceOwner 适配器（boot）：*agent.Agent → Engine 的 MaintenanceAgent 面——会话/模型视图走导出的 ViewAgent，保留轮走 agent.Driver.RunMaintenance（接口已有该方法，agentloop.ReactLoopAgent 同款语义）。CommandID 经 compaction.CommandID(invocation.CommandID) 显式转换（commands 侧是定义类型 string）。
+- README 第 138 行本轮曾被一条误写 Set-Content 清空——git checkout 即刻恢复后用 edit 工具重做，无内容损失（工作区其余文件未受影响，如实记录）。
+- 下一轮：tool-fs/fs-search/str-replace-editor 家族或 session-title/spill/checkpoint，或 ACP/list-children。

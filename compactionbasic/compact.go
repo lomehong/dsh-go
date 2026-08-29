@@ -18,10 +18,11 @@ import (
 // compactUsage is the rejection text for any argument supply.
 const compactUsage = "Usage: /compact (no arguments)"
 
-// compactStarter starts one manual compaction for the receiving session's
-// agent: the composition binds the maintenance owner. signal carries the
-// dispatching UI request's cancellation.
-type compactStarter func(signal context.Context, sourceCommandID commands.CommandID) (*compaction.Result, error)
+// compactStarter starts one manual compaction for the invocation's receiving
+// agent: the composition binds the maintenance owner from the invocation (the
+// exact receiving agent rides the dispatch). signal carries the dispatching
+// UI request's cancellation.
+type compactStarter func(invocation commands.Invocation, signal context.Context) (*compaction.Result, error)
 
 // manualFailureText converts one expected capability failure into its
 // concise human-only outcome text. The closed ManualCompactionKind union is
@@ -57,7 +58,7 @@ func RegisterCompactCommand(runtime *commands.CommandRuntime, compactNow compact
 		}
 		active.Add(1)
 		defer active.Done()
-		result, err := compactNow(invocation.Context, invocation.CommandID)
+		result, err := compactNow(invocation, invocation.Context)
 		if err != nil {
 			if invocation.Context != nil && invocation.Context.Err() != nil {
 				return commands.CommandResult{Kind: commands.ResultError, HasText: true, Text: "Compaction cancelled."}, nil

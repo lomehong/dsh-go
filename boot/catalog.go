@@ -7,6 +7,7 @@
 package boot
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 	"dshgo/agent"
 	"dshgo/agentloop"
 	"dshgo/commands"
+	"dshgo/compaction"
+	"dshgo/compactionbasic"
 	"dshgo/cordis"
 	"dshgo/credentials"
 	"dshgo/guard"
@@ -35,6 +38,7 @@ import (
 	"dshgo/subagent"
 	"dshgo/systemprompt"
 	"dshgo/todo"
+	"dshgo/tokenmeter"
 	"dshgo/tools"
 	"dshgo/toolsjobs"
 	"dshgo/toolskill"
@@ -61,6 +65,8 @@ const (
 	ServiceSkills            = "skills"
 	ServiceJobs              = "jobs"
 	ServicePlanMode          = "planMode"
+	ServiceTokenMeter        = "tokenMeter"
+	ServiceCompaction        = "compaction"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -720,6 +726,87 @@ var batchThreeBuilders = map[string]pluginBuilder{
 			},
 		}
 	},
+
+	// The singleton replay-aware token meter. Image route pricing is an
+	// optional llm seam; the default composition leaves it nil so image
+	// pricing falls back to estimation.
+	"@deepseek-ai/dsh-token-meter": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceTokenMeter},
+			Apply: func(ctx *cordis.Context, config any) error {
+				ctx.Provide(ServiceTokenMeter, tokenmeter.NewMeter(nil))
+				return nil
+			},
+		}
+	},
+
+	// The replay-aware compaction engine: config resolved fail-loud at
+	// composition; summarization rides the llm runtime, capacity resolution
+	// rides the same runtime's model info, durability rides the persistence
+	// coordinator's flush.
+	"@deepseek-ai/dsh-compaction-basic": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceLlm, ServiceTokenMeter, ServiceSessionPersist},
+			Provide: []string{ServiceCompaction},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg compactionbasic.BasicConfig
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				runtime := ctx.Get(ServiceLlm).(*llm.Runtime)
+				engine, err := compactionbasic.NewEngine(cfg, compactionbasic.EngineConfig{
+					LLM:       runtime,
+					Meter:     ctx.Get(ServiceTokenMeter).(*tokenmeter.Meter),
+					Logger:    deps.Logger,
+					ModelInfo: runtime,
+					Flusher:   ctx.Get(ServiceSessionPersist).(*persistence.Coordinator),
+				})
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceCompaction, engine)
+				return nil
+			},
+		}
+	},
+
+	// The /compact command: manual compaction for the receiving agent; the
+	// invocation binds the maintenance owner at dispatch time.
+	"@deepseek-ai/dsh-command-compact": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceCommands, ServiceCompaction},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				engine := ctx.Get(ServiceCompaction).(*compactionbasic.Engine)
+				_, err := compactionbasic.RegisterCompactCommand(
+					ctx.Get(ServiceCommands).(*commands.CommandRuntime),
+					func(invocation commands.Invocation, signal context.Context) (*compaction.Result, error) {
+						if invocation.Agent == nil {
+							return nil, fmt.Errorf("/compact requires a receiving agent")
+						}
+						owner := maintenanceOwner{
+							AgentView: compactionbasic.ViewAgent(invocation.Agent),
+							driver:    invocation.Agent.Driver(),
+						}
+						return engine.CompactNow(owner, signal, compaction.CommandID(invocation.CommandID))
+					},
+				)
+				return err
+			},
+		}
+	},
+}
+
+// maintenanceOwner adapts one receiving agent into the engine's
+// MaintenanceAgent face: the session/model view rides the exported ViewAgent
+// adapter and the reserved maintenance turn rides the driver.
+type maintenanceOwner struct {
+	compactionbasic.AgentView
+	driver agent.Driver
+}
+
+func (m maintenanceOwner) RunMaintenance(task func(signal context.Context) error) error {
+	return m.driver.RunMaintenance(task)
 }
 
 func init() {

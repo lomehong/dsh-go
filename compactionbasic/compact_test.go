@@ -28,9 +28,9 @@ func TestCompactCommandOutcomes(t *testing.T) {
 	starts := 0
 	seenCommandID := commands.CommandID("")
 	var startOverride func(context.Context) (*compaction.Result, error)
-	starter := func(signal context.Context, sourceCommandID commands.CommandID) (*compaction.Result, error) {
+	starter := func(invocation commands.Invocation, signal context.Context) (*compaction.Result, error) {
 		starts++
-		seenCommandID = sourceCommandID
+		seenCommandID = invocation.CommandID
 		if startOverride != nil {
 			return startOverride(signal)
 		}
@@ -129,7 +129,7 @@ func executionResult(execution *commands.CommandExecution) any {
 func TestCompactCommandUndoDrainsInFlight(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
-	starter := func(signal context.Context, _ commands.CommandID) (*compaction.Result, error) {
+	starter := func(_ commands.Invocation, signal context.Context) (*compaction.Result, error) {
 		close(started)
 		<-release
 		return nil, nil
