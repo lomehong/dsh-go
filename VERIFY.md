@@ -216,3 +216,96 @@
   (4) server.Serve 补齐官方 jsonrpc.serve effect 接线：把 HandleRequest 安装进 LineTransport 请求处理器（上一轮仅暴露方法未装线）。
 - 测试 8 条：端到端（client↔真 server 过 pipe 对：initialize→prompt→session.event 订阅通知→shutdown）、身份契约、messageId 契约、协议错误透传、超时映射、关停后请求/订阅出生失败、filter+Close 语义、队列先于等待投递。
 - 结论：SDK JSON-RPC 接缝（protocol+server+client）三层全绿闭环。
+[DSH → omp] 2026-08-29: 第 51 轮（attachment 契约 + local 后端）完成，门禁 44 包 / 634 测试全绿：
+- `attachment/` 新包（官方 packages/attachment 移植）：durable 附件存储接缝。
+  (1) 词汇表：ImageAttachmentRef（内容寻址 id/mediaType/bytes/width/height/可选 name/originalDimensions）；ImageAttachmentLimits（逐图字节、每消息张数、每消息聚合字节、总像素、单边像素、mediaTypes）；Encoded/Save/Stored/RequestImage 各面；错误码全集（9 个 caller 可纠正的图像准入码 + 6 个存储故障码），IsImageAdmissionError 按码路由。
+  (2) RequestImageDimensions：等比整数投影进硬像素预算，向内取整、小图不放大——逐字对齐官方算法（极端长宽比沉到 1px 短边）。
+  (3) AdmitEncodedImages：每成员先做规范化 base64 校验（再编码比对，空/非规范拒绝），再委托 store 的批策略（张数→聚合字节→mediaType）+ 有序提交；测试证实顺序保持。
+  (4) Store 接口 + ValidateImageBatch 基类语义；saveImages 校验失败零写入、存储失败零部分引用。
+- `attachment/local/` 新包（官方 packages/attachment-local 移植）：DSH_HOME/attachments/v1 内容寻址后端。
+  (1) sha256 内容寻址（id 形如 sha256:<64hex>），objects/<前2位>/<sha256> 布局；发布经 staging 硬链接 + EEXIST 去重校验 + 文件 fsync + 只读化；读取先比对 digest 再仅重探 header（免去全量像素解码）；read 路径损坏/缺失/元数据不符分码响亮。
+  (2) 准入：字节上限→格式嗅探→全量解码（webp 除外）→像素/单边上限→声明类型比对。
+  (3) 归一化：干净 8-bit sRGB 单帧且全部入限 → 字节透传；否则解码→等比投影（总像素预算后单边上限）→重编码（带 alpha→PNG；不透明→JPEG 质量阶梯，无一达标留最小输出）；GIF 归一为首帧 PNG；displayName 手工剥离双风格路径分隔符 + 控制字符 + 255 截断。
+  (4) Go 适配（包文档明示）：sharp→标准库；webp 走 RIFF/VP8/VP8L/VP8X 头探针（尺寸/动画/alpha），不能转码——不透传资格的超限 webp 响亮失败而非漂移契约；EXIF 方向不应用（带元数据 JPEG 必然重编码为无方向形式）。
+- `sdk/server` 补 AttachmentStoreAdmitter 桥：真实 store 绑入 prompt 图像接缝（canonical base64→批准入→{type:'image',attachment:ref} 有序回填，对齐官方 durablePromptContent）。
+- 测试 15 条：投影几何 5 例、批策略、准入顺序/非规范 base64、错误路由；round-trip、拒绝面（超限/类型不符/截断）、完整性（缺失/篡改/非法 ref）、去重、归一化（元数据剥离+降采样记录 originalDimensions）、GIF 首帧、webp 头探针、批失败零写入、验证零存储、请求投影不支持、SDK 桥接。
+[DSH → omp] 2026-08-29: 第 52 轮（boot：profile 组装 + app 装配）完成，门禁 45 包 / 648 测试全绿：
+- `boot/` 新包（官方 packages/boot 移植）：
+  (1) `profile.go`（app-boot/src/profile.ts 语义）：profile = `<home>/profiles/<name>` 目录 + package.json 清单（dsh.profile.bundles 有序层 + patchReload）+ cordis.patch.yml 用户补丁层。
+    - ResolveProfileDir 名称校验逐字对齐（空/点/点点/node_modules/分隔符拒绝）。
+    - 模板自动初始化：acp/web/headless/sdk/sdk-minimal 五套 shipped 模板 + DefaultProfileBundles + live 默认重载；InitProfile 只补缺失文件，幂等。
+    - normalizeShippedProfile：installation-owned 退役 bundle 元组（headless 三元组）规范化为 shipped 模板、现役元组补 shipped reload 默认——写回时保留清单全部其他字段（custom 字段保留有测试）；其余 bundle 列表属用户所有不动。
+    - 双锚 bundle 解析：安装锚优先（盒内 bundle 永远来自运行中的 dsh 安装，绝不用 profile 本地副本），再探测 profile 目录 node_modules 父链——Go 适配：锚的父链 `<dir>/node_modules/<name>` 就近优先，替代 Node require.paths；无 dsh.bundle 声明的包被列为层 = 配置错误响亮失败。
+    - 用户层可跳过（userLayer=false 时 bundles-only 消费者不会因坏的用户层失败）；patchReload 非法值响亮。
+    - ComposeEntries：空根 + 各层补丁依序过一次 ApplyEntryPatches（与挂载共用同一条调用，flag 推导与配置 dump 所见即所挂）。
+  (2) `app.go`（entry-tree 装配）：Assemble 把组合后的条目表挂进 cordis.Context——disabled 条目（及其子树）跳过；group 条目自身从不运行且永远 enabled，但其 disabled 标志加入祖先链（子条目激活前检查全部祖先——官方 _disabled 语义）；插件目录解析失败响亮（"failed to import loader entry <id> (<name>)"措辞对齐官方 updateError）；条目级 inject 整体覆盖插件自己的列表；注入服务在位后 Apply 才运行；条目 config 原样透传。App.Shutdown 子上下文按挂载逆序先卸，根最后。
+- 测试 14 条：名称校验、幂等初始化、模板自动初始化（headless 两层+补丁解析+用户层模板）、四处响亮失败（未知 profile/缺 bundle/无 bundle 声明/非法 reload）、profile 本地 bundle 第二锚、退役元组规范化+字段保留、用户层跳过/解析、ComposeEntries 层序（覆盖+插入+后续层命中插入行）、注入排序、禁用子树、组作用域、inject 覆盖、未知模块/非法 disabled 响亮。
+- 结论：objective 中的 cordis loader（此前已在 cordis/loader）+ boot 组装链路（profile→layers→ComposeEntries→Assemble）全部打通。
+[DSH → omp] 2026-08-29: 第 53 轮（context 插件：file-reference + output-retention + session-reference）完成，门禁 48 包 / 676 测试全绿：
+- `filereference/`（@deepseek-ai/dsh-file-reference + -local 移植）：
+  - `@` 补全语法（grammar.ts 逐字）：activeAtToken 引号/裸路径/光标列（Go 用 rune 偏移，文档注明与 UTF-16 单位的差异）、@ 在其他 token 内不触发；formatFileMention 控制字符+引号拒绝、目录补尾斜杠、空白用 `@"` 引号形式、保留已开引号。
+  - `WorkspaceFileSearch`（search.ts 全量）：目录查询走实时列表（排除段短路、根上逃逸拒绝、点文件可见性规则、不可读子树贡献空），裸查询走有界模糊索引（BFS 遍历、maxEntries 预算、排除目录、根不可读响亮失败不发布空索引）；失效后旧索引继续作答 + 后台重建（生成代守卫，dispose 后扫描结果不回灌）；评分=精确名 1000/前缀 900/包含 700/路径 500/子序列 300+100-缺口（目录+25），排序=分数降序→目录优先→短路径（仅非空查询）→文本序。
+  - `Service`：每 agent 一个搜索根（首次 List 以会话 cwd 扎根），InvalidateAgent/DisposeAgent/Dispose 对应 tool/result 失效、agent/disposed、service effect 卸载；FileReferencePrompt 逐字钉死。
+- `outputretention/`（@deepseek-ai/dsh-output-retention 移植）：ItemRetainer（head，精确省略计数）+ TextRetainer（head/tail/headTail，字节导向，滚动后缀有界内存，finish 修剪切点处不完整 UTF-8 序列，无省略时头尾作为连续整体解码避免跨切点码点损坏，省略计数对实际返回字节负责）+ DescribeOmitted/FormatRetentionNotice（标准化措辞 + 工具自述恢复语）。
+- `sessionreference/`（@deepseek-ai/dsh-session-reference 移植）：
+  - 规范 URI：JSON+base64url 无损编码，解码要求 base64url 形状 + JSON 字符串 + 重编码一致（仅接受规范形）；`@[label](uri)` Markdown 提及（`\`/`]` 转义）与文本解析（Markdown 提及或裸规范 URI，出现序结构化引用）；StringifyTagSafeJSON 仅重写 `<` 为 `\u003c`（`>`/`&` 保持字面，解析结果不变）。
+  - 投影：retainReferencedSession 精确字节预算——先整体丢最旧（checkpoint 与最新一条钉死），再对最长条目做 head-tail 二分缩短 + `[… omitted N UTF-8 bytes …]` 通知，固定数据放不下返回 nil；stats（compacted/original/retained/omitted/truncated）随附。
+  - `Resolver`：normalizeReferences（自引用拒绝、去重、label 默认、≤3 上限）、prepare（读面 seam → 逐源预算渲染 → 聚合不可信快照 prompt，前缀/后缀逐字钉死含 `<referenced-sessions>` 包裹）、prepareDirectMessages（user 源消息的提及替换 + 快照紧跟引用消息之后）、listCandidates（cwd 亲和排序：同工作区→无工作区→其他，投影标题 labeler seam，needle 过滤，limit 上限，remote 面附带规范提及）。llm.MessageSource 扩展 session-reference 源词汇（kind/form/version/references——对齐官方 declaration merging，条目含保留事实与 inputIndex）。
+- 测试 28 条：语法 8 例、提及格式 7 例、实时/索引查询、失效重建、预算、不可读根、dispose、配置校验、service 每 agent 隔离、retainer 头/尾/头尾/UTF-8 边界/滚动、省略措辞、URI 规范性、提及往返、tag-safe、投影丢消息/钉 checkpoint/缩短/nil/跳过工具与非 user 源、normalize/prepare/prepareDirect/candidates 排序。
+- 结论：官方 context/ 组的 file-reference、file-reference-local、output-retention、session-reference 四个包的语义面全部打通并有契约测试。
+
+---
+
+## 第 54 轮（jobs + tool-jobs）
+
+新增两个包，对照官方 packages/jobs/jobs 与 packages/jobs/tool-jobs（tag dsh-v0.1.2-alpha.1）：
+
+- `dshgo/jobs`（13 测）：`LocalRegistry` 内存作业注册表。`<kind>-N` 按 kind 独立计数；启动前置检查（kind/label 非空、outputLimitBytes 正数、`no job controller serves this agent` 控制器归属检查——全局层服务所有 owner，作用域层沿 ChainOf 服务其子组合）；每 owner（或无主桶）并发上限默认 10；Run 同步返回 Hooks 后原子注册、id 不再失败；结算 first-wins（一条终态记录、释放等待者、容器化监听器通知最后进行）；read 流式消费游标 vs 终态幂等输出，终态读标记 reported；kill 先 cancel（producer cancel 错误原样传播且状态不变）→ stopping+reported，已终态 → already-finished+reported；Wait 区分超时（返回当前快照）与调用方取消（`wait aborted`），结算时有等待者 → reported；OnJobDone/OnJobsChanged/AttachController 按 scope 分层（nil=全局），监听器 panic 容器化；DisposeOwner/Dispose 收尾：reported 先标记、cancel 抛错强制 fail（`cancel threw during teardown; work may be orphaned`）、先等待 settled 再清空并通知。
+- `dshgo/toolsjobs`（10 测）：`job_output`/`job_list`/`job_kill` 三工具 + 提示词 `tool:jobs` 节（OrderToolJobs）。Config 解析校验（wait>cap 拒绝、delivery 枚举、wake 预算整数）；`PublicJob`/`publicJobValue` 剥离所有权簿记；`statusLine`、`FitWithSuffix`（省略标记提升进固定后缀）、`FitCompletionNotice`（完整句→`[notice truncated]`→compact→action 逐级退化）、`CompletionSummary`（BoundContextSummary）。工具管线：pre-execute 捕获 outputLimitBytes，FinalizeContent 将 job_output/job_kill 内容按上限截断（job_output 保持 output/status 分割，`[output truncated]`；其余 `[result truncated]`）；wait:true 归工具自有（超时返回 running 快照）；`wait` 上限钳制到 maxWaitTimeoutMs；注册时附带全局控制器，disposer 一并拆除。Canonical 值走 lossless JSON（map[string]any），caller 解析经 CallerOf seam（nil→空会话，仅无主作业）。
+
+门禁：50 包全绿，699 个行为测试（+23），`go build`/`go vet`/`gofmt` 干净。
+
+遗留：completion-delivery（wakeup/quiet 注入与 wake 预算，依赖 agent 运行时接线，作为宿主 seam 留待组合层）；guard、agent-instructions、tmux-context、spill、preset 等仍在队列。
+
+---
+
+## 第 55 轮（guard）
+
+新增 `dshgo/guard`（8 测），对照官方 packages/guard/{repeat-tool-reminder,timeout-policy}：
+
+- 循环守卫 `RepeatToolReminder`：thresholds 校验 fail-loud（nil=默认 [3,5,8]；显式空表、<2、重复值均在构造期拒绝）并排序升序；`*`-通配 include/exclude（其余元字符字面匹配，模式不命中已注册工具同样合法）；深键排序 canonicalize（属性顺序不影响链键）；post-execute 先计数再委托（deny 调用同样计入，"锤被拒调用"正是要打破的循环），提醒折叠到 accept 与 block 两种决定（additionalContexts 前插、保留下游 feedback）；thresholds[0] 温和提醒、后续阈值详细提醒（工具名/连击数/参数预览，previewCap 只约束模型可见文本）；agent/pre-step 上用户插话重置链（纯 reset，永远委托）；agent 无 key 的直连调用不观测。
+- 超时策略 `AttachTimeoutPolicy`：读取定义 timeoutMs，无预算原样委托；有预算则 context.WithTimeout 派生 deadline、换入 exec.Signal、委托后还原上游信号；仅自己的计时器触发（`DeadlineExceeded` 精确归属——嵌套外层 deadline 读作普通上游取消）时以结构化 `TOOL_TIMEOUT` 结果替换（`tool call timed out after Nms` + ToolTimeoutError/TOOL_TIMEOUT）。
+
+门禁：51 包全绿，707 个行为测试（+8），`go build`/`go vet`/`gofmt` 干净。
+
+遗留：completion-delivery（tool-jobs 的 wakeup/quiet 投递，待 agent 运行时接线）；agent-instructions、tmux-context、spill、preset、session-query、schedule、skill、hooks 仍在队列。
+
+---
+
+## 第 56 轮（tmux-context）
+
+新增 `dshgo/tmuxcontext`（6 测），对照官方 packages/context/tmux-context：
+
+- 单条 tmux/ps 组合查询：`$TMUX_PANE` 存在性、`ps -o tty=` 自身 tty、`#{pane_tty}` 与 `/dev/$self_tty` 精确匹配（继承自 tmux 祖先的环境读作“不在 tmux”，如 VS Code 集成终端），匹配才输出 8 个格式字段（session/window/pane 名与 id、active 标记、`window_layout` 面板树布局；像素尺寸按范围声明排除）。字段分隔用字面 `\t` 两字符序列（tmux 不解释 C 转义）。
+- 每回合 step===1 拉取一次；executor 拒绝被容器化（警告日志、回合照常）；非零退出/乱码行/空 pane id 一律读作无位置。
+- 稳定状态块 `renderState`（不含回合前导）变更驱动再注入；`latestInjectedState` 扫描持久 user-message 事件（plugin 名匹配）——压缩与进程重启后调度仍成立；`refreshIntervalMs` 只压制“变更后过早再注入”，状态不变依旧免注入。
+- 注入消息源 `{kind:'plugin', plugin:'tmux-context', form:'snapshot', sections:[{name,text}]}`，前插到下游决定的消息之前。
+- Go 适配：shell executor 为包内 seam（Go 侧 shell 能力尚无消费者接线）；pre-step 监听按普通顺序注册。
+
+门禁：52 包全绿，713 个行为测试（+6），`go build`/`go vet`/`gofmt` 干净。
+
+遗留：completion-delivery（tool-jobs wakeup/quiet 投递）；agent-instructions、spill、preset、session-query、schedule、skill、hooks 仍在队列。
+
+---
+
+## 第 57 轮（spill / spill-policy / spill-local）
+
+新增三包（15 测），对照官方 packages/spill：
+
+- `dshgo/spill`：溢出存储接缝（Store.SaveText）与词汇（SpillOwner/SpillSource/SaveTextSpill/SpillRef）；locator 对模型不透明、仅按 RetrievalHint 呈现；存储失败必须拒绝而非吞错，降级由策略决定。Go 适配：接缝为显式构造参数（无 ctx 服务查找）。
+- `dshgo/spillpolicy`：tools/post-execute 结果整形器。仅当 `maxInlineBytes` 配置存在才注册（nil=真 no-op）；负数在装载期 fail-loud（错误进入部署而不是每次调用变 isError）。先委托再界定（hook 替换的内容同样被界定）；accept+纯文本+超限才动；value 替换、block、非文本块、`read`（避免 read→spill→read 循环）、嵌套子调用（PTC dispatch-log 臂随 PTC 延后）全部直通。溢出全文写入 Store，替换 = head/tail 预览 + 空行 + 通知；通知字节成本按最坏省略计数（全文总量）预留进预算内，替换永不超 cap；通知自身超 cap（极小 cap/长根路径）时保留原文（已写的溢出文件为无害孤儿）。best-effort：无会话归属、无后端、保存失败一律警告并保留原文，绝不把成功调用变错误。多字节 UTF-8 边界保留。
+- `dshgo/spilllocal`：主机文件系统后端。注入式 safe 段编码（字面 `[A-Za-z0-9._-]`，其余 `~XXXX`，`~` 自转义，`.`/`..`/空串全转义——单射可逆，遍历 Neutralized）；`session-<sha256 前 12 hex>` 会话目录；6 位随机前缀 + 编码名的 0600 独占写（O_EXCL，ENOENT 重试），0700 私有根（默认根精确 `dsh-spill-<6 alnum>` 形状）。一次性启动清扫（cleanupPeriodDays 默认 30，0 显式关闭）：过期正则文件删除（mtime 严格早于 cutoff）、软链/特殊条目不跟随不删除、非本后端形状的 `session-backup`/杂散条目不触碰且阻止剪枝、POSIX 上属主+写权限+祖先链信任检查（Windows 全信任）、身份去重（POSIX dev:ino，Windows 规范小写路径）、发现的旧默认根清空后自剪、活动根不剪；清扫后台启动不阻塞可用性，Close 等待静止。检索提示逐字保留：`Use read with offset/limit, or grep this path to search within it.`
+
+门禁：55 包全绿，729 个行为测试（+15... spill 1 + policy 6 + local 8），`go build`/`go vet`/`gofmt` 干净。
+
+遗留：completion-delivery（tool-jobs wakeup/quiet 投递）；agent-instructions、preset、session-query、schedule、skill、hooks 仍在队列。

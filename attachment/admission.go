@@ -1,0 +1,97 @@
+package attachment
+
+import (
+	"encoding/base64"
+	"fmt"
+)
+
+// Store is the immutable binary attachment service. Implementations validate
+// bytes before publishing a reference.
+type Store interface {
+	// ImageLimits is the deployment-resolved image policy used by
+	// authoritative and fast-path validation.
+	ImageLimits() ImageAttachmentLimits
+	// ValidateImage validates one image without persisting it. Batch
+	// callers validate every member before saving any member.
+	ValidateImage(input SaveImageAttachment) error
+	// SaveImages validates and durably commits one ordered image batch:
+	// validation failures start no writes; storage failures return no
+	// partial references.
+	SaveImages(inputs []SaveImageAttachment) ([]ImageAttachmentRef, error)
+	// SaveImage validates and durably commits one image before its owning
+	// session event is appended.
+	SaveImage(input SaveImageAttachment) (ImageAttachmentRef, error)
+	// ReadImage reads one image and verifies that bytes still match the
+	// recorded reference.
+	ReadImage(ref ImageAttachmentRef) (StoredImageAttachment, error)
+	// ImageHostPath locates the provider-owned normalized object in the
+	// harness host filesystem; ok is false when this backend is not
+	// host-file-backed. An invalid durable reference fails loud.
+	ImageHostPath(ref ImageAttachmentRef) (path string, ok bool, err error)
+	// ReadImageRequest generates or reads one deterministic model-request
+	// version from the stored normalized image.
+	ReadImageRequest(ref ImageAttachmentRef, policy ImageRequestPolicy) (RequestImageAttachment, error)
+}
+
+// ValidateImageBatch enforces the base-store batch admission policy: count
+// and aggregate-byte limits, then media-type membership per member.
+func ValidateImageBatch(limits ImageAttachmentLimits, inputs []SaveImageAttachment) error {
+	if len(inputs) > limits.MaxImagesPerMessage {
+		return NewAttachmentError("Image batch exceeds the configured image-count limit.", CodeTooManyImages)
+	}
+	totalBytes := 0
+	for _, input := range inputs {
+		totalBytes += len(input.Data)
+	}
+	if totalBytes > limits.MaxMessageImageBytes {
+		return NewAttachmentError("Image batch exceeds the configured aggregate image-byte limit.", CodeImagesTooLarge)
+	}
+	for _, input := range inputs {
+		accepted := false
+		for _, mediaType := range limits.MediaTypes {
+			if input.MediaType == mediaType {
+				accepted = true
+				break
+			}
+		}
+		if !accepted {
+			return NewAttachmentError(fmt.Sprintf("Image type %s is not accepted by this deployment.", input.MediaType), CodeUnsupportedImgType)
+		}
+	}
+	return nil
+}
+
+// decodeBase64 decodes one upload payload while rejecting non-canonical
+// base64 forms.
+func decodeBase64(data string) ([]byte, error) {
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if err != nil || len(data) == 0 || base64.StdEncoding.EncodeToString(decoded) != data {
+		return nil, NewAttachmentError("Image upload is not canonical base64.", CodeInvalidImageBase64)
+	}
+	return decoded, nil
+}
+
+// saveInput converts one wire upload into a store input.
+func saveInput(image EncodedImageAttachment) (SaveImageAttachment, error) {
+	data, err := decodeBase64(image.Data)
+	if err != nil {
+		return SaveImageAttachment{}, err
+	}
+	return SaveImageAttachment{Data: data, MediaType: image.MediaType, Name: image.Name}, nil
+}
+
+// AdmitEncodedImages admits one wire image batch: canonical base64 on every
+// member, then batch admission — count and aggregate-byte limits, media-type
+// and per-image validation, ordered commit — to the store. This is the
+// shared entry for every endpoint accepting browser uploads.
+func AdmitEncodedImages(attachments Store, images []EncodedImageAttachment) ([]ImageAttachmentRef, error) {
+	inputs := make([]SaveImageAttachment, 0, len(images))
+	for _, image := range images {
+		input, err := saveInput(image)
+		if err != nil {
+			return nil, err
+		}
+		inputs = append(inputs, input)
+	}
+	return attachments.SaveImages(inputs)
+}

@@ -110,6 +110,26 @@ type MessageSource struct {
 	// Relay sources: the session id of the agent whose tool call produced the
 	// message (coordinator relay, subagent report, subagent settled notice).
 	SenderSessionID string `json:"senderSessionId,omitempty"`
+	// Session-reference source: the durable provenance of one aggregated
+	// cross-session snapshot (dsh-session-reference types.ts). ReferenceVersion
+	// is always 1.
+	ReferenceVersion int                     `json:"version,omitempty"`
+	References       []SessionReferenceEntry `json:"references,omitempty"`
+}
+
+// SessionReferenceEntry is one source session cited by a session-reference
+// snapshot, with its retention facts.
+type SessionReferenceEntry struct {
+	SessionID          string `json:"sessionId"`
+	Label              string `json:"label"`
+	CapturedThroughSeq *int64 `json:"capturedThroughSeq"`
+	Compacted          bool   `json:"compacted"`
+	OriginalMessages   int    `json:"originalMessages"`
+	RetainedMessages   int    `json:"retainedMessages"`
+	OmittedMessages    int    `json:"omittedMessages"`
+	OmittedBytes       int    `json:"omittedBytes"`
+	Truncated          bool   `json:"truncated"`
+	InputIndex         int    `json:"inputIndex"`
 }
 
 // Message is the one immutable message representation shared by delivery,
