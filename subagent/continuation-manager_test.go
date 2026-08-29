@@ -72,10 +72,14 @@ var testingT *testing.T
 
 // stubSnapshots satisfies the persistence seam with a configurable store.
 type stubSnapshots struct {
-	headers []session.SessionHeader
+	headers  []session.SessionHeader
+	failList error
 }
 
 func (s *stubSnapshots) ListSnapshots() ([]persistence.Snapshot, error) {
+	if s.failList != nil {
+		return nil, s.failList
+	}
 	snapshots := make([]persistence.Snapshot, 0, len(s.headers))
 	for _, header := range s.headers {
 		snapshots = append(snapshots, persistence.Snapshot{Header: header})
@@ -399,6 +403,55 @@ func TestFollowupWaitingRoutesThroughWaking(t *testing.T) {
 	manager.mu.Unlock()
 	if !accepted {
 		t.Fatal("waking followup must account the id before release")
+	}
+}
+
+func TestExplicitIDDurabilityGateFailLoud(t *testing.T) {
+	testingT = t
+	parent, _ := newManagedAgent(t, "delegator-11", "")
+	registry := agent.NewAgentRegistry(nil, nil)
+	if _, err := registry.Enter(parent, nil); err != nil {
+		t.Fatalf("enter parent: %v", err)
+	}
+	runtime := NewSubagentRuntime(RuntimeConfig{Logger: cordis.Discard{}, Events: registry.Events()})
+	if _, err := runtime.RegisterProvider(&fakeProvider{name: "spawn", continuable: true}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	failure := errors.New("disk offline")
+	manager := NewSubagentContinuationManager(ManagerDeps{Logger: cordis.Discard{}, Agents: registry, Setup: runtime.SetupRegistry()})
+	manager.SetChildRuntime(&fakeChildRuntime{}, cordis.NewRoot(cordis.Discard{}))
+	manager.SetManagerExt(ManagerExt{Host: managerHost{runtime}, Snapshots: &stubSnapshots{failList: failure}, HasApproval: true})
+	runtime.SetContinuations(manager)
+
+	// R9: an explicit id consults the persisted leg; a storage failure there
+	// rejects the start instead of silently risking a duplicate creation.
+	_, err := manager.StartContinuable(ContinuableStartSpec{
+		Provider: "spawn",
+		Label:    "Chosen",
+		ChildID:  "chosen-id",
+		Request: ContinuableDelegationRequest{
+			Prompt: []llm.ContentBlock{{Type: llm.BlockText, Text: "go"}},
+			Parent: parent,
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "disk offline") {
+		t.Fatalf("explicit-id start with failing store = %v, want storage error", err)
+	}
+	// A minted id never consults the persisted leg: the same failing store
+	// cannot break ordinary starts.
+	start, err := manager.StartContinuable(ContinuableStartSpec{
+		Provider: "spawn",
+		Label:    "Minted",
+		Request: ContinuableDelegationRequest{
+			Prompt: []llm.ContentBlock{{Type: llm.BlockText, Text: "go"}},
+			Parent: parent,
+		},
+	})
+	if err != nil {
+		t.Fatalf("minted-id start with failing store = %v", err)
+	}
+	if start.ChildID == "" {
+		t.Fatal("minted id must be non-empty")
 	}
 }
 

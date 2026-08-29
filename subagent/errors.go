@@ -40,6 +40,15 @@ const (
 	CodeActivationSetupReleaseFailed = "ACTIVATION_SETUP_RELEASE_FAILED"
 )
 
+// Subagent control-surface error codes (official control-types.ts
+// SubagentControlErrorDetailsMap plus the manager's runtime codes).
+const (
+	CodeControlProjectionsUnavailable  = "SUBAGENT_CONTROL_PROJECTIONS_UNAVAILABLE"
+	CodeControlSessionStoreUnavailable = "SUBAGENT_CONTROL_SESSION_STORE_UNAVAILABLE"
+	CodeControlQueryUnavailable        = "SUBAGENT_CONTROL_QUERY_UNAVAILABLE"
+	CodeCancelled                      = "CANCELLED"
+)
+
 // asSubagentError walks the Unwrap chain looking for a SubagentError.
 func asSubagentError(err error, target *SubagentError) bool {
 	for err != nil {

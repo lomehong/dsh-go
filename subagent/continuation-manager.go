@@ -122,11 +122,15 @@ func (m *SubagentContinuationManager) StartContinuable(spec ContinuableStartSpec
 	if err := AssertSubagentMaxDepth(spec.Request.MaxDepth); err != nil {
 		return ContinuableStart{}, err
 	}
+	// Minted ids skip the persisted leg of the collision check: the mint is
+	// a fresh random identity, so the official source only pays the
+	// O(sessions) list for caller-chosen ids, where reuse is possible.
+	explicit := spec.ChildID != ""
 	childID := spec.ChildID
 	if childID == "" {
 		childID = session.SessionID(newSubagentRunID())
 	}
-	if err := m.assertChildIDAvailable(ext, childID); err != nil {
+	if err := m.assertChildIDAvailable(ext, childID, explicit); err != nil {
 		return ContinuableStart{}, err
 	}
 	childDepth, err := ResolveChildDepth(parent, spec.Request.MaxDepth)
@@ -169,7 +173,7 @@ func (m *SubagentContinuationManager) StartContinuable(spec ContinuableStartSpec
 	meta := ChildSessionMeta(ext.Composition.Presets, parent, childDepth, lineageSeedLength)
 	var messageID llm.MessageID
 	lockErr := m.locks.Run(childID, func() error {
-		if err := m.assertChildIDAvailable(ext, childID); err != nil {
+		if err := m.assertChildIDAvailable(ext, childID, explicit); err != nil {
 			return err
 		}
 		activation, err := m.materialize(ext, materializeInputs{
@@ -203,8 +207,11 @@ func (m *SubagentContinuationManager) StartContinuable(spec ContinuableStartSpec
 }
 
 // assertChildIDAvailable rejects a child identity already owned by a live
-// Agent, a live Activation, or a persisted session.
-func (m *SubagentContinuationManager) assertChildIDAvailable(ext ManagerExt, childID session.SessionID) error {
+// Agent, a live Activation, or a persisted session. The persisted leg runs
+// only for caller-chosen ids (a minted id cannot collide); a list failure
+// there is fail loud — the official source awaits the list and lets the
+// storage error reject the start rather than risk a duplicate creation.
+func (m *SubagentContinuationManager) assertChildIDAvailable(ext ManagerExt, childID session.SessionID, explicit bool) error {
 	if m.deps.Agents.Get(childID) != nil {
 		return newSubagentError(fmt.Sprintf("subagent %q already exists", childID), CodeDuplicateChild, nil)
 	}
@@ -214,11 +221,16 @@ func (m *SubagentContinuationManager) assertChildIDAvailable(ext ManagerExt, chi
 	if live {
 		return newSubagentError(fmt.Sprintf("subagent %q already exists", childID), CodeDuplicateChild, nil)
 	}
-	if persisted, err := ext.Snapshots.ListSnapshots(); err == nil {
-		for _, snapshot := range persisted {
-			if snapshot.Header.ID == childID {
-				return newSubagentError(fmt.Sprintf("subagent %q already exists", childID), CodeDuplicateChild, nil)
-			}
+	if !explicit {
+		return nil
+	}
+	persisted, err := ext.Snapshots.ListSnapshots()
+	if err != nil {
+		return fmt.Errorf("listing persisted subagent sessions: %w", err)
+	}
+	for _, snapshot := range persisted {
+		if snapshot.Header.ID == childID {
+			return newSubagentError(fmt.Sprintf("subagent %q already exists", childID), CodeDuplicateChild, nil)
 		}
 	}
 	return nil

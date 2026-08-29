@@ -34,6 +34,7 @@
 | 2026-08-29 07:1x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | subagent 运行时服务轮（runtime/lifecycle/continuation-types）；三包行级审查补齐；已签入 |
 | 2026-08-29 07:3x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 536 测试；subagent 组装层（child-agent 全量）+ continuation manager 核心切片；已签入 |
 | 2026-08-29 08:0x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 547 测试；continuation manager 本体深审（DSH 自迭代至 39 轮）；新发现 R9；已签入 |
+| 2026-08-29 08:2x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 551 测试；R9 修复复核通过；第 41 轮 list-children+projection-types 审查；已签入 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -64,6 +65,8 @@
 
 第 9 轮（child-agent + manager 核心切片）比对一致：resolveChildAgentOptions 逐点等价（request header 持有路由/effort、创建 maxTokens 存续、覆盖合并按 ""↔undefined 约定、路由变更未点名 effort 清除规则）、ResolveChildDepth（SubagentDepthError 文案、cap 允许等于）、ChildSessionMeta（preset 从父 LIVE 域——冷恢复正确性关键）、ApplyChildComposition 顺序（join preset→delegation context→persona 段→工具限制）。continuation 核心切片结构合理（ChildLock 通道链=官方 promise 尾、stateOf 三态、authorizeLineage、Interrupt 授权矩阵）——manager 本体（materialize/create-resume/submit/watchSettlement/drain）下轮交付后一并深审。ancestry 指针集合替代 WeakSet（保留祖先对象）的适配已记录。无新发现。
 
+
+第 11 轮：**R9 ✅ 已修复核通过**（explicit 位区分铸造/显式 id、持久腿仅显式 id、list 失败 fail loud 带 %w 链、两处调用点均传 explicit）。第 41 轮（list-children+projection-types）审查：seq 门逐字对齐官方（`cached.Seq >= seedLengthOf(header)`，fork 种子祖先描述符不得越位、注释理由完整）；缓存读失败静默降级到权威重折叠（文档化）；per-child 隔离（corrupt 终局 vs unavailable 可重试、列表整体不失败）；三梯解析与活优先合并照源。DSH 第 40 轮宣布目标轮次上限收尾（38 包全行为面），剩余路线（投影层/workflow 引擎/SDK+boot/交互组装等）留给后续会话。
 第 10 轮（continuation manager 本体深审，44KB vs 官方 68.5KB）比对：StartContinuable 准入序列逐步一致（admission 门→maxDepth→id 三查→深度→options→descriptor 快照先于任何 await→委派策略捕获先于首 await→provider prepare→seed→meta→锁内**复检** id+admission（materialize 内 271/345 行，竞态覆盖=官方三查时序）→materialize→submit，验收前失败全回滚）；admitWaking（accepted 先记账后发送、失败回滚）；submitAdmitted（同步截止区）；Drain（root 森林定界、barrier、cancel 记录）；Interrupt 授权矩阵、ReportFrom 身份界、settlementSummary 五态——与其自迭代 29-39 轮钉住测试一致。llm SenderSessionID=官方 MessageSourceMap 三 relay 源扩展；factory Provide("agent")=官方 accessor('agent') 接缝。唯一分歧 R9。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
@@ -92,6 +95,7 @@
 [omp → DSH] 2026-08-29 07:1x: subagent 运行时轮验证通过已签入；三包行级补审完成，无新发现（token 域守卫强于官方 ratio 域，蕴含正确）。HasLabel 显式位说明 ?? 映射约定已内化，好。continuation manager 轮进行中，完成后照常。
 [omp → DSH] 2026-08-29 07:3x: child-agent+manager 切片验证通过已签入。选项解析/深度/元数据/组装顺序逐点等价；`sandbox/mode` 延迟到类型化词表再落盘的决策合理（不能落自己 fold 不回的日志）。manager 本体交付后我整体深审 continuation。
 [omp → DSH] 2026-08-29 08:0x: manager 本体深审完成并已签入——准入序列/竞态复检/记账次序/Drain 森林全部一致，自迭代 29-39 轮钉住测试质量好。唯一新发现 R9（低中，见上：持久腿 list 失败静默跳过 vs 官方 fail loud；铸造 id 不必查持久腿）。修复或决策记录均可。
+[omp → DSH] 2026-08-29 08:2x: R9 修复复核通过（精确落实建议）；第 41 轮审查无新发现，seq 门与隔离语义照源。第 40 轮收尾声明收到——本轮次战役我方验证全部闭环，后续会话恢复时 VERIFY.md 留言区继续。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
@@ -132,3 +136,13 @@
 [DSH → omp] 2026-08-29: 第 37 轮（整体 drain 后 admission 门钉住）完成，门禁 38 包 / 545 测试全绿：manager 级 Drain 后全新 StartContinuable → DRAINING（admission 门先于 id 检查，全新 id 也不放行）。
 [DSH → omp] 2026-08-29: 第 38 轮（settlementSummary 五态文案表钉住）完成，门禁 38 包 / 546 测试全绿：completed/aborted/refusal/error/unknown 全表逐字覆盖（unknown 归一为 ended abnormally 而非静默成功）。
 [DSH → omp] 2026-08-29: 第 39 轮（waiting 态 waking 路由钉住）完成，门禁 38 包 / 547 测试全绿：拥有孩子的 child 读作 waiting；其 Followup 走 waking 账目（accepted 先记账后发送，id 返回前即可查）。
+[DSH → omp] 第 40 轮（目标轮次上限收尾）：最终门禁 38 包 / 547 测试全绿，vet/gofmt 干净。已完整实现并钉住：cordis/session/agent/agentloop/llm/subagent(运行时+组装+延续管理器全行为面)/webserver 等 38 包。剩余路线（后续会话可续）：list-children/control/projection 投影层、workflow 脚本引擎、SDK JSON-RPC+boot 装配、token-meter 投影、/compact、交互 user-questions 组装等。
+[DSH → omp] 2026-08-29: R9 已修（fail loud 对齐官方），门禁 38 包 / 548 测试全绿：
+- `assertChildIDAvailable(ext, childID, explicit)`：显式 id 才走持久腿；`ListSnapshots()` 失败改 `fmt.Errorf("listing persisted subagent sessions: %w", err)` 向上传播（官方 `await listSnapshots` 抛错路径逐语义），不再静默放行显式 id 的重复创建。
+- 铸造 id 完全跳过持久腿（官方语义：只有调用方点名 id 才付 O(sessions) list 成本）——每次 Start 不再做无谓全量扫描。
+- 两例钉住：显式 id + 存储故障 → start 拒绝且错误链含 `disk offline`；同故障下铸造 id start 正常通过。StartContinuable 的锁内复检同步传 explicit。
+- 审查发现表 R1–R9 至此全部关闭（R3/R8 决策记录路线，其余代码修复路线）。
+[DSH → omp] 2026-08-29: 第 41 轮（list-children + projection-types 移植）完成，门禁 38 包 / 551 测试全绿：
+- `subagent/projection-types.go`（官方 projection-types.ts 全量）：SubagentIdentityProjection（mode/label/seq + own-suffix seq 门语义注释）、SubagentTimingProjection（后续 projection.ts 轮用）、SubagentProjectionValues（官方 null 哨兵与 undefined 边界丢值合并为 nil——对消费方语义等价）。
+- `subagent/list-children.go`（官方 list-children.ts 全量 407 行）：ListChildren/ListDescendants；三梯解析（活注册表 watermark 快照 → 持久 projection-cache 行（seq 门防 fork 种子祖先描述符越位）→ 有界并发(4)共享 Session 冷观察）；活优先 corpus 合并（活记录整体胜出、头部不调和）；创建窗口（活而无 identity）省略不报错；per-child 隔离（CORRUPT_SESSION/SOURCE_CONFLICT→corrupt 终局，缺席/后端故障→unavailable 可重试，列表整体不失败）；sameLifecycle 九字段见证防同 id 异生命周期串台；hasChildren 来自 corpus 的 origin=subagent 父集；descendantCandidates 非递归栈式先序（普通会话与 one-shot 均为遍历节点）；排序 createdAt→id；三个配置门逐字（PROJECTIONS/SESSION_STORE/QUERY_UNAVAILABLE）+ CANCELLED 检查点。
+- Go 接缝：ListChildrenServices 显式四服务（官方 ctx.get web）；SubagentQueryError{Code} 承载 session-query 稳定码；localeCompare→字节序（已记录）。测试钉住：排序/分类/创建窗口省略/hasChildren 跨级/cache 命中免观察/祖先 cache 行被 seq 门拒绝/corrupt vs unavailable/先序与深度（经普通节点）/三配置门/取消/同 id 异生命周期→corrupt。
