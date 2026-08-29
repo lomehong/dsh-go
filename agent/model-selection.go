@@ -66,8 +66,8 @@ func InstallModelSelection(
 			Variables: variables,
 		}
 	})
-	disposeRequest := events.OnWaterfall(EventRequest, agentScope, func(payload any, next func(any) any) any {
-		resolved, _ := next(payload).(*llm.LlmCallConfig)
+	disposeRequest := events.Request().On(agentScope, func(payload RequestPayload, next func(RequestPayload) *llm.LlmCallConfig) *llm.LlmCallConfig {
+		resolved := next(payload)
 		if resolved == nil {
 			return nil
 		}

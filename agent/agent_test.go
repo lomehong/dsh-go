@@ -285,21 +285,21 @@ func TestWaterfallAndSerialDispatch(t *testing.T) {
 	registry := NewAgentRegistry(nil, nil)
 	agent := newTestAgent(t, registry, "agent-1", nil)
 	seen := []string{}
-	registry.Events().OnWaterfall(EventRequest, nil, func(payload any, next func(any) any) any {
+	registry.Events().Request().On(nil, func(payload RequestPayload, next func(RequestPayload) *llm.LlmCallConfig) *llm.LlmCallConfig {
 		seen = append(seen, "outer")
-		result := next(payload).(*llm.LlmCallConfig)
+		result := next(payload)
 		result.Provider = "outer-provider"
 		return result
 	})
-	registry.Events().OnWaterfall(EventRequest, nil, func(payload any, next func(any) any) any {
+	registry.Events().Request().On(nil, func(payload RequestPayload, next func(RequestPayload) *llm.LlmCallConfig) *llm.LlmCallConfig {
 		seen = append(seen, "inner")
 		return next(payload)
 	})
-	base := func(payload any) any {
+	base := func(RequestPayload) *llm.LlmCallConfig {
 		seen = append(seen, "base")
 		return &llm.LlmCallConfig{Provider: "base", Model: "m"}
 	}
-	result := registry.Events().Waterfall(EventRequest, agent.Scope, nil, base).(*llm.LlmCallConfig)
+	result := registry.Events().Request().Dispatch(agent.Scope, RequestPayload{}, base)
 	if result.Provider != "outer-provider" || result.Model != "m" {
 		t.Fatalf("result = %+v", result)
 	}

@@ -156,8 +156,8 @@ func TestRequestErrorRetryContinues(t *testing.T) {
 
 	retried := make(chan struct{}, 1)
 	retry := false
-	dispose := h.events.OnWaterfall(agent.EventRequestError, nil, func(payload any, next func(any) any) any {
-		action := next(payload).(agent.RequestErrorAction)
+	dispose := h.events.RequestError().On(nil, func(payload agent.RequestErrorPayload, next func(agent.RequestErrorPayload) agent.RequestErrorAction) agent.RequestErrorAction {
+		action := next(payload)
 		if !retry {
 			retry = true
 			select {
@@ -311,7 +311,7 @@ func TestSteerJoinsNearestStepBoundary(t *testing.T) {
 	steered := make(chan struct{})
 	// After the first request completes, inject steering for the next step.
 	var fired atomic.Bool
-	dispose := h.events.OnWaterfall(agent.EventRequest, nil, func(payload any, next func(any) any) any {
+	dispose := h.events.Request().On(nil, func(payload agent.RequestPayload, next func(agent.RequestPayload) *llm.LlmCallConfig) *llm.LlmCallConfig {
 		if fired.CompareAndSwap(false, true) {
 			h.sendTarget(a, "also consider this", agent.InboxNextStep, false)
 			close(steered)

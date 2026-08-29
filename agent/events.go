@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"dshgo/cordis"
+	"dshgo/llm"
 	"dshgo/scope"
 )
 
@@ -270,4 +271,19 @@ func (w TypedWaterfall[T, R]) Dispatch(agentScope scope.ScopeKey, payload T, bas
 // and with which messages the loop enters a proposed step.
 func (b *SubjectEventBus) PreStep() TypedWaterfall[PreStepPayload, PreStepDecision] {
 	return NewTypedWaterfall[PreStepPayload, PreStepDecision](b, EventPreStep)
+}
+
+// Request is the typed accessor for the agent/request waterfall: the LLM
+// call config composition (provider/model/effort/limits) before each call.
+// The chain carries pointers; a nil answer leaves the decision to outer
+// listeners.
+func (b *SubjectEventBus) Request() TypedWaterfall[RequestPayload, *llm.LlmCallConfig] {
+	return NewTypedWaterfall[RequestPayload, *llm.LlmCallConfig](b, EventRequest)
+}
+
+// RequestError is the typed accessor for the agent/request-error waterfall:
+// one listener may claim a failed call for recovery (e.g. context-overflow
+// compaction) and demand a retry.
+func (b *SubjectEventBus) RequestError() TypedWaterfall[RequestErrorPayload, RequestErrorAction] {
+	return NewTypedWaterfall[RequestErrorPayload, RequestErrorAction](b, EventRequestError)
 }

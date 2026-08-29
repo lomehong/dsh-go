@@ -438,13 +438,9 @@ func (e *Engine) RegisterAutomaticCompaction(bus *agent.SubjectEventBus, listene
 		return nil
 	}))
 
-	disposers = append(disposers, bus.OnWaterfall(agent.EventRequestError, listenerScope, func(payload any, next func(any) any) any {
-		requestError, ok := payload.(agent.RequestErrorPayload)
-		if !ok {
-			return next(payload)
-		}
+	disposers = append(disposers, bus.RequestError().On(listenerScope, func(requestError agent.RequestErrorPayload, next func(agent.RequestErrorPayload) agent.RequestErrorAction) agent.RequestErrorAction {
 		if requestError.Failure.Code != llm.ContextWindowExceededCode || signalErr(requestError.Signal) != nil {
-			return next(payload)
+			return next(requestError)
 		}
 		view := ViewAgent(requestError.Agent)
 		e.mu.Lock()
@@ -452,14 +448,14 @@ func (e *Engine) RegisterAutomaticCompaction(bus *agent.SubjectEventBus, listene
 		e.mu.Unlock()
 		target := routedTarget(view.Session())
 		if target == nil {
-			return next(payload)
+			return next(requestError)
 		}
 		policy := ResolveTargetPolicy(e.Config, *target)
 		e.mu.Lock()
 		retries := e.overflowRetries[requestError.Agent]
 		e.mu.Unlock()
 		if retries >= policy.maxOverflowRetries {
-			return next(payload)
+			return next(requestError)
 		}
 
 		generation := view.Session().Surface().ReplaceGeneration()
@@ -484,10 +480,10 @@ func (e *Engine) RegisterAutomaticCompaction(bus *agent.SubjectEventBus, listene
 				detail = "cancellation prevents retry"
 			}
 			e.logWarn(fmt.Sprintf("context-overflow compaction failed: %s; %s", llm.ErrorChain(recoveryErr), detail))
-			return next(payload)
+			return next(requestError)
 		}
 		if signalErr(requestError.Signal) != nil || view.Session().Surface().ReplaceGeneration() <= generation {
-			return next(payload)
+			return next(requestError)
 		}
 		if result != nil {
 			e.logResult(*result, "context overflow recovery")

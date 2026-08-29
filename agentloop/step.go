@@ -115,7 +115,7 @@ func (d *ReactLoopAgent) step(signal context.Context, turn, step int64, assembly
 			if finish.Failure != nil {
 				failure = *finish.Failure
 			}
-			action := d.Events().Waterfall(agent.EventRequestError, d.Scope, agent.RequestErrorPayload{
+			action := d.Events().RequestError().Dispatch(d.Scope, agent.RequestErrorPayload{
 				Agent:       d.Agent,
 				Turn:        turn,
 				Step:        step,
@@ -123,9 +123,9 @@ func (d *ReactLoopAgent) step(signal context.Context, turn, step int64, assembly
 				Failure:     failure,
 				RetryPolicy: preparedRetryPolicy(preparedCall),
 				Signal:      signal,
-			}, func(payload any) any {
+			}, func(agent.RequestErrorPayload) agent.RequestErrorAction {
 				return agent.RequestErrorAction{}
-			}).(agent.RequestErrorAction)
+			})
 			if err := signal.Err(); err != nil {
 				return stepEndReason{}, err
 			}
@@ -243,9 +243,9 @@ func (d *ReactLoopAgent) buildRequest(
 		}
 	}
 	payload := agent.RequestPayload{Agent: d.Agent, Turn: turn, Step: step, Signal: signal}
-	proposed := d.Events().Waterfall(agent.EventRequest, d.Scope, payload, func(any) any {
-		return seedConfig
-	}).(llm.LlmCallConfig)
+	proposed := *d.Events().Request().Dispatch(d.Scope, payload, func(agent.RequestPayload) *llm.LlmCallConfig {
+		return &seedConfig
+	})
 	if err := signal.Err(); err != nil {
 		return llm.GenerateOptions{}, nil, err
 	}

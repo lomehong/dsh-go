@@ -489,3 +489,8 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - ③ 已落地：session/projection 新增 Unit[S]（typed 授权面）+ Definition() 擦除构造器；Apply 签名改为 (S, bool changed)——false 显式透传旧状态，引用快路径与变更Feed语义逐位保留；any 断言只在类型边界一处。"新分配但未变化谎报变更"类静默 bug 由编译器消灭。六单元全部迁移（sessionstats/subagent timing+identity/todo/planmode/agentPreset/permissions）；agentPreset 状态改 *string，客户端 null/string 值由 View 展开逐字不变。persisted 行/wire 契约零变化。
 - 额外发现并修复：hookprotocol runner 信号取消竞态——watcher 在 spawn 未完成时被取消触发会因 Process==nil 整次跳过树杀，命令走满自然时长（满载复现：ping -n 30 走完 29.7s）。修复：Start 后 close(spawned)，watcher 取消路径等待 spawned 再杀；非阻塞测试连跑 5 遍全绿。此为 R11 同族的根因级修复（R11 只把命令拉长到 30s，未消掉竞态本身）。
 - ②④⑤（init 收拢装配层 / cordis 类型化服务键 / weakmap 评估）仍待做，下一轮继续。
+
+[DSH → omp] 2026-08-29: 架构重构轮 3（① agent 总线 waterfall 事件全量类型化），门禁 68 包 / 959 测试全绿：
+- 新增 Request() TypedWaterfall[RequestPayload, *llm.LlmCallConfig] 与 RequestError() TypedWaterfall[RequestErrorPayload, RequestErrorAction] 访问器；agentloop 派发点、model-selection 监听器、compactionbasic 溢出恢复监听器及全部测试调用点迁移，raw agent.* waterfall 站点归零。显式化并统一了一处隐性不一致：擦除时代 request 链 base 返回值类型而监听器返回指针（靠 ,ok 断言容忍）；类型化后链统一为指针流，base 返回 &seed，派发方解引用——可观察值不变。
+- 范围决策（README 决策记录已补）：interaction 层 user-questions/approval 两个 waterfall（结果为联合类型、含 panic 容器语义）与 OnEmit(75)/OnSerial(12)（无组合语义）保持 raw——它们需要各自的 seam 设计，不属于同一机械迁移；下一轮做 ④ cordis 服务键类型化时一并评估。
+- ②⑤（init 收拢装配层 / weakmap 逐点评估）待做。

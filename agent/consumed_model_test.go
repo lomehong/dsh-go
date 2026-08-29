@@ -150,9 +150,9 @@ func TestModelSelectionCouplesAssemblyAndRequest(t *testing.T) {
 	}
 
 	// The request waterfall applies the assembled selection.
-	resolved := registry.Events().Waterfall(EventRequest, agent.Scope, nil, func(any) any {
+	resolved := registry.Events().Request().Dispatch(agent.Scope, RequestPayload{}, func(RequestPayload) *llm.LlmCallConfig {
 		return &llm.LlmCallConfig{Provider: "other", Model: "other-1", ReasoningEffort: "low"}
-	}).(*llm.LlmCallConfig)
+	})
 	if resolved.Provider != "deepseek" || resolved.Model != "dsh-1" || resolved.ReasoningEffort != "high" {
 		t.Fatalf("resolved = %+v", resolved)
 	}
@@ -162,9 +162,9 @@ func TestModelSelectionCouplesAssemblyAndRequest(t *testing.T) {
 	if _, err := prompt.Assemble(agent.AssembleContextFor(nil)); err != nil {
 		t.Fatalf("Assemble 2: %v", err)
 	}
-	resolved = registry.Events().Waterfall(EventRequest, agent.Scope, nil, func(any) any {
+	resolved = registry.Events().Request().Dispatch(agent.Scope, RequestPayload{}, func(RequestPayload) *llm.LlmCallConfig {
 		return &llm.LlmCallConfig{Provider: "other", Model: "other-1", ReasoningEffort: "low"}
-	}).(*llm.LlmCallConfig)
+	})
 	if resolved.ReasoningEffort != "" {
 		t.Fatalf("absent effort must clear inherited: %+v", resolved)
 	}
@@ -190,9 +190,9 @@ func TestModelSelectionNilPassthroughAndDisposal(t *testing.T) {
 	if _, ok := assembly.Variables.Get("provider"); ok {
 		t.Fatal("no selection must inject no variables")
 	}
-	resolved := registry.Events().Waterfall(EventRequest, agent.Scope, nil, func(any) any {
+	resolved := registry.Events().Request().Dispatch(agent.Scope, RequestPayload{}, func(RequestPayload) *llm.LlmCallConfig {
 		return &llm.LlmCallConfig{Provider: "other", Model: "other-1"}
-	}).(*llm.LlmCallConfig)
+	})
 	if resolved.Provider != "other" {
 		t.Fatalf("passthrough = %+v", resolved)
 	}
@@ -206,9 +206,9 @@ func TestModelSelectionNilPassthroughAndDisposal(t *testing.T) {
 	if _, ok := assembly.Variables.Get("provider"); ok {
 		t.Fatal("disposal must remove the assembly listener")
 	}
-	resolved = registry.Events().Waterfall(EventRequest, agent.Scope, nil, func(any) any {
+	resolved = registry.Events().Request().Dispatch(agent.Scope, RequestPayload{}, func(RequestPayload) *llm.LlmCallConfig {
 		return &llm.LlmCallConfig{Provider: "other", Model: "other-1"}
-	}).(*llm.LlmCallConfig)
+	})
 	if resolved.Provider != "other" {
 		t.Fatal("disposal must remove the request listener")
 	}
@@ -232,9 +232,9 @@ func TestModelSelectionConcurrentSwitchTakesEffectNextStep(t *testing.T) {
 	// ...and the request is routed with A even though the switch landed
 	// before the request dispatched.
 	selection.Current = &ModelSelection{Provider: "b", Model: "b-1"}
-	resolved := registry.Events().Waterfall(EventRequest, agent.Scope, nil, func(any) any {
+	resolved := registry.Events().Request().Dispatch(agent.Scope, RequestPayload{}, func(RequestPayload) *llm.LlmCallConfig {
 		return &llm.LlmCallConfig{}
-	}).(*llm.LlmCallConfig)
+	})
 	if resolved.Provider != "a" || resolved.Model != "a-1" {
 		t.Fatalf("step 1 resolved = %+v", resolved)
 	}
@@ -242,9 +242,9 @@ func TestModelSelectionConcurrentSwitchTakesEffectNextStep(t *testing.T) {
 	if _, err := prompt.Assemble(agent.AssembleContextFor(nil)); err != nil {
 		t.Fatalf("Assemble 2: %v", err)
 	}
-	resolved = registry.Events().Waterfall(EventRequest, agent.Scope, nil, func(any) any {
+	resolved = registry.Events().Request().Dispatch(agent.Scope, RequestPayload{}, func(RequestPayload) *llm.LlmCallConfig {
 		return &llm.LlmCallConfig{}
-	}).(*llm.LlmCallConfig)
+	})
 	if resolved.Provider != "b" || resolved.Model != "b-1" {
 		t.Fatalf("step 2 resolved = %+v", resolved)
 	}
