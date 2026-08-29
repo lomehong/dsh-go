@@ -563,3 +563,11 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 实跑修正两处：锚点语义（packageDirFromAnchor 从 anchor 父目录起走 node_modules，锚应传树内文件路径——与 ResolveBundleDir 第二锚点同形）；默认 profile 名改 headless（ProfileTemplates 无 "base" 键——acp/web/headless/sdk/sdk-minimal 五模板）。
 - README 路线图更新：关键路径改述为"目录与顶层组合均已落地，余量在插件覆盖"（17/86）；patchReload watch/live 后半轮与插件管理 CLI 如实列入待续。
 - 下一轮：spawn/fork-in-process provider 移植（subagent 运行时能真正产子代理）或 catalog 插件批量补线。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 6（① spawn/fork-in-process provider 移植），门禁 69 包 / 969 测试全绿：
+- subagent/inprocess.go：官方 in-process-driver + spawn/fork 双插件合并移植。StartInProcessRun 一次性子代理全生命周期：AssertSubagentMaxDepth→深度解析→策略捕获（信号前同步）→CreateAgent（setup 期：AppendDelegatedPolicyOverrides+描述符+ApplyChildComposition）→drivePublishedRun（信号 goroutine→parent 取消；Followup+WhenIdle 一轮驱动；readResult 从 activation boundary 后事件解算 StopReason+FinalAssistantOutput）→幂等 Dispose（sync.Once）。
+- stop 词汇映射逐字对齐官方：completed/max-tokens/aborted/blocked→refusal/error+interrupted+未记账→error（取消无记账轮不解为成功）。fork 以父 completed-turn 前缀（至最后 turn/end 含）为 seed，InheritsParentContext=true；spawn 零种子。
+- 能力诚实原则：outputSchema 能力位置 false（structured.ts 132 行结构化捕获轮未移植，不虚报能力）；catalog 集成测试断言 fork 不得虚报 outputSchema。
+- Go 适配差异（README 已记）：描述符改在发布前 setup 期挂载（与 delegation 覆盖同窗，先于 turn/start），官方在首个 pre-step enter 后——消费者只读描述符存在性无顺序依赖。
+- catalog 19/86：spawn/fork 条目 Inject 完整依赖闭包、RegisterProvider 注册、providerName 可覆写；集成测试 19 条目装配+GetProvider 双验。
+- 下一轮：catalog 批量补线（tools 家族/tool-fs 等轻插件）或 compaction-pruner+/compact。

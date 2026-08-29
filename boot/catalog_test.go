@@ -7,6 +7,7 @@ import (
 
 	"dshgo/cordis"
 	"dshgo/cordis/loader"
+	"dshgo/subagent"
 )
 
 func TestCatalogResolvesOfficialNames(t *testing.T) {
@@ -64,6 +65,8 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		{ID: "system-prompt", Name: "@deepseek-ai/dsh-system-prompt"},
 		{ID: "agent-loop", Name: "@deepseek-ai/dsh-agent-loop"},
 		{ID: "subagent", Name: "@deepseek-ai/dsh-subagent"},
+		{ID: "spawn", Name: "@deepseek-ai/dsh-subagent-spawn-in-process"},
+		{ID: "fork", Name: "@deepseek-ai/dsh-subagent-fork-in-process"},
 	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
 	if err != nil {
 		t.Fatalf("assemble: %v", err)
@@ -78,6 +81,46 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		if ctx.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
 		}
+	}
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+func TestCatalogRegistersInProcessProviders(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	runtimeSpec := func(name string) loader.Entry {
+		return loader.Entry{ID: name, Name: "@deepseek-ai/dsh-" + name}
+	}
+	entries := []loader.Entry{}
+	for _, name := range []string{
+		"tools", "commands", "settings-file", "credentials-local", "web",
+		"session", "session-projection", "agent", "llm", "llm-deepseek",
+		"session-persistence-jsonl", "user-questions", "user-approval",
+		"permission-presets", "system-prompt", "agent-loop", "subagent",
+	} {
+		entries = append(entries, runtimeSpec(name))
+	}
+	entries = append(entries,
+		loader.Entry{ID: "spawn", Name: "@deepseek-ai/dsh-subagent-spawn-in-process"},
+		loader.Entry{ID: "fork", Name: "@deepseek-ai/dsh-subagent-fork-in-process"},
+	)
+	app, err := Assemble(root, entries, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	runtime := root.Get(ServiceSubagentRuntime).(*subagent.SubagentRuntime)
+	spawn, ok := runtime.GetProvider("spawn")
+	if !ok || spawn.Name() != "spawn" {
+		t.Fatalf("spawn provider missing (got %v, %v)", spawn, ok)
+	}
+	fork, ok := runtime.GetProvider("fork")
+	if !ok || !fork.InheritsParentContext() {
+		t.Fatal("fork provider missing or wrong context contract")
+	}
+	if fork.Capabilities().OutputSchema {
+		t.Fatal("fork must not advertise outputSchema before the structured round")
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)

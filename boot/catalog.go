@@ -470,4 +470,48 @@ var builders = map[string]pluginBuilder{
 			},
 		}
 	},
+
+	// The in-process spawn provider: each child is a fresh child agent on
+	// the same process (own session, own system prompt, zero parent
+	// context). Config.providerName overrides the registry name (spawn).
+	"@deepseek-ai/dsh-subagent-spawn-in-process": inProcessProviderSpec("spawn"),
+	// The in-process fork provider: the child is seeded with the parent's
+	// completed-turn prefix. Config.providerName overrides fork.
+	"@deepseek-ai/dsh-subagent-fork-in-process": inProcessProviderSpec("fork"),
+}
+
+// inProcessProviderSpec builds one in-process provider's spec: shared
+// composition, configurable registry name, registration on the runtime.
+func inProcessProviderSpec(defaultName string) pluginBuilder {
+	return func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{
+				ServiceSubagentRuntime, ServiceAgentLoop,
+				ServiceSystemPrompt, ServiceTools,
+				ServicePermissionPresets, ServiceUserApproval,
+			},
+			Apply: func(ctx *cordis.Context, config any) error {
+				name := defaultName
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["providerName"].(string); ok && raw != "" {
+						name = raw
+					}
+				}
+				runtime := ctx.Get(ServiceSubagentRuntime).(*subagent.SubagentRuntime)
+				provider, err := subagent.NewInProcessProvider(name, defaultName, subagent.InProcessProviderDeps{
+					Children:    ctx.Get(ServiceAgentLoop).(subagent.ChildRuntime),
+					Owner:       ctx,
+					Sandbox:     ctx.Get(ServicePermissionPresets).(subagent.SandboxOverrideService),
+					HasApproval: true,
+					Prompt:      ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt),
+					Registry:    ctx.Get(ServiceTools).(*tools.ToolRuntime),
+				})
+				if err != nil {
+					return err
+				}
+				_, err = runtime.RegisterProvider(provider)
+				return err
+			},
+		}
+	}
 }
