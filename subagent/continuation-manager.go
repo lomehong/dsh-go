@@ -379,29 +379,29 @@ func (m *SubagentContinuationManager) materializeTracked(ext ManagerExt, inputs 
 // watchInbox registers the accepted-id drain listeners on the child's own
 // bus: every accepted id leaves the inbox exactly once, through claim or
 // discard, and clearing it there is what lets stateOf distinguish a truly
-// quiet agent from one whose accepted turn has not been admitted yet.
+// quiet agent from one whose accepted turn has not been admitted yet. The
+// two events carry different payload types (claimed rides a turn), so the
+// typed accessors force the split the erased decoder used to paper over —
+// it only matched the discard shape, silently dropping the claim drain.
 func (m *SubagentContinuationManager) watchInbox(activation *Activation) {
-	onLeave := func(payload any) error {
-		if message, ok := inboxMessageOf(payload); ok {
-			m.mu.Lock()
-			_, wasAccepted := activation.accepted[message.ID]
-			delete(activation.accepted, message.ID)
-			m.mu.Unlock()
-			if wasAccepted {
-				m.wake(activation)
-			}
+	leave := func(message llm.Message) {
+		m.mu.Lock()
+		_, wasAccepted := activation.accepted[message.ID]
+		delete(activation.accepted, message.ID)
+		m.mu.Unlock()
+		if wasAccepted {
+			m.wake(activation)
 		}
+	}
+	events := activation.Handle.Agent.Events()
+	events.InboxClaimed().On(nil, func(claimed agent.AgentClaimedPayload) error {
+		leave(claimed.Message)
 		return nil
-	}
-	activation.Handle.Agent.Events().OnEmit(agent.EventInboxClaimed, nil, onLeave)
-	activation.Handle.Agent.Events().OnEmit(agent.EventInboxDiscarded, nil, onLeave)
-}
-
-func inboxMessageOf(payload any) (llm.Message, bool) {
-	if data, ok := payload.(agent.AgentMessagePayload); ok {
-		return data.Message, true
-	}
-	return llm.Message{}, false
+	})
+	events.InboxDiscarded().On(nil, func(discarded agent.AgentMessagePayload) error {
+		leave(discarded.Message)
+		return nil
+	})
 }
 
 func ancestrySet(self *agent.Agent, lineage []*agent.Agent) map[*agent.Agent]struct{} {

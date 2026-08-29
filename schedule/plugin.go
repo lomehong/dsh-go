@@ -57,9 +57,8 @@ func Register(options Options) (func(), error) {
 	stopping := false
 	runtimes := map[*agent.Agent]func(){}
 
-	createdDisposer := options.Agents.Events().OnEmit(agent.EventAgentCreated, nil, func(payload any) error {
-		created, ok := payload.(agent.AgentLifecyclePayload)
-		if !ok || created.Agent == nil {
+	createdDisposer := options.Agents.Events().Created().On(nil, func(created agent.AgentLifecyclePayload) error {
+		if created.Agent == nil {
 			return nil
 		}
 		ag := created.Agent
@@ -83,9 +82,8 @@ func Register(options Options) (func(), error) {
 		if err != nil {
 			return err
 		}
-		stopStatus := options.Agents.Events().OnEmit(agent.EventAgentStatus, nil, func(statusPayload any) error {
-			status, ok := statusPayload.(agent.AgentStatusPayload)
-			if !ok || status.Agent != ag || status.Status != agent.AgentIdle {
+		stopStatus := options.Agents.Events().Status().On(nil, func(status agent.AgentStatusPayload) error {
+			if status.Agent != ag || status.Status != agent.AgentIdle {
 				return nil
 			}
 			if sessionHasScheduleChange(ag.Session) {

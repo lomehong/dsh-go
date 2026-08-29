@@ -287,3 +287,78 @@ func (b *SubjectEventBus) Request() TypedWaterfall[RequestPayload, *llm.LlmCallC
 func (b *SubjectEventBus) RequestError() TypedWaterfall[RequestErrorPayload, RequestErrorAction] {
 	return NewTypedWaterfall[RequestErrorPayload, RequestErrorAction](b, EventRequestError)
 }
+
+// TypedEmit binds one emit event name to its payload type. It drives the
+// same any-erased listener table as the raw OnEmit; the payload assertion
+// sits at this boundary, where construction guarantees it holds. Register
+// and dispatch one event name through exactly one accessor.
+type TypedEmit[T any] struct {
+	bus   *SubjectEventBus
+	event string
+}
+
+// NewTypedEmit binds an emit event name to its payload type.
+func NewTypedEmit[T any](bus *SubjectEventBus, event string) TypedEmit[T] {
+	return TypedEmit[T]{bus: bus, event: event}
+}
+
+// On registers a fire-and-forget listener; the disposer removes it.
+func (e TypedEmit[T]) On(listenerScope scope.ScopeKey, fn func(payload T) error) func() {
+	return e.bus.OnEmit(e.event, listenerScope, func(payload any) error {
+		return fn(payload.(T))
+	})
+}
+
+// TypedSerial binds one serial event name to its payload type and the type
+// of its bail value. Same table, same boundary rule as TypedEmit.
+type TypedSerial[T any, V any] struct {
+	bus   *SubjectEventBus
+	event string
+}
+
+// NewTypedSerial binds a serial event name to its payload and bail types.
+func NewTypedSerial[T any, V any](bus *SubjectEventBus, event string) TypedSerial[T, V] {
+	return TypedSerial[T, V]{bus: bus, event: event}
+}
+
+// On registers an awaited in-order listener: returning ok=true bails the
+// chain with value.
+func (s TypedSerial[T, V]) On(listenerScope scope.ScopeKey, fn func(payload T) (V, bool)) func() {
+	return s.bus.OnSerial(s.event, listenerScope, func(payload any) (any, bool) {
+		value, ok := fn(payload.(T))
+		return value, ok
+	})
+}
+
+// Created is the typed accessor for the agent/created veto emit: registry
+// entry rejects the first failing listener.
+func (b *SubjectEventBus) Created() TypedEmit[AgentLifecyclePayload] {
+	return NewTypedEmit[AgentLifecyclePayload](b, EventAgentCreated)
+}
+
+// Status is the typed accessor for the agent/status emit.
+func (b *SubjectEventBus) Status() TypedEmit[AgentStatusPayload] {
+	return NewTypedEmit[AgentStatusPayload](b, EventAgentStatus)
+}
+
+// SessionStart is the typed accessor for the agent/session-start emit.
+func (b *SubjectEventBus) SessionStart() TypedEmit[AgentSessionStartPayload] {
+	return NewTypedEmit[AgentSessionStartPayload](b, EventAgentSessionStart)
+}
+
+// InboxClaimed is the typed accessor for the agent/inbox/claimed emit.
+func (b *SubjectEventBus) InboxClaimed() TypedEmit[AgentClaimedPayload] {
+	return NewTypedEmit[AgentClaimedPayload](b, EventInboxClaimed)
+}
+
+// InboxDiscarded is the typed accessor for the agent/inbox/discarded emit.
+func (b *SubjectEventBus) InboxDiscarded() TypedEmit[AgentMessagePayload] {
+	return NewTypedEmit[AgentMessagePayload](b, EventInboxDiscarded)
+}
+
+// TurnStopping is the typed accessor for the agent/turn-stopping serial:
+// an in-order blocking boundary; production listeners steer through the
+// inbox and never bail, so the bail value stays any.
+func (b *SubjectEventBus) TurnStopping() TypedSerial[TurnStoppingPayload, any] {
+	return NewTypedSerial[TurnStoppingPayload, any](b, EventTurnStopping)
+}

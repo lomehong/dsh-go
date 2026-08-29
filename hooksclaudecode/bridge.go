@@ -179,9 +179,8 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 
 	// SessionStart injects context when its detached hook resolves; a slow
 	// hook may miss the first request.
-	disposers = append(disposers, agents.Events().OnEmit(agent.EventAgentSessionStart, nil, func(payload any) error {
-		start, ok := payload.(agent.AgentSessionStartPayload)
-		if !ok || start.Agent == nil {
+	disposers = append(disposers, agents.Events().SessionStart().On(nil, func(start agent.AgentSessionStartPayload) error {
+		if start.Agent == nil {
 			return nil
 		}
 		agentRef := start.Agent
@@ -287,9 +286,8 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 
 	// A blocking Stop hook steers at the stopping boundary, which makes the
 	// machine observe pending input and run another step.
-	disposers = append(disposers, agents.Events().OnSerial(agent.EventTurnStopping, nil, func(payload any) (any, bool) {
-		stopping, ok := payload.(agent.TurnStoppingPayload)
-		if !ok || stopping.Agent == nil {
+	disposers = append(disposers, agents.Events().TurnStopping().On(nil, func(stopping agent.TurnStoppingPayload) (any, bool) {
+		if stopping.Agent == nil {
 			return nil, false
 		}
 		merged, runErr := b.runPoint(pointStop, "", b.stopPayload(stopping.Agent), runPointOptions{agent: stopping.Agent, turn: stopping.Turn, hasTurn: true, signal: stopping.Signal})
@@ -311,11 +309,7 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 	// Both use the live child's workspace and the generic agent-type
 	// matcher subject.
 	{
-		disposers = append(disposers, agents.Events().OnEmit(subagent.EventSubagentStart, nil, func(payload any) error {
-			info, ok := payload.(subagent.SubagentRunInfo)
-			if !ok {
-				return nil
-			}
+		disposers = append(disposers, subagent.Starts(agents.Events()).On(nil, func(info subagent.SubagentRunInfo) error {
 			child := resolveChild(agents, info.ID)
 			if child != nil {
 				b.subagentChildrenMu.Lock()
@@ -334,11 +328,7 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 			})
 			return nil
 		}))
-		disposers = append(disposers, agents.Events().OnEmit(subagent.EventSubagentEnd, nil, func(payload any) error {
-			info, ok := payload.(subagent.SubagentRunEndInfo)
-			if !ok {
-				return nil
-			}
+		disposers = append(disposers, subagent.Ends(agents.Events()).On(nil, func(info subagent.SubagentRunEndInfo) error {
 			b.subagentChildrenMu.Lock()
 			child := b.subagentChildren[info.RunID]
 			delete(b.subagentChildren, info.RunID)

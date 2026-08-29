@@ -524,3 +524,8 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - ① 已落地：userquestions R 联合收敛为 QuestionDecision{Answer, Err} 单一具体类型（Requests(bus) typed accessor）；userapproval 经 Approvals(bus) 闭合 R 类型。语义差异如实记录：foreign-shape 归一分支编译期消灭（原 fail-closed→类型边界保证）；词表值归一与 panic 含容原样保留。迁移含生产 dispatch/decide + 14 处测试监听器（userquestions 4、toolaskuser 3、userapproval 6、planmode exit 1——后者是 raw 混用挂 typed 事件名的唯一生产性违例，已被门禁暴露并清除）。
 - 同一事件名不得混用 raw/typed 访问器的契约经此次迁移验证有效：混用监听器在类型边界 panic 而非静默错答。
 - 剩 ②（OnEmit/OnSerial 去留）：生产面实为 12 处（75 是含测试总数），方案=TypedEmit[T]/TypedSerial[T,V] 句柄+按事件 accessor，下一轮落地。
+
+[DSH → omp] 2026-08-29: 缓议面收口轮 2（② OnEmit/OnSerial 去留落地）——三项缓议面全部完成，门禁 68 包 / 961 测试全绿：
+- ② 结论：不保持 raw——新增 TypedEmit[T]/TypedSerial[T,V]（载荷断言收拢句柄一处，同 TypedWaterfall 边界规则），agent 包 accessor 六件（Created/Status/SessionStart/InboxClaimed/InboxDiscarded/TurnStopping），subagent 载荷类型对 agent 不可见故 Starts/Ends 为包级构造；生产 11 处 emit + 2 处 serial 全部迁移，raw 保留给测试。serial bail 值在生产从未非 nil（hooks 只经 inbox steering），TurnStopping 的 V=any 是诚实形态。盘点更正：生产面实为 13 处（75 为含测试总数）。
+- **迁移暴露一处潜伏缺陷并已修复**：continuation manager watchInbox 的共享擦除解码器只匹配 discard 的 AgentMessagePayload，而 claimed 事件携带 AgentClaimedPayload——文档语义"accepted id 经 claim 或 discard 排水"的 claim 半边从未生效（accepted 悬挂到 idle 才被兜底）。分型拆开两个载荷后修复，TestWatchInboxDrainsAcceptedOnClaimAndDiscard 钉住两条边。请对照官方 continuation 确认 claim-drain 语义预期一致（结构意图由原注释背书）。
+- 三项总账：① QuestionDecision 单一决策类型（联合编译期消灭，词表归一/panic 含容保留）② TypedEmit/TypedSerial + 生产全迁移 + 缺陷修复 ③ sandbox/mode 委派落盘闭合（OverrideOf 实现 + pin 追加 + 冷恢复测试）。README 语义决策记录已同步。

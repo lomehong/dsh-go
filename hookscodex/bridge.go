@@ -153,9 +153,8 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 
 	// SessionStart injects plain stdout when its detached hook resolves; a
 	// slow hook may miss the first request.
-	disposers = append(disposers, agents.Events().OnEmit(agent.EventAgentSessionStart, nil, func(payload any) error {
-		start, ok := payload.(agent.AgentSessionStartPayload)
-		if !ok || start.Agent == nil {
+	disposers = append(disposers, agents.Events().SessionStart().On(nil, func(start agent.AgentSessionStartPayload) error {
+		if start.Agent == nil {
 			return nil
 		}
 		agentRef := start.Agent
@@ -258,9 +257,8 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 
 	// A blocking Stop hook steers at the stopping boundary, which makes the
 	// machine observe pending input and run another step.
-	disposers = append(disposers, agents.Events().OnSerial(agent.EventTurnStopping, nil, func(payload any) (any, bool) {
-		stopping, ok := payload.(agent.TurnStoppingPayload)
-		if !ok || stopping.Agent == nil {
+	disposers = append(disposers, agents.Events().TurnStopping().On(nil, func(stopping agent.TurnStoppingPayload) (any, bool) {
+		if stopping.Agent == nil {
 			return nil, false
 		}
 		stopPayload := b.turnBase(pointStop, stopping.Agent, stopping.Turn)

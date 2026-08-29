@@ -146,9 +146,8 @@ func (d *CompletionDeliverer) refillOnClaims(live *agent.Agent) {
 	if _, ok := d.claimed[live]; ok {
 		return
 	}
-	detach := live.Events().OnEmit(agent.EventInboxClaimed, live.Scope, func(payload any) error {
-		claimed, ok := payload.(agent.AgentClaimedPayload)
-		if !ok || claimed.Message.Source.Kind != llm.SourceUser {
+	detach := live.Events().InboxClaimed().On(live.Scope, func(claimed agent.AgentClaimedPayload) error {
+		if claimed.Message.Source.Kind != llm.SourceUser {
 			return nil
 		}
 		d.mu.Lock()

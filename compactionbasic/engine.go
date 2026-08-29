@@ -427,9 +427,8 @@ func (e *Engine) RegisterAutomaticCompaction(bus *agent.SubjectEventBus, listene
 		return next(preStep)
 	}))
 
-	disposers = append(disposers, bus.OnEmit(agent.EventAgentStatus, listenerScope, func(payload any) error {
-		status, ok := payload.(agent.AgentStatusPayload)
-		if !ok || status.Status != agent.AgentIdle {
+	disposers = append(disposers, bus.Status().On(listenerScope, func(status agent.AgentStatusPayload) error {
+		if status.Status != agent.AgentIdle {
 			return nil
 		}
 		e.mu.Lock()

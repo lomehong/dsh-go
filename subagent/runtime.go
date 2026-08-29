@@ -175,6 +175,19 @@ const (
 	EventSubagentEnd = "subagent/end"
 )
 
+// Starts is the typed accessor for the subagent/start emit event. The
+// subagent payload types are invisible to the agent package, so this
+// accessor lives here as a package-level constructor (same boundary rule:
+// register and dispatch one event name through exactly one accessor).
+func Starts(bus *agent.SubjectEventBus) agent.TypedEmit[SubagentRunInfo] {
+	return agent.NewTypedEmit[SubagentRunInfo](bus, EventSubagentStart)
+}
+
+// Ends is the typed accessor for the subagent/end emit event.
+func Ends(bus *agent.SubjectEventBus) agent.TypedEmit[SubagentRunEndInfo] {
+	return agent.NewTypedEmit[SubagentRunEndInfo](bus, EventSubagentEnd)
+}
+
 // GetProvider looks a provider up by name.
 func (r *SubagentRuntime) GetProvider(name string) (SubagentProvider, bool) {
 	r.mu.Lock()

@@ -736,3 +736,39 @@ func TestDrainDescendantsStopsScopedForest(t *testing.T) {
 		t.Fatalf("unrelated tree must stay admissible: %v", err)
 	}
 }
+
+// Regression: the erased decoder in watchInbox only matched the discard
+// payload shape, so an accepted followup was never drained when the child's
+// driver claimed it — the claim half of "claim or discard" was dead. The
+// typed accessors force the payload split; this test pins both edges.
+func TestWatchInboxDrainsAcceptedOnClaimAndDiscard(t *testing.T) {
+	child, _ := newManagedAgent(t, "drain-child", "")
+	manager := NewSubagentContinuationManager(ManagerDeps{Logger: cordis.Discard{}})
+	activation := &Activation{
+		ChildID:  child.ID,
+		Handle:   agent.AgentHandle{Agent: child},
+		accepted: map[llm.MessageID]struct{}{"m1": {}},
+	}
+	manager.watchInbox(activation)
+
+	child.Events().Emit(agent.EventInboxClaimed, nil, agent.AgentClaimedPayload{
+		Agent: child, Message: llm.Message{ID: "m1"}, Turn: 3,
+	})
+	manager.mu.Lock()
+	_, claimed := activation.accepted["m1"]
+	manager.mu.Unlock()
+	if claimed {
+		t.Fatal("claim must drain the accepted id")
+	}
+
+	activation.accepted["m2"] = struct{}{}
+	child.Events().Emit(agent.EventInboxDiscarded, nil, agent.AgentMessagePayload{
+		Agent: child, Message: llm.Message{ID: "m2"},
+	})
+	manager.mu.Lock()
+	_, discarded := activation.accepted["m2"]
+	manager.mu.Unlock()
+	if discarded {
+		t.Fatal("discard must drain the accepted id")
+	}
+}

@@ -179,11 +179,7 @@ func (s *Server) subscribe() {
 			Event:     encoded,
 		})
 	})
-	s.deps.Registry.Events().OnEmit(agent.EventAgentStatus, nil, func(payload any) error {
-		status, ok := payload.(agent.AgentStatusPayload)
-		if !ok {
-			return nil
-		}
+	s.deps.Registry.Events().Status().On(nil, func(status agent.AgentStatusPayload) error {
 		s.transport.Notify(protocol.NotifySessionStatus, protocol.SessionStatusNotification{
 			SessionID: string(status.Agent.Session.ID()),
 			Status:    string(status.Status),
@@ -202,11 +198,7 @@ func (s *Server) subscribe() {
 		return nil
 	})
 	if s.deps.SubagentEvents != nil {
-		s.deps.SubagentEvents.OnEmit(subagent.EventSubagentEnd, nil, func(payload any) error {
-			info, ok := payload.(subagent.SubagentRunEndInfo)
-			if !ok {
-				return nil
-			}
+		subagent.Ends(s.deps.SubagentEvents).On(nil, func(info subagent.SubagentRunEndInfo) error {
 			// This protocol reports only in-process child sessions. The
 			// service snapshots the provider name and local flag through
 			// child disposal; matching ids or parent lineage alone never
