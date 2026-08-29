@@ -592,3 +592,10 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 契约发现：tools.DefineTool 的 Output.Schema 为必填（nil 即 author error）——三工具补显式输出 schema（messageId/interrupted/rows 数组）。
 - 账实修正（如实记录）：轮 8 README 计数漏改（提交里仍是 27/86 而 tail 已含 compaction 三条目描述）——本轮一并修正为 31/86 并补记；未移植面清单同步划掉 subagent list-children。
 - 新接线 1/86（累计 31）：dsh-tool-subagent-control。下一轮：tool-fs/fs-search/str-replace-editor 家族或 ACP provider。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 10（② tool-fs 家族依赖根：fs seam + 本地后端），门禁 72 包 / 977 测试全绿（+2 包 +8 测）：
+- 新包 fs：官方 dsh-fs seam 全量词汇移植——不透明 TargetKey/Version 身份（消费者不得解析）、Observation 正/负观察、Info/PathInfo（不跟随最终组件的 symlink 探测）/DirEntry、WriteIntent 守卫语义（createIfAbsent 撞既有→FS_NOT_OBSERVED；replaceIfVersion 缺失或不匹配→FS_STALE_VERSION）、Write/EditOutcome 携 LF 规范化 before/after 作 diff 基（before 可为 nil→整文件 diff 兜底）、13 个 FS_* 稳定错误码 + FsError{Code,Detail,Cause}、fs/write-intent 与 fs/edit-intent 单槽 waterfall + fs/observed 同步 emit 三事件名、FileSystem 接口（Resolve/ProcessPath/ProcessPathFromHostPath/FileURL/Contains/Stat/Lstat/ReadText/StreamText/ReadBytes/ListDir/WriteText/EditText/SandboxMode 能力位/per-call SandboxExecutionPolicy 缝）。
+- 新包 fslocal：本地后端忠实移植——resolve 偏好自身 realpath（别名共享 stale 守卫、穿 symlink 写更新目标不换链）；缺失文件 realpath 最近存在祖先+重接缺失后缀（键跨创建稳定）；读 NUL+无效 UTF-8 双拒 FS_NOT_TEXT；StreamText 64KiB 分块含拆分 rune 回退持有；ReadBytes 上限在打开描述符上执行（外部替换无法把有界读变无界分配）FS_TOO_LARGE；ListDir 稳定名序+子目标解析；写/改 per-target 锁串行化读→守卫→写窗口；editText 版本守卫先于字面匹配（stale 报 FS_STALE_VERSION 而非对更新内容误报 EDIT_NOT_FOUND）；old_string 唯一性纪律逐字对齐（0→FS_EDIT_NOT_FOUND、>1 无 replace_all→FS_AMBIGUOUS_EDIT、空串→EDIT_NOT_FOUND）；原子发布同目录 temp+rename+保模式；createIfAbsent 语境的 before 兜底读有界于自身描述符。
+- 诚实降级（README 已记）：可移植 os.FileInfo 无 dev/ino/creation time，version token 本 build 退化为 size+mtimeNs——token 不透明、同进程内派生一致，故对消费者不可见；win32 句柄级身份随 shell/sandbox 轮补。
+- 账实：86 名单无裸 dsh-fs/dsh-fs-local 条目（本地后端由 dsh-fs-sandbox 组合），catalog 接线随 fs-sandbox/observation-policy 轮；本轮交付是该家族（str-replace-editor 528 行/tool-fs 1416/tool-fs-search 1486/tool-web 963/tool-bash 522）的依赖根。
+- 下一轮：tool-str-replace-editor（地基已就绪）或 dsh-fs-sandbox 组合，或 ACP provider。
