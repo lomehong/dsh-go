@@ -544,3 +544,8 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 首批接线 5/86：dsh-tools（NewToolRuntime）、dsh-commands、dsh-settings-file（NewStore+file.Open，config.path 覆写，Effect 挂 Close 释放）、dsh-credentials-local（MemoryProvider——持久源随后续轮，如实标注）、dsh-web（AsPlugin）。服务名常量统一（tools/commands/settings/webServer/credentials）。
 - 测试三件：五服务装配齐全+Dispose 干净、config.path 覆写、未实现名 fail-loud。README 路线图同步（5/86 进度）。
 - 下一轮：按依赖序接 agent/session/llm 一批（需先盘各包组合面），随后 ManagerExt 生产装配。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 3（① catalog 批次 2：session/agent/llm 六插件），门禁 68 包 / 965 测试全绿：
+- 新接线 6/86（累计 11）：dsh-session（session.NewStore——session.Logger 的 Warn(string) 极小面与 cordis.Logger Warn(...any) 不同形，按 store.go 注释意图落显式适配器 adaptSessionLogger，不做接口改动）/dsh-session-projection（NewRegistry+Attach 事件订阅随 ctx 生命周期）/dsh-agent（NewAgentRegistry，agent 事件总线随 registry 诞生）/dsh-llm（NewRuntime）/dsh-llm-deepseek（deepseek.Apply 完整装配层接入 catalog：Inject llm+settings+credentials 三服务，静态 config 经插件 json 形态解码，settings 热载与受管凭证由组合序决定生产形态）/dsh-session-persistence-jsonl（Backend 独立服务；store 消费契约确实未建——如实标注随 storage-hub 轮，不硬接）。
+- 集成测试升级：TestCatalogAssemblesCoreServicesThroughAssemble 走 boot.Assemble 生产 mount 路径（非手工 Apply），11 条目注入序/服务齐全/Shutdown 三验。
+- 下一轮：ManagerExt 生产装配（Host/Snapshots/Sandbox 三服务进 catalog+owner context）或 top-level 组合骨架，视 subagent 组合面盘点结果定序。

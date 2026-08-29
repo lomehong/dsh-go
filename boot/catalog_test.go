@@ -43,6 +43,39 @@ func TestCatalogResolvesOfficialNames(t *testing.T) {
 	}
 }
 
+func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "tools", Name: "@deepseek-ai/dsh-tools"},
+		{ID: "commands", Name: "@deepseek-ai/dsh-commands"},
+		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
+		{ID: "credentials", Name: "@deepseek-ai/dsh-credentials-local"},
+		{ID: "web", Name: "@deepseek-ai/dsh-web"},
+		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
+		{ID: "projections", Name: "@deepseek-ai/dsh-session-projection"},
+		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
+		{ID: "llm", Name: "@deepseek-ai/dsh-llm"},
+		{ID: "deepseek", Name: "@deepseek-ai/dsh-llm-deepseek"},
+		{ID: "persistence", Name: "@deepseek-ai/dsh-session-persistence-jsonl"},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	ctx := root
+	for _, service := range []string{
+		ServiceTools, ServiceCommands, ServiceSettings, ServiceCredential, ServiceWebServer,
+		ServiceSessions, ServiceProjections, ServiceAgents, ServiceLlm, ServiceSessionPersist,
+	} {
+		if ctx.Get(service) == nil {
+			t.Fatalf("service %q missing after Assemble", service)
+		}
+	}
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
 func TestCatalogSettingsConfigOverridesPath(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(t.TempDir(), "custom.yaml")

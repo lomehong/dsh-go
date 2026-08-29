@@ -7,13 +7,20 @@
 package boot
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 
+	"dshgo/agent"
 	"dshgo/commands"
 	"dshgo/cordis"
 	"dshgo/credentials"
 	"dshgo/host/webserver"
+	"dshgo/llm"
+	"dshgo/llm/deepseek"
+	"dshgo/session"
+	"dshgo/session/persistence/jsonl"
+	"dshgo/session/projection"
 	"dshgo/settings"
 	"dshgo/settings/file"
 	"dshgo/tools"
@@ -21,11 +28,16 @@ import (
 
 // Service names plugins publish and consume through ctx inject lists.
 const (
-	ServiceTools      = "tools"
-	ServiceCommands   = "commands"
-	ServiceSettings   = "settings"
-	ServiceWebServer  = "webServer"
-	ServiceCredential = "credentials"
+	ServiceTools          = "tools"
+	ServiceCommands       = "commands"
+	ServiceSettings       = "settings"
+	ServiceWebServer      = "webServer"
+	ServiceCredential     = "credentials"
+	ServiceSessions       = "sessions"
+	ServiceProjections    = "projections"
+	ServiceAgents         = "agents"
+	ServiceLlm            = "llm"
+	ServiceSessionPersist = "sessionPersistence"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -51,6 +63,20 @@ func NewCatalog(deps CatalogDeps) PluginResolver {
 			return PluginSpec{}, fmt.Errorf("module not found: %s", name)
 		}
 		return spec, nil
+	}
+}
+
+// sessionLogger adapts the catalog's cordis.Logger to the session store's
+// minimal Warn(string) face (the doc-stated adapter, written out once here).
+type sessionLogger struct{ logger cordis.Logger }
+
+func adaptSessionLogger(logger cordis.Logger) session.Logger {
+	return sessionLogger{logger: logger}
+}
+
+func (s sessionLogger) Warn(message string) {
+	if s.logger != nil {
+		s.logger.Warn(message)
 	}
 }
 
@@ -132,6 +158,109 @@ var builders = map[string]pluginBuilder{
 			Provide: []string{ServiceWebServer},
 			Apply: func(ctx *cordis.Context, config any) error {
 				return webserver.AsPlugin(deps.Logger).Apply(ctx)
+			},
+		}
+	},
+
+	// The session store: in-memory session aggregation; persistence stays a
+	// plugin concern (the jsonl backend lands as its own entry).
+	"@deepseek-ai/dsh-session": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceSessions},
+			Apply: func(ctx *cordis.Context, config any) error {
+				ctx.Provide(ServiceSessions, session.NewStore(adaptSessionLogger(deps.Logger)))
+				return nil
+			},
+		}
+	},
+
+	// The projection registry: per-session derived-state units; Attach
+	// subscribes the registry's event handlers for the context's lifetime.
+	"@deepseek-ai/dsh-session-projection": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceProjections},
+			Apply: func(ctx *cordis.Context, config any) error {
+				registry := projection.NewRegistry()
+				registry.Attach(ctx)
+				ctx.Provide(ServiceProjections, registry)
+				return nil
+			},
+		}
+	},
+
+	// The agent registry: owns the agent event bus and every created agent.
+	"@deepseek-ai/dsh-agent": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceAgents},
+			Apply: func(ctx *cordis.Context, config any) error {
+				ctx.Provide(ServiceAgents, agent.NewAgentRegistry(ctx, deps.Logger))
+				return nil
+			},
+		}
+	},
+
+	// The LLM runtime: model registrations and retry policies resolve here.
+	"@deepseek-ai/dsh-llm": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceLlm},
+			Apply: func(ctx *cordis.Context, config any) error {
+				ctx.Provide(ServiceLlm, llm.NewRuntime())
+				return nil
+			},
+		}
+	},
+
+	// The DeepSeek adapter: registers on the llm runtime; the settings
+	// section (hot-reload) and managed credentials are optional deps the
+	// plugin tolerates in nil form — wired through services so composition
+	// order decides the production shape. Config decodes through the
+	// plugin's json shape (the settings-section shape).
+	"@deepseek-ai/dsh-llm-deepseek": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceLlm, ServiceSettings, ServiceCredential},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg deepseek.Config
+				if config != nil {
+					raw, err := json.Marshal(config)
+					if err != nil {
+						return err
+					}
+					if err := json.Unmarshal(raw, &cfg); err != nil {
+						return err
+					}
+				}
+				deps := deepseek.PluginDeps{
+					Runtime:     ctx.Get(ServiceLlm).(*llm.Runtime),
+					Settings:    ctx.Get(ServiceSettings).(*settings.Store),
+					Credentials: ctx.Get(ServiceCredential).(credentials.Provider),
+					Logger:      deps.Logger,
+				}
+				_, err := deepseek.Apply(deps, cfg)
+				return err
+			},
+		}
+	},
+
+	// The jsonl persistence backend: physical session-log artifacts under
+	// the profile home (config.root overrides). The store's consumption
+	// contract lands with the storage-hub round; until then the backend is
+	// provided as its own service.
+	"@deepseek-ai/dsh-session-persistence-jsonl": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceSessionPersist},
+			Apply: func(ctx *cordis.Context, config any) error {
+				root := filepath.Join(deps.Home, "sessions")
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["root"].(string); ok && raw != "" {
+						if filepath.IsAbs(raw) {
+							root = raw
+						} else {
+							root = filepath.Join(deps.Home, raw)
+						}
+					}
+				}
+				ctx.Provide(ServiceSessionPersist, jsonl.NewBackend(root, jsonl.CompressionNone))
+				return nil
 			},
 		}
 	},
