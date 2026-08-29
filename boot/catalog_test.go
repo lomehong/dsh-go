@@ -101,7 +101,7 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		"permission-presets", "system-prompt", "agent-loop", "subagent",
 		"skill", "tool-skill", "tool-todo", "jobs-local", "tool-jobs",
 		"plan-mode", "repeat-tool-reminder", "token-meter",
-		"compaction-basic", "command-compact",
+		"compaction-basic", "command-compact", "tool-subagent-control",
 	} {
 		entries = append(entries, runtimeSpec(name))
 	}

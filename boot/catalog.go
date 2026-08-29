@@ -36,6 +36,7 @@ import (
 	"dshgo/settings/file"
 	"dshgo/skill"
 	"dshgo/subagent"
+	"dshgo/subagentcontrol"
 	"dshgo/systemprompt"
 	"dshgo/todo"
 	"dshgo/tokenmeter"
@@ -773,8 +774,7 @@ var batchThreeBuilders = map[string]pluginBuilder{
 	// The /compact command: manual compaction for the receiving agent; the
 	// invocation binds the maintenance owner at dispatch time.
 	"@deepseek-ai/dsh-command-compact": func(deps CatalogDeps) PluginSpec {
-		return PluginSpec{
-			Inject:  []string{ServiceCommands, ServiceCompaction},
+		return PluginSpec{Inject: []string{ServiceCommands, ServiceCompaction},
 			Provide: []string{},
 			Apply: func(ctx *cordis.Context, config any) error {
 				engine := ctx.Get(ServiceCompaction).(*compactionbasic.Engine)
@@ -789,6 +789,29 @@ var batchThreeBuilders = map[string]pluginBuilder{
 							driver:    invocation.Agent.Driver(),
 						}
 						return engine.CompactNow(owner, signal, compaction.CommandID(invocation.CommandID))
+					},
+				)
+				return err
+			},
+		}
+	},
+
+	// The subagent control surface: send_message, interrupt_agent, and
+	// list_agents over the runtime's followup/interrupt and the continuable
+	// listing's projection fold.
+	"@deepseek-ai/dsh-tool-subagent-control": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools, ServiceSubagentRuntime, ServiceAgents, ServiceSessions, ServiceProjections, ServiceSessionPersist},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				_, err := subagentcontrol.Register(
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					ctx.Get(ServiceSubagentRuntime).(*subagent.SubagentRuntime),
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					subagentcontrol.ListingDeps{
+						Store:       ctx.Get(ServiceSessions).(*session.Store),
+						Projections: ctx.Get(ServiceProjections).(*projection.Registry),
+						Coordinator: ctx.Get(ServiceSessionPersist).(*persistence.Coordinator),
 					},
 				)
 				return err

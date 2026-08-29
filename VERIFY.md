@@ -584,3 +584,11 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - maintenanceOwner 适配器（boot）：*agent.Agent → Engine 的 MaintenanceAgent 面——会话/模型视图走导出的 ViewAgent，保留轮走 agent.Driver.RunMaintenance（接口已有该方法，agentloop.ReactLoopAgent 同款语义）。CommandID 经 compaction.CommandID(invocation.CommandID) 显式转换（commands 侧是定义类型 string）。
 - README 第 138 行本轮曾被一条误写 Set-Content 清空——git checkout 即刻恢复后用 edit 工具重做，无内容损失（工作区其余文件未受影响，如实记录）。
 - 下一轮：tool-fs/fs-search/str-replace-editor 家族或 session-title/spill/checkpoint，或 ACP/list-children。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 9（② list-children 经 tool-subagent-control 落地），门禁 70 包 / 969 测试全绿：
+- 新包 subagentcontrol：send_message/interrupt_agent 走 SubagentRuntime.Followup/Interrupt（interrupt authority=InterruptAuthorityAncestor+exact live agent；调用方经既定 resolveByScope 模式解析）；list_agents=ListChildren/ListDescendants 的模型面适配——continuable 子代投影为 child 行（一次性子代不进发现面），diagnostic 行直通。
+- 冷读缝 queryEngine：ListSessions=Coordinator.List()；ObserveSession=Coordinator.Load+session.NewRestored+identity 投影切面折叠。投影适配 projectionListing 把共享 registry 的擦除切面解码为 SubagentProjectionValues（编译期接口断言三连）。
+- status 三态如实映射：running=驻留会话的 subagentTiming 切面 Active!=nil（开轮中）；idle=驻留但轮间；ready=仅持久化（可续跑、非终态、无可收结果）。
+- 契约发现：tools.DefineTool 的 Output.Schema 为必填（nil 即 author error）——三工具补显式输出 schema（messageId/interrupted/rows 数组）。
+- 账实修正（如实记录）：轮 8 README 计数漏改（提交里仍是 27/86 而 tail 已含 compaction 三条目描述）——本轮一并修正为 31/86 并补记；未移植面清单同步划掉 subagent list-children。
+- 新接线 1/86（累计 31）：dsh-tool-subagent-control。下一轮：tool-fs/fs-search/str-replace-editor 家族或 ACP provider。
