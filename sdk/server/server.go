@@ -156,6 +156,16 @@ func New(deps Deps, transport protocol.Peer, options Options) *Server {
 	return s
 }
 
+// Serve installs the JSON-RPC dispatch into a line transport: requests go
+// to HandleRequest and results serialize back over the same transport. This
+// mirrors the official jsonrpc.serve effect wiring; it is the composition
+// side's job to call it once before serving traffic.
+func (s *Server) Serve(transport *protocol.LineTransport) {
+	transport.OnRequest(func(method string, params map[string]any) (any, error) {
+		return s.HandleRequest(method, params)
+	})
+}
+
 // subscribe installs the four lifecycle taps; each disposer joins the
 // shutdown sweep.
 func (s *Server) subscribe() {
