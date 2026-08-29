@@ -538,3 +538,9 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 账实对齐完成（全部经本会话实查背书）：boot/profile.go 已含 profile 装配+patchReload 全语义（路线图原"随 app-boot 轮"过时）；settings/settings-file/credentials/llm-deepseek 包已交付；tmuxcontext 为完整移植（git context 无包，确实未移植）；subagent manager 本体轮 30 已完成（路线图尾巴过时）。
 - 剩余清单修正为三项：1) 插件目录与顶层组合（关键路径——boot.Assemble 零生产调用、无 PluginSpec 目录、无 main 入口；catalog 各插件 Apply 内接线清单已列全，含 continuation ManagerExt 仅测试装配的实锤）2) 未移植面八项 3) 插件 ABI。
 - 下一轮动手：boot catalog + 顶层组合骨架。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 2（① catalog 基建+首批 5 插件接线），门禁 68 包 / 964 测试全绿：
+- boot/catalog.go：NewCatalog(deps) 把官方 npm 说明符（base bundle patch 86 名全集，catalog.go 头注锚定来源）解析为 Go 组合 spec；未实现名 fail-loud "module not found"，对齐官方不可解析行为，绝不静默跳过行。
+- 首批接线 5/86：dsh-tools（NewToolRuntime）、dsh-commands、dsh-settings-file（NewStore+file.Open，config.path 覆写，Effect 挂 Close 释放）、dsh-credentials-local（MemoryProvider——持久源随后续轮，如实标注）、dsh-web（AsPlugin）。服务名常量统一（tools/commands/settings/webServer/credentials）。
+- 测试三件：五服务装配齐全+Dispose 干净、config.path 覆写、未实现名 fail-loud。README 路线图同步（5/86 进度）。
+- 下一轮：按依赖序接 agent/session/llm 一批（需先盘各包组合面），随后 ManagerExt 生产装配。
