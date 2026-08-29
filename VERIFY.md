@@ -571,3 +571,9 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - Go 适配差异（README 已记）：描述符改在发布前 setup 期挂载（与 delegation 覆盖同窗，先于 turn/start），官方在首个 pre-step enter 后——消费者只读描述符存在性无顺序依赖。
 - catalog 19/86：spawn/fork 条目 Inject 完整依赖闭包、RegisterProvider 注册、providerName 可覆写；集成测试 19 条目装配+GetProvider 双验。
 - 下一轮：catalog 批量补线（tools 家族/tool-fs 等轻插件）或 compaction-pruner+/compact。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 7（① catalog 批次 3：工具家族 8 插件），门禁 69 包 / 969 测试全绿：
+- 新接线 8/86（累计 27）：dsh-skill（skill.NewRegistry）/dsh-tool-skill（toolskill.Register 四参）/dsh-tool-todo（todo.Register——allowParallel 必须部署选断，config 显式给出默认单活纪律）/dsh-jobs-local（jobs.NewLocalRegistry）/dsh-tool-jobs（toolsjobs.RegisterTools——CallerOf 以 resolveByScope 既定模式从 registry 解析调用方 session id）/dsh-plan-mode（NewController+RegisterPlanCommand+RegisterExitTool 双注册，失败回滚先挂的命令）/dsh-repeat-tool-reminder（Attach+AttachPreStepReset 双 detach 经 Effect 挂释放）/dsh-webserverUI 未动。
+- 集成测试分层：17 条目测试保持原服务断言；25 条目测试增 skills/jobs/planMode 断言+spawn/fork provider 契约验证（fork 不得虚报 outputSchema）。
+- 批次复用基建：inProcessProviderSpec 参数化构造 spawn/fork 两 spec；init() 合并 builder 分表并 panic 防重名。
+- 下一轮：重件按依赖序（compaction coordinator+/compact 命令、tool-fs 家族、web 家族）或 ACP/list-children。

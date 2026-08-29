@@ -16,21 +16,28 @@ import (
 	"dshgo/commands"
 	"dshgo/cordis"
 	"dshgo/credentials"
+	"dshgo/guard"
 	"dshgo/host/webserver"
 	"dshgo/interaction/permissionpresets"
 	"dshgo/interaction/userapproval"
 	"dshgo/interaction/userquestions"
+	"dshgo/jobs"
 	"dshgo/llm"
 	"dshgo/llm/deepseek"
+	"dshgo/planmode"
 	"dshgo/session"
 	"dshgo/session/persistence"
 	"dshgo/session/persistence/jsonl"
 	"dshgo/session/projection"
 	"dshgo/settings"
 	"dshgo/settings/file"
+	"dshgo/skill"
 	"dshgo/subagent"
 	"dshgo/systemprompt"
+	"dshgo/todo"
 	"dshgo/tools"
+	"dshgo/toolsjobs"
+	"dshgo/toolskill"
 )
 
 // Service names plugins publish and consume through ctx inject lists.
@@ -51,6 +58,9 @@ const (
 	ServiceSystemPrompt      = "systemPrompt"
 	ServiceAgentLoop         = "agentLoop"
 	ServiceSubagentRuntime   = "subagentRuntime"
+	ServiceSkills            = "skills"
+	ServiceJobs              = "jobs"
+	ServicePlanMode          = "planMode"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -513,5 +523,210 @@ func inProcessProviderSpec(defaultName string) pluginBuilder {
 				return err
 			},
 		}
+	}
+}
+
+// toolsCallerOf resolves the calling agent's session id for one execution:
+// agent identity is the scope key, resolved against the live registry (the
+// established resolveByScope pattern).
+func toolsCallerOf(agents *agent.AgentRegistry) toolsjobs.CallerOf {
+	return func(exec *tools.ToolExecution) string {
+		if exec.Agent == nil {
+			return ""
+		}
+		for _, candidate := range agents.List() {
+			if candidate.Scope == exec.Agent {
+				return string(candidate.Session.ID())
+			}
+		}
+		return ""
+	}
+}
+
+// decodeConfigBool reads one boolean composition field with its default.
+func decodeConfigBool(config any, key string, fallback bool) bool {
+	if overridden, ok := config.(map[string]any); ok {
+		if raw, ok := overridden[key].(bool); ok {
+			return raw
+		}
+	}
+	return fallback
+}
+
+var batchThreeBuilders = map[string]pluginBuilder{
+	// The skills registry: filesystem skill catalogs merged per cwd/provider.
+	"@deepseek-ai/dsh-skill": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceSkills},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg skill.Config
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				registry, err := skill.NewRegistry(deps.Logger, cfg)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceSkills, registry)
+				return nil
+			},
+		}
+	},
+
+	// The skill tool: lists and loads skills from the registry.
+	"@deepseek-ai/dsh-tool-skill": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools, ServiceSkills, ServiceAgents},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg toolskill.Config
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				_, err := toolskill.Register(
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					ctx.Get(ServiceSkills).(*skill.Registry),
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					deps.Logger,
+					cfg,
+				)
+				return err
+			},
+		}
+	},
+
+	// The todo tool: per-session todo tracking. The parallel-in-progress
+	// discipline is a required deployment choice (config.allowParallel,
+	// default single-active).
+	"@deepseek-ai/dsh-tool-todo": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools, ServiceAgents, ServiceProjections},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				_, err := todo.Register(
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					ctx.Get(ServiceProjections).(*projection.Registry),
+					todo.Config{AllowParallelInProgress: decodeConfigBool(config, "allowParallel", false)},
+				)
+				return err
+			},
+		}
+	},
+
+	// The local jobs registry: in-memory background job ownership.
+	"@deepseek-ai/dsh-jobs-local": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceJobs},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg jobs.Config
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				registry, err := jobs.NewLocalRegistry(cfg, deps.Logger)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceJobs, registry)
+				return nil
+			},
+		}
+	},
+
+	// The jobs tool: job submit/status/cancel for the model.
+	"@deepseek-ai/dsh-tool-jobs": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools, ServiceJobs, ServiceAgents},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg toolsjobs.Config
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				agents := ctx.Get(ServiceAgents).(*agent.AgentRegistry)
+				_, err := toolsjobs.RegisterTools(
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					ctx.Get(ServiceJobs).(*jobs.LocalRegistry),
+					toolsCallerOf(agents),
+					cfg,
+				)
+				return err
+			},
+		}
+	},
+
+	// Plan mode: the /plan command and its exit tool over one controller.
+	"@deepseek-ai/dsh-plan-mode": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceCommands, ServiceTools, ServiceUserQuestions},
+			Provide: []string{ServicePlanMode},
+			Apply: func(ctx *cordis.Context, config any) error {
+				section := "plan"
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["section"].(string); ok && raw != "" {
+						section = raw
+					}
+				}
+				controller, err := planmode.NewController(section)
+				if err != nil {
+					return err
+				}
+				detach, err := planmode.RegisterPlanCommand(
+					ctx.Get(ServiceCommands).(*commands.CommandRuntime), controller)
+				if err != nil {
+					return err
+				}
+				if _, err := planmode.RegisterExitTool(
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					ctx.Get(ServiceUserQuestions).(*userquestions.Service),
+					controller,
+				); err != nil {
+					detach()
+					return err
+				}
+				ctx.Provide(ServicePlanMode, controller)
+				return nil
+			},
+		}
+	},
+
+	// The repeat-tool reminder: post-execution guidance when the model
+	// repeats unproductive calls; pre-step reset per turn.
+	"@deepseek-ai/dsh-repeat-tool-reminder": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools, ServiceAgents},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg guard.RepeatConfig
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				reminder, err := guard.NewRepeatToolReminder(cfg)
+				if err != nil {
+					return err
+				}
+				agents := ctx.Get(ServiceAgents).(*agent.AgentRegistry)
+				detachTools := reminder.Attach(ctx.Get(ServiceTools).(*tools.ToolRuntime))
+				detachReset := reminder.AttachPreStepReset(agents)
+				if err := ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(func() {
+						detachTools()
+						detachReset()
+					}), nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			},
+		}
+	},
+}
+
+func init() {
+	for name, build := range batchThreeBuilders {
+		if _, dup := builders[name]; dup {
+			panic(fmt.Sprintf("boot: duplicate catalog builder for %s", name))
+		}
+		builders[name] = build
 	}
 }
