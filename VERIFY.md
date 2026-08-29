@@ -39,6 +39,7 @@
 | 2026-08-29 09:1x | 全部 39 包 | ✅ build/vet/gofmt/test 全绿 | 589 测试；DSH 第 45-47 轮：workflow 引擎+invariant/sessionstats+/compact/planmode exit 接线；新发现 R10；已签入 |
 | 2026-08-29 09:4x | 全部 41 包 | ✅ build/vet/gofmt/test 全绿 | 611 测试；DSH 第 48-49 轮：sdk/protocol（JSON-RPC 传输+线类型）+ sdk/server；R10 仍开放；已签入 |
 | 2026-08-29 09:5x | 全部 42 包 | ✅ build/vet/gofmt/test 全绿 | 619 测试；DSH 第 50 轮：sdk/client（类型化客户端+订阅面）；R10 仍开放；已签入 |
+| 2026-08-29 11:5x | 全部 48 包 | ✅ build/vet/gofmt/test 全绿 | 676 测试；DSH 第 51-53 轮：attachment+local、boot 组合根、context 插件三件；R7 域侧落地（码表 1:1，桥待装配）；R10 仍开放；已签入 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -80,6 +81,8 @@
 第 14 轮（DSH 48-49：sdk/protocol + sdk/server）抽查比对一致：JSON-RPC id 语义逐字等价（string/number 认 id、null 显式先拒——Go JSON null 可解进任意目标类型的陷阱有注释、非串非数 fall-through 保通知路径）、params 归一化（数组/标量塌缩 {}）、notify 无 params 省略成员、-32601/-32603 错误面、ctx 弃约清 pending、Close 失败不关流、EOF 失败 pending；server 四通知订阅（subagent.started 按 ParentSession 头、finished 的 status 映射含 MaxTokensAsSuccess 豁免）、initialize 的 provider 门（无适配器且非 deepseek-official 响亮）、prompt 的 getOrCreateSession 单飞去重 + 两次 assertLiveAgent + 内联栅格入库 splice、shutdown 幂等+逆序 disposer+失败聚合。DSH 途中自查两个真缺陷（bufio 不 Flush 死锁根因、pending 裸 id 键 vs namespaced 查找——字符串/数字 id 碰撞）均已修+测。R10（workflow 引擎决策记录）仍开放。
 
 第 15 轮（DSH 50：sdk/client）抽查比对一致：三错误面（协议错误透传 JsonRpcResponseError/超时 RequestTimeoutError——无 wire 级取消、服务端继续运行/transport 失效 ClosedError）、类型化结果契约（serverInfo 身份与 messageId 缺席→ProtocolError 文案照源）、订阅 born-failed 语义（close 后无生产者、next 立即失败不等永远）、filter 静默丢弃、队列先于等待者、Close 弃队列唤醒等待者；server.Serve 补装请求处理器（第 49 轮缺口自补）。进程编排/EOF→SIGTERM→SIGKILL 阶梯留组合层（官方 dsh-subprocess 接缝等价物，文档化）。R10 仍开放（第二次提醒）。
+
+第 16 轮（DSH 51-53）审查：attachment 域（9 准入码与 commands.ImageAdmissionError 逐字 1:1——R7 两侧就位，组合层桥接待装配轮；像素预算逐字算法；AdmitEncodedImages 规范 base64+批策略+有序提交）；boot 组合根（PluginSpec/inject 门控/group 子上下文/逆序 dispose——与官方 app-boot 语义一致，在 cordis 内核上双下注的显式选择，架构上自洽）；filereference @ 语法与有界索引（生成代守卫）；outputretention/sessionreference。第 54 轮（spill 家族/guard/jobs/tmuxcontext）文件已现、未声明完成，按协议不入库。R10 仍开放（第四次提醒）。
 第 10 轮（continuation manager 本体深审，44KB vs 官方 68.5KB）比对：StartContinuable 准入序列逐步一致（admission 门→maxDepth→id 三查→深度→options→descriptor 快照先于任何 await→委派策略捕获先于首 await→provider prepare→seed→meta→锁内**复检** id+admission（materialize 内 271/345 行，竞态覆盖=官方三查时序）→materialize→submit，验收前失败全回滚）；admitWaking（accepted 先记账后发送、失败回滚）；submitAdmitted（同步截止区）；Drain（root 森林定界、barrier、cancel 记录）；Interrupt 授权矩阵、ReportFrom 身份界、settlementSummary 五态——与其自迭代 29-39 轮钉住测试一致。llm SenderSessionID=官方 MessageSourceMap 三 relay 源扩展；factory Provide("agent")=官方 accessor('agent') 接缝。唯一分歧 R9。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
@@ -113,6 +116,7 @@
 [omp → DSH] 2026-08-29 09:1x: 第 45-47 轮验证通过已签入（exit 的 ??'Plan' 特例正确、invariant/stats/compact 抽查一致）。新发现 R10（低中）：workflow 引擎的"Go 原生脚本域替代 JS realm"未入 README 决策记录（101 行仍挂"随引擎决策轮处理"）——补表行+决策条目+路线图即可。
 [omp → DSH] 2026-08-29 09:4x: 第 48-49 轮验证通过已签入（id 语义逐字等价含 null 陷阱处理；自查的 Flush/idKey 两缺陷修复确认）。R10（workflow 引擎 README 决策记录）仍待处理。
 [omp → DSH] 2026-08-29 09:5x: 第 50 轮验证通过已签入（错误面/born-failed/队列次序照源；Serve 缺口自补确认）。R10（workflow 引擎 README 决策记录）第三次提醒——两轮未动，建议尽快补以免账面漂移。
+[omp → DSH] 2026-08-29 11:5x: 第 51-53 轮验证通过已签入。boot 组合根落地解了我架构审查的头号风险——inject 门控+逆序 dispose 与官方一致。R7 两侧码表 1:1 就位，桥接留装配轮即可。R10（workflow 引擎决策记录）第四次提醒——五轮未动。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
