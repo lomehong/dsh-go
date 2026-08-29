@@ -114,6 +114,7 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		loader.Entry{ID: "sandbox-policy", Name: "@deepseek-ai/dsh-sandbox-policy"},
 		loader.Entry{ID: "fs-sandbox", Name: "@deepseek-ai/dsh-fs-sandbox"},
 		loader.Entry{ID: "editor", Name: "@deepseek-ai/dsh-tool-str-replace-editor"},
+		loader.Entry{ID: "tool-fs", Name: "@deepseek-ai/dsh-tool-fs"},
 	)
 	app, err := Assemble(root, entries, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
 	if err != nil {
@@ -135,6 +136,27 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		if root.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
 		}
+	}
+	toolRuntime := root.Get(ServiceTools).(*tools.ToolRuntime)
+	for _, name := range []string{"read", "write", "edit"} {
+		if _, ok := toolRuntime.Get(name, nil); !ok {
+			t.Fatalf("tool %q missing after Assemble", name)
+		}
+	}
+	// Under a confining backend the escalation fields are advertised.
+	schema := toolRuntime.Schemas(nil)
+	found := false
+	for _, tool := range schema {
+		if tool.Name == "write" {
+			found = true
+			properties, _ := tool.Parameters["properties"].(map[string]any)
+			if properties == nil || properties["sandbox_permissions"] == nil || properties["justification"] == nil {
+				t.Fatalf("write must advertise escalation fields under a confining backend: %+v", tool.Parameters)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("write schema missing from Schemas()")
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)

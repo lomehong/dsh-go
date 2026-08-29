@@ -620,3 +620,12 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 集成测：workspace-write 组合下根内 create 落盘、盘根 create 拒绝且编辑器 mapError 包沙箱拒绝标记（marker 文案上轮自拟项本轮即位）。测试教训两则如实记录：拒绝路径不能取 TempDir 邻居（平台临时区本就可写——语义正确，改盘根）；/tmp 授予在 Windows 惰性（canonical 化失败保持原拼写、匹配不到——与官方一致）。
 - 上一轮 README 计数笔误修正：round 11 后应为 32（非维持 31 的表述），本轮 +2 → 34/86，余 52。账实已对齐。
 - 下一轮：tool-fs/tool-fs-search（fs 地基齐备）或 ACP provider/storage-sqlite。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 13（② tool-fs 工具族 + 沙箱升级词汇），门禁 77 包 / 1003 测试全绿（+1 包 +9 测）：
+- sandbox/escalation.go：官方 escalation.ts 全量移植——WIDER_MODES 严格更宽阶梯、ESCALATION_TARGETS 闭集、参数配对校验（同进同出+非空句）、逐字双标记（[sandbox: file access denied under <mode> mode] + 同轮升级提示）、ApproveEscalation 有序 fail-closed（严格更宽→无审批服务→无 agent→ask→四值结果逐字映射；非更宽请求不提示人类；rogue 结果 fail-closed）。Go 适配：EscalationApprover 用 any 型 agent 的最小结构面（官方泛型等价），userapproval.Service 适配器桥接——其 ApprovalOutcome 四值词汇与官方完全同构（前轮已对齐）。
+- toolfs 包：read（stat 路由→大文件/未知大小流式、buildWindow 行+字节双帽仍扫出精确总行数、单行截断标记、offset 越界 FS_NOT_FOUND 官方文案、<path> 信封+续读 footer、langFromPath）/write（单槽意图 waterfall、Created/Updated 信封、before 可空 oneOf）/edit（字面唯一匹配走 fslocal 纪律、stale/not-observed 附补救文案且 FS 码保留、session cwd 解析基、fs/observed 记录）。
+- escalation 字段仅围栏 backend 时进 schema（官方 advertisement gating）；FS_SANDBOX_DENIED→marker+提示映射。集成断言：围栏组合下 write schema 带 sandbox_permissions/justification。
+- read_image 按源规则自身不注册（需 attachments 存储，Go 组合未挂载）——如实记录。read-render 的 diff.ts/presentCall 展示面未移植（Go 工具注册表无 presentationMeta 面，随展示轮）——如实记录。
+- 执行体 canonical 值纪律教训：工具返回值必须纯 lossless-JSON 形状（[]any/map[string]any；自定义结构体切片与 *string 指针均被 registry 拒绝）——execute 体出口即规范化。
+- catalog +1（累计 35/86，余 51）：dsh-tool-fs（Inject tools/fs/agents/systemPrompt/sandboxPolicy/userApproval；挂 tool:read/tool:write/tool:edit 三段指引，order 1100/1200/1300）。
+- 下一轮：tool-fs-search（1486 行，fs 地基+本轮同构）或 ACP provider/storage-sqlite。

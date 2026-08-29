@@ -31,6 +31,7 @@ import (
 	"dshgo/llm"
 	"dshgo/llm/deepseek"
 	"dshgo/planmode"
+	"dshgo/sandbox"
 	"dshgo/sandboxpolicy"
 	"dshgo/session"
 	"dshgo/session/persistence"
@@ -45,6 +46,7 @@ import (
 	"dshgo/systemprompt"
 	"dshgo/todo"
 	"dshgo/tokenmeter"
+	"dshgo/toolfs"
 	"dshgo/tools"
 	"dshgo/toolsjobs"
 	"dshgo/toolskill"
@@ -909,6 +911,117 @@ var batchThreeBuilders = map[string]pluginBuilder{
 			},
 		}
 	},
+
+	// The read/write/edit filesystem tool suite over the mounted fs
+	// backend: schemas, read windows, observation events, and (under a
+	// confining backend) the shared sandbox-escalation fields resolved
+	// through the approval channel. read_image stays unregistered by the
+	// source's own rule: it needs an attachment store, which the Go
+	// composition does not mount yet.
+	"@deepseek-ai/dsh-tool-fs": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools, ServiceFS, ServiceAgents, ServiceSystemPrompt, ServiceSandboxPolicy, ServiceUserApproval},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					ReadLimit         *int `json:"readLimit"`
+					ReadMaxLineLength *int `json:"readMaxLineLength"`
+					ReadMaxBytes      *int `json:"readMaxBytes"`
+					ReadStreamMinSize *int `json:"readStreamMinSize"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				caps := toolfs.DefaultCaps()
+				if cfg.ReadLimit != nil {
+					caps.Limit = *cfg.ReadLimit
+				}
+				if cfg.ReadMaxLineLength != nil {
+					caps.MaxLineLength = *cfg.ReadMaxLineLength
+				}
+				if cfg.ReadMaxBytes != nil {
+					caps.MaxBytes = *cfg.ReadMaxBytes
+				}
+				if cfg.ReadStreamMinSize != nil {
+					caps.StreamMinSize = *cfg.ReadStreamMinSize
+				}
+				depsTools := toolfs.RegisterDeps{
+					Backend: ctx.Get(ServiceFS).(fs.FileSystem),
+					Ctx:     ctx,
+					Agents:  toolfs.RegistryAgentSource{Registry: ctx.Get(ServiceAgents).(*agent.AgentRegistry)},
+					PermissionFolds: func(caller *agent.Agent) string {
+						if mode, ok := permissionpresets.EffectiveSandboxMode(caller.Session.Events()); ok {
+							return mode
+						}
+						return ""
+					},
+				}
+				if policy := ctx.Get(ServiceSandboxPolicy); policy != nil {
+					depsTools.Policy = policy.(*sandboxpolicy.Service)
+				}
+				if approval := ctx.Get(ServiceUserApproval); approval != nil {
+					depsTools.ApproverSource = approvalEscalationAdapter{service: approval.(*userapproval.Service)}
+				}
+				if prompt := ctx.Get(ServiceSystemPrompt); prompt != nil {
+					system := prompt.(*systemprompt.SystemPrompt)
+					sections := []systemprompt.PromptSection{
+						{Name: "tool:read", Order: systemprompt.OrderToolRead, Text: "Use the read tool — not shell commands like cat — to inspect text files. Results include line numbers. Use offset and limit to continue reading large files."},
+						{Name: "tool:write", Order: systemprompt.OrderToolWrite, Text: "Use the write tool to create files or completely replace file contents. Existing files are overwritten, so read an existing file first (the default fs-observation-policy requires it) and prefer edit for targeted changes."},
+						{Name: "tool:edit", Order: systemprompt.OrderToolEdit, Text: "Use the edit tool for targeted changes to existing UTF-8 text files. It replaces literal old_string with new_string; by default old_string must appear exactly once. If old_string appears multiple times, provide a more specific old_string or set replace_all to true. Read the file first (the default fs-observation-policy requires it), unless you just created or edited it in this session."},
+					}
+					if err := ctx.Effect(func() (cordis.Disposer, error) {
+						undos := make([]func(), 0, len(sections))
+						for _, section := range sections {
+							undo, err := system.Section(nil, section)
+							if err != nil {
+								return nil, err
+							}
+							undos = append(undos, undo)
+						}
+						return cordis.Disposer(func() {
+							for _, undo := range undos {
+								undo()
+							}
+						}), nil
+					}); err != nil {
+						return err
+					}
+				}
+				_, err := toolfs.Register(ctx.Get(ServiceTools).(*tools.ToolRuntime), depsTools, caps)
+				return err
+			},
+		}
+	},
+}
+
+// approvalEscalationAdapter adapts the composed approval service to the
+// sandbox escalation channel face.
+type approvalEscalationAdapter struct {
+	service *userapproval.Service
+}
+
+func (a approvalEscalationAdapter) EscalationApprover() sandbox.EscalationApprover {
+	return approvalChannel{service: a.service}
+}
+
+type approvalChannel struct {
+	service *userapproval.Service
+}
+
+func (c approvalChannel) RequestApproval(req sandbox.EscalationAsk) (string, error) {
+	var caller *agent.Agent
+	caller, _ = req.Agent.(*agent.Agent)
+	outcome, err := c.service.Request(userapproval.ApprovalRequest{
+		Agent:    caller,
+		ToolName: req.ToolName,
+		CallID:   req.CallID,
+		Reason:   req.Reason,
+		Signal:   req.Signal,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(outcome), nil
 }
 
 // ServiceSandboxPolicy is the sandbox policy service's cordis name (official
