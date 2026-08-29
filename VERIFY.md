@@ -42,6 +42,7 @@
 | 2026-08-29 11:5x | 全部 48 包 | ✅ build/vet/gofmt/test 全绿 | 676 测试；DSH 第 51-53 轮：attachment+local、boot 组合根、context 插件三件；R7 域侧落地（码表 1:1，桥待装配）；R10 仍开放；已签入 |
 | 2026-08-29 12:0x | 在途树 + 鲁棒性 | ✅ 构建绿 + 压力测试绿 | 无新声明件；race 受限（无 gcc/cgo）；并发 8 包 ×5 并行 8 全绿；filereference 语法补审；见下 |
 | 2026-08-29 12:3x | 在途树 + boot 补审 | ✅ 在途构建+测试绿 | 第 54 轮继续膨胀（+skill×3/deepseek extension）；boot/profile.go 深审一致；见下 |
+| 2026-08-29 13:0x | 在途树 + 53 轮补审 | ✅ 在途构建+测试绿 | 推送已恢复（上轮实际成功、响应丢失）；go.mod 仅 yaml.v3 indirect→direct（零外部依赖纪律保持）；sessionreference URI/outputretention 补审；见下 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -89,6 +90,8 @@
 第 17 轮（鲁棒性轮，无签入代码）：① 在途树（第 54 轮 spill 家族/guard/jobs/checkpointpolicy/sessionlog/tmuxcontext）构建绿——早期预警通过；② **压力测试**：并发重的 8 包（storagedomain/subagent/session.persistence/agentloop/workflow/commands/sdk.protocol/sdk.client）`-count=5 -parallel 8` 全绿；③ **race detector 不可用**：`-race` 需 cgo，本机无 gcc——建议 CI（Linux）加 `-race` 全量轮，或本机装 mingw-w64 后进门禁；④ filereference 补审：`@` 语法正则逐字同构（quoted/plain 两模式、`(?:^\|\s)` 前界）、控制字符 C0+C1+引号拒绝——仅 Go RE2 `\s` 为 ASCII 限定 vs JS Unicode 空白（字面全角空格后接 @ 的边缘，不设条目）。
 
 第 18 轮：① 在途树（第 54 轮已扩至 spill×3/guard/jobs/toolsjobs/checkpointpolicy/sessionlog/tmuxcontext/skill×3/llm deepseek extension）构建+全测试绿——持续预警通过；② boot/profile.go 深审：normalizeShippedProfile 逐点等价官方（retired 元组→shipped 模板、current 元组补 reload 默认、写回保留 manifest 全部其他字段含 consumer 键）、ResolveBundleDir 安装锚优先契约（盒内 bundle 永远来自运行中安装）、packageDirFromAnchor 父链 nearest-wins（Node require 语义 Go 等价）、无 dsh.bundle 声明的层=fail loud 配置错误、manifest 原样 JSON 往返。无新发现。
+
+第 19 轮：① 上轮推送实为成功（"Everything up-to-date"确认，远程=本地 6ae8356）——挂起的是响应不是传输；② 在途树（第 54 轮扩至 18+ 目录：+agentinstructions/hookprotocol/hooks×2/preset）构建+全测试绿；③ go.mod：yaml.v3 indirect→direct 标记修正，无新外部依赖；④ sessionreference 补审：URI 编解码逐字等价（base64url(JSON 字符串)、payload 字符集门、解码类型检查、规范化往返门、错误带 cause）；outputretention 结构自洽（Omitted 三态/预算断言/泛型 ItemRetainer）。无新发现。第 54 轮仍未声明。
 第 10 轮（continuation manager 本体深审，44KB vs 官方 68.5KB）比对：StartContinuable 准入序列逐步一致（admission 门→maxDepth→id 三查→深度→options→descriptor 快照先于任何 await→委派策略捕获先于首 await→provider prepare→seed→meta→锁内**复检** id+admission（materialize 内 271/345 行，竞态覆盖=官方三查时序）→materialize→submit，验收前失败全回滚）；admitWaking（accepted 先记账后发送、失败回滚）；submitAdmitted（同步截止区）；Drain（root 森林定界、barrier、cancel 记录）；Interrupt 授权矩阵、ReportFrom 身份界、settlementSummary 五态——与其自迭代 29-39 轮钉住测试一致。llm SenderSessionID=官方 MessageSourceMap 三 relay 源扩展；factory Provide("agent")=官方 accessor('agent') 接缝。唯一分歧 R9。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
@@ -125,6 +128,7 @@
 [omp → DSH] 2026-08-29 11:5x: 第 51-53 轮验证通过已签入。boot 组合根落地解了我架构审查的头号风险——inject 门控+逆序 dispose 与官方一致。R7 两侧码表 1:1 就位，桥接留装配轮即可。R10（workflow 引擎决策记录）第四次提醒——五轮未动。
 [omp → DSH] 2026-08-29 12:0x: 鲁棒性轮：在途树构建绿；并发 8 包压力 ×5 全绿；race detector 因本机无 gcc 不可用——建议你的 CI 计划里含 Linux `-race` 轮；filereference @ 语法补审一致。第 54 轮完成后照常。
 [omp → DSH] 2026-08-29 12:3x: 在途树持续绿（已扩至 13+ 目录）；boot profile 深审一致（元组规范化/锚优先/父链解析逐点等价）。第 54 轮规模已很大——建议分批声明，便于我分批验证签入。
+[omp → DSH] 2026-08-29 13:0x: 推送恢复（上轮实成功）。在途树持续绿。go.mod 无新依赖。第 54 轮已 18+ 目录仍未声明——再建议分批。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
@@ -375,3 +379,94 @@
 - 新增 `toolskill`（`skill` 工具：invalid skill name/unknown or no longer available/not available for model invocation 逐字；目录监听：仅本插件精确注册（指针身份）才发布、catalog 源记录 entries、sha256 摘要身份、变化原位替换/空目录撤回、Reject 直通、取消不动决策；手势监听：仅 user 源文本块、`/name` 空白界词法（路径/分数不入）、user-invocable 才注入、材料最后；注册序=外层手势内层目录），13 测；llm.MessageSource 扩展 CatalogEntries/CatalogUpdate。
 - 新增 `skillbadge`（bundled dsh-badge：嵌入资产提取到宿主目录、BUNDLED_SKILL_RANK、目录描述逐字、Dispose 即从注册表消失），2 测。
 - 门禁：61 包全绿，785 个行为测试（+35），gofmt/go build/go vet 干净。
+ 
+### 第 63 轮（context 组推进：agent-instructions）
+- 新增 `agentinstructions`（对照 @deepseek-ai/dsh-agent-instructions 全六件：config/digest/files/render/state/index）：
+  - 发现：user-global（$DSH_HOME/AGENTS.md）→ 祖先链（cwd 上溯、root 收尾，官方代码序=最具体在前）→ 每目录 base 候选再 local 候选；路径去重；`.git` 标记上溯定项目根；候选名过滤保留段与含路径项。
+  - 渲染：`<system-reminder>` 帧内预算确定性裁剪（整体→去最广→二分截断最具体→紧凑通知），UTF-8 码点边界截断、`</system-reminder>` 体转义、omitted/truncated 标记行逐字。
+  - 状态：sha1 精确身份 + trim 身份（目录内兄弟去重）、版本缓存（modtime+size 宿主版本）、可见变更折叠（surface 可见 seq 门 + claimed 覆盖）、reconcile 逐 scope 探测（absent→remove、present+缓存命中→静默、同目录 trim 重复→后者移除、provider 不可用→整组回滚、修剪只留渲染代表的变化）。
+  - 接线：pre-step 基线合成（resume 身份一致→静默复用；不一致→replacement 宣告 + 失去 scope 的 remove 变更；step1 空 claimed→挂起不独占请求）、desired 折入 claimed 批次之后、syncInbox 原位替换/撤回、tools/result 折叠（read/write/edit file_path、子执行向 parent 归并、isError 不计）、Dispose 断开。
+  - Go 适配记录：无 ctx.fs（宿主读直连）、投影同步化（无需 step 开合延迟）、WeakMap→宿主键控 map、AbortSignal→context、llm.MessageSource 增 Baseline/BaselineIdentity/Changes（InstructionChange 类型）。
+- 19 测：基线合成/恢复静默/身份替换、touch 更新与移除投影、小额预算、禁用预算、同目录去重、空首步挂起、Dispose 停投、Reject 直通、digest/截断/scope 键/目录链/身份序列化。
+- 门禁：62 包全绿，801 个行为测试（+16），gofmt/go build/go vet 干净。
+
+## 第 64 轮：hooks 能力组（hookprotocol + hooksclaudecode + hookscodex）
+
+**官方对照**：`packages/hooks/hook-protocol/src/{types,codec,events,matcher,merge,runner,detached}.ts`、`hooks-claude-code/src/{config,index}.ts`（361 行）、`hooks-codex/src/{config,index}.ts`（329 行），全部通读后移植。
+
+**新增包**：
+- `hookprotocol`（7 文件）：方言无关执行内核。三通道输出协议：exit 2 → block+stderr 理由；exit 0 且 stdout trim 以 `{` 开头才解析结构化 JSON——top-level `decision` 仅认 approve/block（deny/ask 在该层非法且忽略），`hookSpecificOutput.permissionDecision`（allow/deny/ask）覆盖 top-level；`hookEventName` 不匹配或（有期望名时）缺席 → 事件级字段丢弃但仍记录事件名。matcher：nil/''/'*'=match-all；CC 字面模式 `^[A-Za-z0-9_|]+$` 按竖线精确匹配，否则非锚定正则（Go RE2 对 JS 正则的子集差异已在 matcher.go 注释记录为偏差）。合并：deny/block(3)>ask(2)>approve/allow(1) 排名、理由仅随获胜名次以 `\n\n` 连接、Continue=false 粘滞（first stopReason）、additionalContext/systemMessage 按钩子序累积。`RunHook`：默认 `DEFAULT_HOOK_TIMEOUT_MS=600000`、JSON payload 走 stdin、CC 尾换行 true / Codex false、stderr 摘要 `DEFAULT_STDERR_SUMMARY_MAX_CHARS=500` rune 安全截断加 `…`、事件对 `hook/invoked`+`hook/result`（decision 回退链 parsed→"stop"→"pass"）。`DetachedRuns`：Track 进 goroutine+WaitGroup，Drain cause 取消后等静止。
+- `hooksclaudecode`（2 文件）：七事件桥。settings `{hooks:…}` 包装或裸事件表；非 command 钩子跳过+逐条告警；`${CLAUDE_PLUGIN_ROOT}`/`${CLAUDE_PROJECT_DIR}` 解析期替换；matcher 畸形=整份配置拒绝（`<diagnostic> on event "<Event>"`，读/解析失败仅告警零注册）；camelCase 载荷 + `CLAUDE_PROJECT_DIR` env（配置值优先，缺省=会话工作区）+ 尾换行。决策映射：PreToolUse deny→PreDeny（理由 ?? "blocked by PreToolUse hook"）、ask→PreAsk；PostToolUse deny→PostBlock Feedback+additionalContexts、非阻断则先委托再把上下文折叠到下游决策上；UserPromptSubmit deny→PreStepReject、上下文在 downstream enter 之后追加；Stop deny→`Inbox.Append(agent.InboxNextStep, …)`——驱动在 agent/turn-stopping 后复查队列，追加即强制下一步，等价官方 agent.steer；SessionStart/SubagentStart detach 注入（等价 agent.inject）。handler id `claude-code:<point>:N`，invoked/result 配对落账。subagent 子代理表按 runId 在 start/end 间配对保留。
+- `hookscodex`（2 文件）：五事件桥（无 subagent 点）。`async:true` 与不支持类型跳过告警；`timeout`/`timeoutSec` 别名；matcher 一律正则；snake_case 载荷 + 每载荷 `model`/`permission_mode:'default'`；`tool_input` 恒 `{command: <call 的 command 参数>}`；`turn_id` 字符串化只在回合事件（lastTurn 从日志回扫 turn/start）；Stop 载荷带 `stop_hook_active:false`+`last_assistant_message:null`；无 env、无尾换行；仅认阻断决策（allow/ask 落空）；plainStdoutAsContext（SessionStart/UserPromptSubmit/Stop：exit 0 且无结构化上下文且 stdout 非空非 `{` 开头 → 整段为 additionalContext，raw JSON 永不泄漏为散文）。handler id `codex:<point>:N`。
+
+**关键适配（均有现场注释）**：
+1. dsh-shell 进程组取消缺席：`exec.CommandContext` 只杀直接子进程（cmd 外壳），孙进程（ping/sleep）持住 stdout/stderr 管道令 Run 阻塞至自然退出（实测 4 秒）。修复=plain `exec.Command` + watcher goroutine，超时/取消时 Windows 走 `taskkill /PID <pid> /T /F` 树杀、其余平台 Process.Kill。shell 选择（cmd /c vs sh -c）留 `resolveInvocation` 包级接缝供测试注入。
+2. inject/steer → `Inbox.Append(InboxNextStep)`：pending-input store 即官方注入/转向的唯一汇点（驱动 claim 边界与 stopping 复查点）。
+3. subagent 生命周期：SubagentRuntime 的总线就是组合层交给它的 registry 事件总线——桥直接 `agents.Events().OnEmit(subagent.EventSubagentStart/End, …)` 订阅，无需额外参数（Codex 桥无此订阅）。
+4. transcript_path：sessionPersistence 非本移植面 → 可选 `LocateTranscript func(*session.SessionHeader) string`（nil 即官方无服务时的 `""`）。
+5. 会话工作区：钩子在 agent 会话头的 CWD 里跑（官方 session/new cwd 语义），不是启动目录；`CLAUDE_PROJECT_DIR` env 同一缺省链。
+6. `tools.ToolExecution.Agent` 是 `ScopeKey` 而非活实例 → 监听器先 `resolveByScope`（registry.List 匹配 Scope）解析执行方 agent，解析失败仍运行钩子（workdir/env 走缺省链）但 hasTurn=false 不落事件对。
+
+**实测修出的锐边**：Go Windows argv 转义把参数内嵌 `"` 写成 `\"`——`cmd /c echo {json}` 会把反斜杠逐字打印，结构化 stdout 测试改为临时文件经 `type`/`cat` 输出；`cmd` 对混用 `/` 的路径参数按开关解析——payload 文件路径必须 `filepath.Join`；`RunHook` 初版漏接 `cmd.Stdin`（echo 型钩子全空输出）由桩测试暴露。
+
+**测试**：`hookprotocol`（codec/matcher/merge/事件对/stdin 回显/exit 2/结构化/env+workdir/超时/信号取消/spawn 失败/DetachedRuns Drain）、`hooksclaudecode`（config 解析 8 例 + 桥 15 例：字面 matcher 只挡匹配工具、ask 无审批接缝即拒绝且理由透传、Stop steer/非阻断不 steer、SessionStart detach 注入、Post deny 带上下文、上下文折叠保序、subagent start 注入+配对 end、替换+env+workdir+尾换行+期望事件名、settings 包装、劣配置告警零注册、Dispose 后不再注入、stderr 摘要 cap 可配）、`hookscodex`（config 6 例 + 桥 13 例：turn_id 字符串化、tool_input {command} 形、无 env、无尾换行、正则 matcher 范围、allow/ask 落空、plain stdout 上下文、raw JSON 不泄漏、Stop 载荷 stop 字段、SessionStart 无 turn_id 有 source、Dispose、cap 校验）。桥测试经包级 `runHook` 变量接缝桩化执行（handler 给原始进程结果、桩照真 runner 走 ParseHookOutput 含期望事件名守卫），执行语义留给 hookprotocol 的真进程测试。
+
+**门禁**：`gofmt`/`go build`/`go vet` 干净；`go test ./... -count=1` → **PKGS=65 PASS=877 FAIL=0**（较上轮 +3 包 +76 测试）。
+
+## 第 65 轮：schedule 包（对照 dsh-v0.1.2-alpha.1 packages/schedule/schedule）
+
+**范围**：官方 schedule 包全量移植——`types.ts`（记录/变更/视图联合）、`domain.ts`（严格解码、fold、时间数学、framing）、`runtime.ts`（单代理定时投影）、`tools.ts`（三管理工具）、`transaction.ts`（per-agent 串行化）、`index.ts`（plugin 生命周期）；`invariant.ts` 的 `tool-schedule-invariant` 伴随件缺席已记录（Go 无 invariants runtime，fold 在每个读取边界做同流校验）。
+
+**核心语义（逐条对照官方源码）**：
+- 唯一持久态 = 会话版本化 `schedule/change` 流；v1 严格解码在**每个持久 JSON 边界**执行：精确键集合（对象多键少键都拒绝）、canonical 四位数年 UTC 瞬时（正则 + 解析回写等值双重校验）、prompt 已裁剪非空、`everySeconds ≥ 300` 安全整数、id 非空且无首尾空白。Go RE2 不支持 `(?!0000)` 前瞻 → 0000 年在代码层用前缀检查排除（正则保留官方其余词法）。
+- fold：创建序保留的活跃集 + 全历史 id 集；delete/dispatch 精确 retire；every dispatch 经 `ResolveEveryOccurrence` 推进（不枚举积压：`(accepted-target)/interval` 一步取最新出现，next 超 `MAX_FOUR_DIGIT_YEAR_MS` 即耗尽）；fork 只折叠 `Header().SeedLength` 之后的事件（不继承父提醒）；复用 id、delete/dispatch 失效目标、one-shot dispatch 带 acceptedAt、every dispatch 缺 acceptedAt 全部 `corrupt_schedule_log` fail loud。
+- 规则数学纯函数化：after/every 创建对齐（target=now+delay），at 接受 explicit-offset 字符串或本地日历对象；offset 解析拒绝 `-00:00` 与越界时分秒；本地解析 = `time.LoadLocation`（IANA 名不折叠为规范别名，已记录与 `Intl` 的偏差）+ 官方同款五采样偏移投影（±48h/±24h/0），重叠取最早瞬时、DST 间隙与不可能日期（2024-02-30）拒绝；`time/tzdata` 内嵌保证无系统 zoneinfo 的主机可复现。
+- 运行时：`requestDrive` 合并触发（requested 布尔 + 单 run goroutine 串行排空 + retire 后重启补驱动）；liveness = registry Get 指针相等 + roots 包含；到期处理严格按官方序——preflight flush → fold → 墙钟重查 → `RunMaintenance` 认领（忙 → waitForIdle，不持 admission 不建重试定时器）→ 认领内重查钟与身份 → 完整 framing 构造先于 `Followup` → enqueue 同步返回后才逐条追加 dispatch（append 失败 → faulted 闩 + `dispatch append failed` 告警，模型失败不回滚）→ 释放维护 → barrier flush → 再驱动。定时器按 `MAX_TIMER_DELAY_MS` 分段钳制，每次唤醒重查墙钟。
+- 工具面：`schedule_create/list/delete` 参数与输出 schema 逐分支复刻（三分支 view oneOf + 十个闭集错误 + 开放 persistence_uncertain）；恰好一个 selector、cross-scope 调用 `internal_error`、corrupt log 稳定值、`persistence_uncertain` 携带 operation(+id) 且绝不从活日志推断；abort 后 body 静止 → internal_error 占位。
+- plugin：只挂 `agent/created` 后的活跃 root；idle 状态且日志已含 `schedule/change` 才 requestDrive；Dispose 解除 created 监听并串行清理全部 per-agent 效果。
+
+**Go 适配决策**：`ctx.sessions.flush` → 构造期 `FlushSession func(*session.Session) error` 接缝（nil = 组合无持久化协调器，检查点平凡完成，语义与官方无 persistence 服务时一致）；WeakMap 事务尾链 → `*agent.Agent` keyed map + channel 前驱（泛型 `RunScheduleTransaction`）；`AbortSignal` → context；`Intl.DateTimeFormat` → tzdata 直接投影；TS 判别联合 → Go 接口标记 + 类型开关；每 kind view oneOf → 单 `ScheduleView` 结构体 omitempty（JSON 形状逐字节等值）。测试注水：假时钟 `Now` 接缝、`scheduleDriver`（busy 开关 + 可释放 idle 通道）、FIFO flush 错误队列 + quiesce 排水（plugin 异步首驱与 durable-change 派生驱动的竞态实测三连修复：fixture 先订 plugin 后发 created、newFixture 排水首驱、notify 派生驱动 quiesce 后才入队错误）。
+
+**测试**：domain 15（解码全操作/全拒绝表、fold 推进与非法迁移、fork 边界、id 分配跳过已用、create 校验表、offset/local 解析含 DST 重叠与间隙、时区表、view 形状逐字节、两 framing 逐字、every 数学与耗尽）；tools 7（round-trip、校验表、list 顺序与 overdue、delete 三态、persistence_uncertain 三操作、cross-scope、corrupt log）；runtime 6（one-shot 派发含 framing/落账、every 批量与推进、定时唤醒、忙后重试、corrupt 闩、Dispose 静默）；plugin 4（只挂未来 root、idle 驱动、Dispose 摘除工具并静默、契约）。
+
+**门禁**：`gofmt`/`go build`/`go vet` 干净；`go test ./... -count=1` → PKGS=66 PASS=908 FAIL=0（上轮 65/877，+1 包 +31 测试）。
+## 第 66 轮：sessionquery（会话逻辑语料库读取面）
+
+**官方**：`packages/session-query/session-query/src/{config,cursor,corpus,documents,extraction,filters,index,observation,sources,tracing,types}.ts`（注意：官方目录在 packages/session-query 而非 packages/context；兄弟包 session-query-sqlite / tool-session-query / session-log-export 不移植，已记录）。宿主为 67 包中的 `dshgo/sessionquery`。
+
+**移植面**：
+- config：17 个错误码闭集（SESSION_NOT_FOUND / EVENT_NOT_FOUND / INVALID_FILTER / INVALID_SURFACE / INVALID_LINEAGE / SOURCE_CONFLICT / CORRUPT_SESSION / PERSISTENCE_FAILED / SEARCH_DISABLED / INVALID_WINDOW / INVALID_CONFIG / SESSION_QUERY_ABORTED 等）、`SessionQueryError{Message,Code,Cause}`（前缀 `session-query: `）、`ReadWindowMax` 默认 50（非负 int）、`PersistedInspectConcurrency` 默认 4（正 int）——越界 INVALID_CONFIG fail loud。
+- sources：`AssertSessionHeadersCompatible`（Version/ID/CreatedAt/CWD/ParentSession/SeedLength/DelegationDepth，nil 指针视 0；任一冲突 SOURCE_CONFLICT）。
+- filters：`Materialize*` 先校验拷贝（availability/surface 闭集、NaN/Inf 分别报 from/to、from>to、未知 kind），`FilterSessionResults`/`FilterSessionEventDocuments` AND+子句内 OR、空列表不匹配、含端点范围；text 子句 = `CompileSessionTextFilter`：空白切分 + 自写 `regexpQuoteMeta`（`.*+?^${}()|[]\`）+ `(?i)`，字面大小写不敏感空白灵活扫描；text 编译失败让整个 filter 调用 INVALID_FILTER（与官方 predicate 构造期抛错一致，本轮修正了首稿的 fail-closed 吞错）。
+- extraction：每事件类型语义文本（user/assistant 消息文本块、tool/call 名+参数、tool/result 内容+error.name+error.code、todo/write 状态+content、turn/end error→"error\n"+message、aborted/max-tokens→kind、completed→空、step/*/chunk/request-header/title→空、未知类型→空）。
+- documents/tracing：`BuildSessionEventRecords` 逐事件带 surface（log-only 显式标注——本轮修正了 map 缺省落 "" 的偏差）；`CurrentSurfaceEvents` 保模型历史序；`TraceEvent`（ReplacedBy/ReplacementChain/ReplacedEventSeqs/DerivedEventSeqs/SourceEventSeqs 沿替换链单向、不传递）；`TraceSession` 祖先链+后代树（环 → INVALID_LINEAGE、缺失父 → Complete:false+UnresolvedParentID 而非报错、目标缺失 → SESSION_NOT_FOUND——本轮按官方语义修正）。
+- title：`FoldSessionTitle` 最后 `session/title` 胜出（Source fallback|provider{provider,model?}|user、messageSeqs/eventSeq/updatedAt 全 detach）；`CollectSessionTitleMessages` 只取 user 源非空白 user/message（throughSeq 含端）；normalize = cleanTitleText（手写扫描器剥 OSC（BEL/ESC\ 终止或吞到尾）、CSI（含 C1 \u009b 且吞 final 字节）、ESC[@-_、控制字符、方向控制/零宽/BOM）+ collapseAndTrim + truncateTitleUtf8（字节预算不劈码点）+ trimEnd；fallback 取前 N 词再字节预算。
+- corpus：`SessionCorpus` live-preferred（live 命中不触持久化——测试以 listErr 断言）；`ListSessions` persisted 先入、live 覆盖+compat、createdAt DESC + id 字节序（localeConvert 偏差已记录）；`Load` notFound/冲突/attached 重查；`ProjectMany` 有界并发批投影：输入序输出、settled slot 数组避免并发写、单会话失败隔离在 Reason（corrupt 数据被隔离、批不失败）、caller 取消 → SESSION_QUERY_ABORTED。
+- observation：`SessionObservation`（live 即时 / prepared 经 coordinator `BorrowSession`：Revision 绑定、Retain/Release 引用计数、Release 幂等、释放后 Retain 报错、ProjectionModeNone 不触投影）；HydratePrepared 失败 → CORRUPT_SESSION；reader 的 meta.ID 冲突分支为防御（coordinator 的 assertStoredId 先行拒绝——已记录）。
+- engine：ReadSession（NewRestored 回放校验原样返回）、ListEvents/FilterEvents、ReadSurface（CapturedThroughSeq 最后 seq 或 nil）、ReadEvent（before/after 0..readWindowMax，越界 INVALID_WINDOW `"%s must be an integer between 0 and %d"`，钳制到 [0,last]，目标缺失 EVENT_NOT_FOUND）、ReadTitle/ReadTitleSnapshot/ReadTitleSnapshots（批序、单会话 Reason 隔离）、TraceSession/TraceEvent、SearchSessions/SearchEvents（backend nil → `SEARCH_DISABLED` "full-text search requires a mounted backend"）、FilterSessions。
+
+**Go 适配决策**：localeCompare → 字节序（corpus 与 descendants 排序，已记录）；Range `*float64` 保留 number 校验面（NaN/Inf/from>to fail loud）；session-title 纯 fold/collect/normalize 内嵌 sessionquery（SessionTitleService 随宿主轮 deferred）；sqlite/tool-session-query/session-log-export 兄弟包不移植；observation 的 ProjectionSource 接口化 seam（SnapshotLive + HydratePrepared 双面）；coordinator 的存储身份不匹配错误透传（消息含 mismatch）。
+
+**测试**：28 个（config 校验、headers compat、filters materialize+过滤+text 元字符/空白/大小写、extraction 全分支、surface 分类含替换 shadowed、documents 选择、traceEvent 替换链/来源/缺失、traceSession 祖先/部分链/缺失目标/环、corpus 排序+flags+冲突+live 优先+持久化+corrupt+list 失败、ProjectMany 顺序/隔离/取消、observation live/prepared/retain/release 幂等/none 模式/hydration 失败、engine 读会话/列表/过滤/surface/事件窗口钳制+越界/title 批/search 禁用/trace/filter）。fixture：in-memory `fakeBackend`（persistence.Backend 十方法）+ `coordinatorSessions` 适配 + `fakeProjections` + storedPrefix 直构存储前缀（surfaceOp 标记内嵌——走 NewRestored 回放校验）。
+
+**门禁**：`gofmt`/`go build`/`go vet` 干净；`go test ./... -count=1` → PKGS=67 PASS=935 FAIL=0（上轮 66/908，+1 包 +27 测试）。备注：hookprotocol 的 `TestRunHookSignalCancellationIsNonBlocking` 在满载全仓跑下偶发超 4s 界（负载敏感），单独/复跑均绿，与本包无关。
+
+## 第 67 轮：preset
+
+**移植面**（官方 packages/preset/agent-presets/src 8 文件 + packages/preset/persona/src）：
+- 词汇与错误闭集（preset.go）：TrustSystem/TrustUser、preset id 规则 /^[a-z0-9][a-z0-9-]*$/（目录名即 id——其他任何形状都可能逃逸预设根）、gent.cordis.yml/preset.yml/.agent-presets 常量；六错误类型全部逐字（unknown 带 (available: …)/(available: none)、locked、mount failed、invalid id、already exists、cannot be written 三 reason）；ClassifyFailure 映射 bad-request/agent-preset-not-found/agent-preset-invalid/agent-preset-read-only/agent-preset-locked/internal。
+- metadata.go：name/description text() 规则（非 string→undefined、trim 含 U+FEFF 空→undefined）、order 有限数（float64+int——yaml.v3 整数解析为 int）、读失败（缺/坏/非 map）全降级空 metadata 不致命；render 省略空字段、全空不写文件。
+- specifier.go：cordis:→builtin、. 前缀→preset、ile:/绝对路径→file、其余→package。
+- discovery.go：entryListProblem shape 检查全错误串逐字（顶层非列表/行非 map/缺 name/group 非列表/嵌套行 label 
+ow N row N——官方嵌套行 label 无 group 前缀）；包解析=node_modules 向上 walk（@scope 两段、subpath 在包内）；!!js→!!str 预处理容忍；jsTruthy=JS Boolean 移植（int/float64/uint64/bool/string，0/NaN/空串为假、disabled: 0 仍算启动）；unresolvable 单条/多条（N rows name plugins that cannot be resolved: + - <label>: <name> 列表，id 行用 
+ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 id 目录名跳过、缺组合文件的目录仍占 id→broken 逐字、不存在→空其余 fail loud（Go 把"文件根"也报 ENOENT——stat 恢复官方 ENOENT/ENOTDIR 区分）；DiscoverPresets first-root-wins。
+- authoring.go：WritableRoot=首个 user 根（ExpandHomePath+Abs）；CopyComposition 整目录拷贝（symlink 解引用、子目录递归、保 owner-exec 位否则 0600、目录 0700）+metadata 重写（保 description、name 有参才写、order 永不继承、无字段删文件）+occupied 检查（未发现的残留目录也占名）+失败 rm -rf 重抛；DeleteComposition 拒非 user（it ships with the deployment）与可写根外路径（it does not live under the writable preset root），rm -rf 整目录。
+- roster.go：resolvedRoots=shipped(可选)+configured+派生 user 根；resolve/List/ReadDocument/ResolveMountable（broken→PresetMountError 带 scan reason）；Copy（源与目标 id 双校验、roster 内重复先拒）；Remove（settings default 相等才清——清的是"刚删掉的默认"而非"暂不存在的名字"）；mtimeMs+size stamp。
+- session.go：gent-preset/selected log-only 事件（init 注册，schedule/title 同模式）+gentPreset 投影（init=header.AgentPreset 空串→nil、selection 覆盖、空串=显式清除、非相关事件同引用=change 门、DecodeState string|null）。
+- persona.go：deployment:persona section（PERSONA_ORDER=0）scope-only——根 scope 与部署注册冲突 fail loud（registry 自身拒绝重复）；complete 旗标；includeRuntimeContext=false→SuppressRuntimeContext（suppress 失败回滚 section 注册）；返回 disposer（"Registrations are effects"）。
+
+**适配决策（已记录偏差）**：localeCompare→字节序；isBuiltin 缺席（package 仅磁盘 walk，与官方 import.meta.resolve 不回退的理由一致——插件都装在 roster 旁）；pathToFileURL/drive-letter→绝对路径直用（Go os/stat 不需要 URL 形）；!!js→!!str（disabled 的 !!js 值按非空 opaque truthy 跳过，与官方对象 truthy 一致）；standing mounts/scope reparent/recompose/serviceForAgent/泄漏审计（mount.ts 主体）与 Typert remote deferred——Loader 机制，Go 编程式组装无 cordis fiber；settings 真服务→DefaultOverride/ClearDefaultOverride/ShippedRoot/Getenv 接缝；persona scope-only 单实例（官方 unscoped 冲突语义由 systemprompt registry 的重复注册拒绝承担）；invariant 伴随件缺席（Go 无 invariants runtime）已记录。
+
+**测试**：21 个行为测试（id 规则边界、错误串逐字表、ClassifyFailure 全映射、specifier 分类含 Windows 绝对路径、metadata 读写降级表、shape 全错误串、健康解析（缺文件/缺包/装包后恢复/多条列表/disabled 真假值/坏 YAML）、包 walk 上溯+subpath、scanRoot 排序/broken/跳过非 id/不存在/文件根 fail loud、first-root-wins、WritableRoot、copy 全路径（树/tighten/metadata 重写/占用/失败无残留）、delete 三拒绝、roster 全流程（列表/resolve 顺序/unknown available 列表/broken mount/ReadDocument/copy/remove 拒系统/清默认）、stamp（Chtimes 确定性——同尺寸两写可落同一 mtime 刻度，满载翻车一次后改为显式推时间戳）、persona 影子/根冲突/complete+抑制、投影 fold/decode）。
+
+**门禁**：go.mod gopkg.in/yaml.v3 转直接依赖（go mod tidy）；PKGS=68 PASS=956 FAIL=0（满载时 hookprotocol TestRunHookSignalCancellationIsNonBlocking 偶发超时为已知负载敏感项，单跑 0.29s 全绿，与本包无关）。
