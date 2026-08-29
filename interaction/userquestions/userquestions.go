@@ -223,12 +223,31 @@ func (s *Service) Ask(request Request) (answer AskUserQuestionAnswer, err error)
 	return answer, nil
 }
 
+// QuestionDecision is the closed decision type of the user-questions
+// waterfall: one claimed answer, or one error (a typed UserQuestionError, or
+// a foreign failure preserved as-is). The erased era's union of value and
+// pointer answer/error shapes collapses into this single concrete return:
+// an answerer can no longer return an unrecognized shape, because the type
+// system admits only decisions.
+type QuestionDecision struct {
+	Answer AskUserQuestionAnswer
+	Err    error
+}
+
+// Requests is the typed accessor for the user-questions request waterfall:
+// registered answerers either claim the request with a decision or delegate
+// through next. Register and dispatch this event name only through this
+// accessor — a raw listener here would receive values its assertions cannot
+// decode.
+func Requests(bus *agent.SubjectEventBus) agent.TypedWaterfall[Request, QuestionDecision] {
+	return agent.NewTypedWaterfall[Request, QuestionDecision](bus, EventUserQuestionsRequest)
+}
+
 // dispatch runs the contained waterfall. A listener panic restores through
-// the same error path as a thrown one; a delegation to the base means no
-// answerer accepted the request.
+// the same error path a thrown answerer takes.
 func (s *Service) dispatch(request Request) (answer AskUserQuestionAnswer, err error) {
-	fallback := func(any) any {
-		return newUserQuestionError("no user-questions answerer accepted the request", CodeNoProvider, nil)
+	fallback := func(Request) QuestionDecision {
+		return QuestionDecision{Err: newUserQuestionError("no user-questions answerer accepted the request", CodeNoProvider, nil)}
 	}
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -239,27 +258,8 @@ func (s *Service) dispatch(request Request) (answer AskUserQuestionAnswer, err e
 	if request.Agent != nil {
 		agentScope = request.Agent.Scope
 	}
-	result := s.registry.Events().Waterfall(EventUserQuestionsRequest, agentScope, request, fallback)
-	switch typed := result.(type) {
-	case AskUserQuestionAnswer:
-		return typed, nil
-	case *AskUserQuestionAnswer:
-		if typed != nil {
-			return *typed, nil
-		}
-	case UserQuestionError:
-		return AskUserQuestionAnswer{}, typed
-	case *UserQuestionError:
-		if typed != nil {
-			return AskUserQuestionAnswer{}, *typed
-		}
-	case error:
-		return AskUserQuestionAnswer{}, typed
-	}
-	// A claim must be a recognizable answer; a foreign return value fails
-	// closed instead of feeding the model a fabricated structure.
-	return AskUserQuestionAnswer{}, newUserQuestionError(
-		"user-questions answerer returned an unrecognized answer shape", CodeNoProvider, nil)
+	decision := Requests(s.registry.Events()).Dispatch(agentScope, request, fallback)
+	return decision.Answer, decision.Err
 }
 
 // AgentByScope resolves one live agent by its scope key, for consumers that

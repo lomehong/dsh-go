@@ -316,12 +316,12 @@ func (s *Service) decide(req ApprovalRequest, sess *session.Session) ApprovalOut
 	}
 	// A throwing answerer must fail the QUESTION closed, not the caller's
 	// tool call open — the seam contains its callbacks.
-	outcome := containedWaterfall(s.registry.Events(), EventApprovalRequest, req.Agent.Scope, req,
-		func(any) any { return OutcomeUnavailable })
-	// A rogue (non-vocabulary) answerer return normalizes to the fail-closed
-	// outcome instead of leaking into callers' closed-union switches.
-	decided, ok := outcome.(ApprovalOutcome)
-	if !ok || !outcomes[decided] {
+	outcome := containedDispatch(s.registry.Events(), req.Agent.Scope, req)
+	// The type of an answer is guaranteed by the seam; its vocabulary value
+	// is not. A rogue value normalizes to the fail-closed outcome instead of
+	// leaking into callers' closed-union switches.
+	decided := outcome
+	if !outcomes[decided] {
 		decided = OutcomeUnavailable
 	}
 	// An abort observed after the synchronous dispatch wins over a late
@@ -332,14 +332,24 @@ func (s *Service) decide(req ApprovalRequest, sess *session.Session) ApprovalOut
 	return decided
 }
 
-// containedWaterfall runs one bus waterfall with panic containment.
-func containedWaterfall(bus *agent.SubjectEventBus, event string, agentScope scope.ScopeKey, payload any, base func(any) any) (result any) {
+// Approvals is the typed accessor for the approval request waterfall:
+// registered answerers claim the request by returning their outcome. The
+// type is compile-time closed; decide still normalizes the value against
+// the outcome vocabulary. Register and dispatch this event name only
+// through this accessor.
+func Approvals(bus *agent.SubjectEventBus) agent.TypedWaterfall[ApprovalRequest, ApprovalOutcome] {
+	return agent.NewTypedWaterfall[ApprovalRequest, ApprovalOutcome](bus, EventApprovalRequest)
+}
+
+// containedDispatch runs the typed approval waterfall with panic
+// containment: a panicking answerer degrades to the fail-closed base.
+func containedDispatch(bus *agent.SubjectEventBus, agentScope scope.ScopeKey, req ApprovalRequest) (result ApprovalOutcome) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			result = base(payload)
+			result = OutcomeUnavailable
 		}
 	}()
-	return bus.Waterfall(event, agentScope, payload, base)
+	return Approvals(bus).Dispatch(agentScope, req, func(ApprovalRequest) ApprovalOutcome { return OutcomeUnavailable })
 }
 
 // PolicyContext builds the "approval:policy" dynamic context section for one

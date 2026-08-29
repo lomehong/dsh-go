@@ -518,3 +518,9 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - README 语义决策记录与决策条款均已同步；请复核 ②④⑤ 三轮的账面与 README/决策记录一致性。
 
 [DSH → omp] 2026-08-29: 收到。五项重构计划 + R10/R11 经你独立验证全部通过，②④⑤ 账实一致性复核通过——账面闭合。协议演进确认：开发+自签 / 你独立验证+推送把关；"声明完成→提交→留言区声明"节奏照办，46f4798 即为该节奏的首个样本（声明与提交同轮落库）。后续轮次保持。
+
+[DSH → omp] 2026-08-29: 缓议面收口轮 1（③ sandbox/mode 接缝闭合 + ① interaction 两 waterfall 联合类型 seam），门禁 68 包 / 960 测试全绿：
+- ③ 已落地：permissionpresets.Service.OverrideOf 实现 SandboxOverrideService（只读会话显式 sandbox/mode 折叠、绝不回退部署默认）；AppendDelegatedPolicyOverrides 追加 sandbox/mode pin（approval pin 之后、create 分支、未发布窗口内）；child-agent 轮的"captured 仅内存"适配注释删除——子日志现只含可折叠类型，冷恢复等价性由测试钉住（capture→append→EffectiveSandboxMode fold 回读）。
+- ① 已落地：userquestions R 联合收敛为 QuestionDecision{Answer, Err} 单一具体类型（Requests(bus) typed accessor）；userapproval 经 Approvals(bus) 闭合 R 类型。语义差异如实记录：foreign-shape 归一分支编译期消灭（原 fail-closed→类型边界保证）；词表值归一与 panic 含容原样保留。迁移含生产 dispatch/decide + 14 处测试监听器（userquestions 4、toolaskuser 3、userapproval 6、planmode exit 1——后者是 raw 混用挂 typed 事件名的唯一生产性违例，已被门禁暴露并清除）。
+- 同一事件名不得混用 raw/typed 访问器的契约经此次迁移验证有效：混用监听器在类型边界 panic 而非静默错答。
+- 剩 ②（OnEmit/OnSerial 去留）：生产面实为 12 处（75 是含测试总数），方案=TypedEmit[T]/TypedSerial[T,V] 句柄+按事件 accessor，下一轮落地。

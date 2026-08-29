@@ -78,6 +78,18 @@ func NewService(config Config) (*Service, error) {
 // declaration order.
 func (s *Service) Names() []string { return s.names }
 
+// OverrideOf reports the session's explicit sandbox-mode override (the
+// `sandbox/mode` fold), or empty without one. It never falls back to the
+// deployment default: delegation capture wants the parent's own choice
+// only. Satisfies the subagent.SandboxOverrideService seam structurally.
+func (s *Service) OverrideOf(sess *session.Session) string {
+	mode, ok := EffectiveSandboxMode(sess.Events())
+	if !ok {
+		return ""
+	}
+	return mode
+}
+
 // DefaultPreset returns the preset currently selected as the default for
 // future sessions.
 func (s *Service) DefaultPreset() string { return s.defaultPreset }

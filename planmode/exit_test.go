@@ -75,20 +75,19 @@ func newExitWorld(t *testing.T, active bool) *exitWorld {
 		registry: registry, service: service, runtime: runtime,
 		controller: controller, tool: tool, dispose: dispose, agent: built, sess: sess,
 	}
-	registry.Events().OnWaterfall(userquestions.EventUserQuestionsRequest, built.Scope, world.listener)
+	userquestions.Requests(registry.Events()).On(built.Scope, world.listener)
 	return world
 }
 
-func (w *exitWorld) listener(payload any, next func(any) any) any {
-	request := payload.(userquestions.Request)
+func (w *exitWorld) listener(request userquestions.Request, next func(userquestions.Request) userquestions.QuestionDecision) userquestions.QuestionDecision {
 	w.mu.Lock()
 	w.claims = append(w.claims, request)
 	claim := w.claim
 	w.mu.Unlock()
 	if claim == nil {
-		return next(payload)
+		return next(request)
 	}
-	return claim(request)
+	return userquestions.QuestionDecision{Answer: claim(request)}
 }
 
 func (w *exitWorld) seenRequests() []userquestions.Request {

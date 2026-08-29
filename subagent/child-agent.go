@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"dshgo/agent"
+	"dshgo/interaction/permissionpresets"
 	"dshgo/interaction/userapproval"
 	"dshgo/scope"
 	"dshgo/session"
@@ -255,17 +256,20 @@ func CaptureDelegatedPolicyOverrides(sandbox SandboxOverrideService, hasApproval
 // log alone. Appends land after any fork seed, so fresh policy wins stale
 // seed state; later child switches still win over these events.
 //
-// Go adaptation: the approval pin appends through the typed userapproval
-// vocabulary today. The sandbox-mode event awaits the sandbox-policy round —
-// the captured override is kept in memory for the creation window, and the
-// durable `sandbox/mode` append lands with that round's typed event, so the
-// child log never carries a type this build cannot fold back.
+// Both pins append through typed vocabulary (userapproval policy,
+// permissionpresets sandbox/mode), so the child log never carries a type
+// this build cannot fold back.
 func AppendDelegatedPolicyOverrides(childSession *session.Session, overrides DelegatedPolicyOverrides) error {
 	if overrides.ApprovalNever {
 		if _, err := childSession.Append(userapproval.EventApprovalPolicy, userapproval.PolicyData{
 			Policy: "never",
 			Source: "delegation",
 		}, nil); err != nil {
+			return err
+		}
+	}
+	if overrides.SandboxMode != "" {
+		if err := permissionpresets.SetSandboxMode(childSession, overrides.SandboxMode); err != nil {
 			return err
 		}
 	}

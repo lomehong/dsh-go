@@ -105,7 +105,7 @@ func TestNeverPolicyRejectsDeterministically(t *testing.T) {
 	service, registry, a := newTestService(t, Config{})
 	openTurn(t, a)
 	called := false
-	unsubscribe := registry.Events().OnWaterfall(EventApprovalRequest, a.Scope, func(payload any, next func(any) any) any {
+	unsubscribe := Approvals(registry.Events()).On(a.Scope, func(ApprovalRequest, func(ApprovalRequest) ApprovalOutcome) ApprovalOutcome {
 		called = true
 		return OutcomeAllowedOnce
 	})
@@ -131,8 +131,7 @@ func TestAnswererWaterfallClaimsAndCarriesContext(t *testing.T) {
 	service, registry, a := newTestService(t, Config{})
 	openTurn(t, a)
 	var seen map[string]any
-	unsubscribe := registry.Events().OnWaterfall(EventApprovalRequest, a.Scope, func(payload any, next func(any) any) any {
-		request := payload.(ApprovalRequest)
+	unsubscribe := Approvals(registry.Events()).On(a.Scope, func(request ApprovalRequest, next func(ApprovalRequest) ApprovalOutcome) ApprovalOutcome {
 		seen = map[string]any{"toolName": request.ToolName, "callId": request.CallID, "reason": request.Reason}
 		return OutcomeAllowedOnce
 	})
@@ -154,7 +153,7 @@ func TestAnswererWaterfallClaimsAndCarriesContext(t *testing.T) {
 func TestRogueAnswererNormalizesToUnavailable(t *testing.T) {
 	service, registry, a := newTestService(t, Config{})
 	openTurn(t, a)
-	unsubscribe := registry.Events().OnWaterfall(EventApprovalRequest, a.Scope, func(any, func(any) any) any {
+	unsubscribe := Approvals(registry.Events()).On(a.Scope, func(ApprovalRequest, func(ApprovalRequest) ApprovalOutcome) ApprovalOutcome {
 		return "banana"
 	})
 	defer unsubscribe()
@@ -170,7 +169,7 @@ func TestRogueAnswererNormalizesToUnavailable(t *testing.T) {
 func TestThrowingAnswererFailsQuestionClosed(t *testing.T) {
 	service, registry, a := newTestService(t, Config{})
 	openTurn(t, a)
-	unsubscribe := registry.Events().OnWaterfall(EventApprovalRequest, a.Scope, func(any, func(any) any) any {
+	unsubscribe := Approvals(registry.Events()).On(a.Scope, func(ApprovalRequest, func(ApprovalRequest) ApprovalOutcome) ApprovalOutcome {
 		panic("answerer exploded")
 	})
 	defer unsubscribe()
@@ -187,7 +186,7 @@ func TestScopeFiltering(t *testing.T) {
 	service, registry, a := newTestService(t, Config{})
 	openTurn(t, a)
 	// One agent-scoped answerer for agent-1 only.
-	unsubscribe := registry.Events().OnWaterfall(EventApprovalRequest, a.Scope, func(any, func(any) any) any {
+	unsubscribe := Approvals(registry.Events()).On(a.Scope, func(ApprovalRequest, func(ApprovalRequest) ApprovalOutcome) ApprovalOutcome {
 		return OutcomeAllowedOnce
 	})
 	defer unsubscribe()
@@ -312,7 +311,7 @@ func TestServiceSetPolicyAppendsOverride(t *testing.T) {
 func TestToolsSeamMapsVocabulary(t *testing.T) {
 	service, registry, a := newTestService(t, Config{})
 	openTurn(t, a)
-	unsubscribe := registry.Events().OnWaterfall(EventApprovalRequest, a.Scope, func(any, func(any) any) any {
+	unsubscribe := Approvals(registry.Events()).On(a.Scope, func(ApprovalRequest, func(ApprovalRequest) ApprovalOutcome) ApprovalOutcome {
 		return OutcomeAllowedOnce
 	})
 	defer unsubscribe()

@@ -25,8 +25,7 @@ type answerRecorder struct {
 	failure error
 }
 
-func (r *answerRecorder) listener(payload any, next func(any) any) any {
-	request := payload.(userquestions.Request)
+func (r *answerRecorder) listener(request userquestions.Request, next func(userquestions.Request) userquestions.QuestionDecision) userquestions.QuestionDecision {
 	r.mu.Lock()
 	r.seen = append(r.seen, request)
 	panics := r.panics
@@ -37,14 +36,14 @@ func (r *answerRecorder) listener(payload any, next func(any) any) any {
 		panic("ui exploded")
 	}
 	if failure != nil {
-		return failure
+		return userquestions.QuestionDecision{Err: failure}
 	}
 	if claim == nil {
 		// No claim and no delegation to offer: pass through to the base,
 		// which fails the request with NO_PROVIDER.
-		return next(payload)
+		return next(request)
 	}
-	return claim(request)
+	return userquestions.QuestionDecision{Answer: claim(request)}
 }
 
 func (r *answerRecorder) requests() []userquestions.Request {
@@ -130,7 +129,7 @@ func TestToolSchemaAndRegistration(t *testing.T) {
 
 func TestToolAsksAndReturnsAnswers(t *testing.T) {
 	world := newTestWorld(t)
-	world.registry.Events().OnWaterfall(userquestions.EventUserQuestionsRequest, world.agent.Scope, world.recorder.listener)
+	userquestions.Requests(world.registry.Events()).On(world.agent.Scope, world.recorder.listener)
 	world.recorder.claim = func(request userquestions.Request) userquestions.AskUserQuestionAnswer {
 		return userquestions.AskUserQuestionAnswer{Answers: []userquestions.AskUserQuestionAnswerItem{
 			{ID: "mode", Selected: []string{"Fast", "Safe"}, Custom: "also cheap"},
@@ -168,8 +167,8 @@ func TestToolAsksAndReturnsAnswers(t *testing.T) {
 func TestToolWithoutLiveAgentAsksUnscoped(t *testing.T) {
 	world := newTestWorld(t)
 	// A global-scope listener (no agent routing) still answers.
-	unsubscribe := world.registry.Events().OnWaterfall(userquestions.EventUserQuestionsRequest, nil, func(any, func(any) any) any {
-		return userquestions.AskUserQuestionAnswer{Answers: []userquestions.AskUserQuestionAnswerItem{{ID: "go", Selected: []string{"Yes"}}}}
+	unsubscribe := userquestions.Requests(world.registry.Events()).On(nil, func(userquestions.Request, func(userquestions.Request) userquestions.QuestionDecision) userquestions.QuestionDecision {
+		return userquestions.QuestionDecision{Answer: userquestions.AskUserQuestionAnswer{Answers: []userquestions.AskUserQuestionAnswerItem{{ID: "go", Selected: []string{"Yes"}}}}}
 	})
 	defer unsubscribe()
 	value, err := world.tool.Execute(questionsArgs(t, `{"questions":[{"id":"go","question":"Go?"}]}`),
@@ -185,7 +184,7 @@ func TestToolWithoutLiveAgentAsksUnscoped(t *testing.T) {
 
 func TestToolSurfacesAskAborted(t *testing.T) {
 	world := newTestWorld(t)
-	world.registry.Events().OnWaterfall(userquestions.EventUserQuestionsRequest, world.agent.Scope, world.recorder.listener)
+	userquestions.Requests(world.registry.Events()).On(world.agent.Scope, world.recorder.listener)
 	signal, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := world.tool.Execute(questionsArgs(t, `{"questions":[{"id":"go","question":"Go?"}]}`),

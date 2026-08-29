@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dshgo/agent"
+	"dshgo/interaction/permissionpresets"
 	"dshgo/interaction/userapproval"
 	"dshgo/llm"
 	"dshgo/scope"
@@ -277,17 +278,50 @@ func TestDelegatedPolicyCaptureAndAppend(t *testing.T) {
 	if data.Policy != userapproval.PolicyNever || data.Source != "delegation" {
 		t.Fatalf("pin = %+v", data)
 	}
-	// Without the approval capability nothing is seeded.
+	// A parent's explicit sandbox override appends the sandbox/mode pin and
+	// folds back to the same value from the child log alone.
+	if err := AppendDelegatedPolicyOverrides(sess, DelegatedPolicyOverrides{
+		ApprovalNever: true,
+		SandboxMode:   permissionpresets.SandboxWorkspaceWrite,
+	}); err != nil {
+		t.Fatalf("append sandbox pin: %v", err)
+	}
+	if got, ok := permissionpresets.EffectiveSandboxMode(sess.Events()); !ok || got != permissionpresets.SandboxWorkspaceWrite {
+		t.Fatalf("child sandbox fold = %q %v, want %q true", got, ok, permissionpresets.SandboxWorkspaceWrite)
+	}
+	// The real service seam reads the same explicit override from the log
+	// (and never invents a deployment default).
+	seam := &permissionpresets.Service{}
+	if got := seam.OverrideOf(sess); got != permissionpresets.SandboxWorkspaceWrite {
+		t.Fatalf("OverrideOf = %q, want %q", got, permissionpresets.SandboxWorkspaceWrite)
+	}
+	// Without the approval capability nothing is seeded: a no-capability
+	// append must leave both pins untouched.
+	policyCount := 0
+	sandboxCount := 0
+	for i := range sess.Events() {
+		switch sess.Events()[i].Type {
+		case userapproval.EventApprovalPolicy:
+			policyCount++
+		case permissionpresets.EventSandboxMode:
+			sandboxCount++
+		}
+	}
 	if err := AppendDelegatedPolicyOverrides(sess, CaptureDelegatedPolicyOverrides(nil, false, parent)); err != nil {
 		t.Fatalf("append none: %v", err)
 	}
-	count := 0
+	afterPolicy := 0
+	afterSandbox := 0
 	for i := range sess.Events() {
-		if sess.Events()[i].Type == userapproval.EventApprovalPolicy {
-			count++
+		switch sess.Events()[i].Type {
+		case userapproval.EventApprovalPolicy:
+			afterPolicy++
+		case permissionpresets.EventSandboxMode:
+			afterSandbox++
 		}
 	}
-	if count != 1 {
-		t.Fatalf("policy events = %d, want 1", count)
+	if afterPolicy != policyCount || afterSandbox != sandboxCount {
+		t.Fatalf("no-capability append changed pins: policy %d→%d, sandbox %d→%d",
+			policyCount, afterPolicy, sandboxCount, afterSandbox)
 	}
 }

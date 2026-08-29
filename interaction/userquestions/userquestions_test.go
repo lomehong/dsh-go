@@ -71,15 +71,14 @@ func TestNoAnswererFailsWithNoProvider(t *testing.T) {
 
 func TestAnswererClaimsRequest(t *testing.T) {
 	service, registry, a := newTestService(t)
-	unsubscribe := registry.Events().OnWaterfall(EventUserQuestionsRequest, a.Scope, func(payload any, next func(any) any) any {
-		request := payload.(Request)
+	unsubscribe := Requests(registry.Events()).On(a.Scope, func(request Request, next func(Request) QuestionDecision) QuestionDecision {
 		if len(request.Questions) != 1 || request.Questions[0].ID != "q1" {
 			t.Fatalf("questions = %+v", request.Questions)
 		}
 		if request.Agent != a {
 			t.Fatal("agent identity missing in transit")
 		}
-		return AskUserQuestionAnswer{Answers: []AskUserQuestionAnswerItem{{ID: "q1", Selected: []string{"Yes"}}}}
+		return QuestionDecision{Answer: AskUserQuestionAnswer{Answers: []AskUserQuestionAnswerItem{{ID: "q1", Selected: []string{"Yes"}}}}}
 	})
 	defer unsubscribe()
 	answer, err := service.Ask(Request{Questions: oneQuestion(), Agent: a})
@@ -176,8 +175,8 @@ func TestBadIntentWithoutDetailRejected(t *testing.T) {
 
 func TestValidPlanReviewIntentAsks(t *testing.T) {
 	service, registry, a := newTestService(t)
-	unsubscribe := registry.Events().OnWaterfall(EventUserQuestionsRequest, a.Scope, func(any, func(any) any) any {
-		return AskUserQuestionAnswer{Answers: []AskUserQuestionAnswerItem{{ID: "plan", Selected: []string{"Approve"}}}}
+	unsubscribe := Requests(registry.Events()).On(a.Scope, func(Request, func(Request) QuestionDecision) QuestionDecision {
+		return QuestionDecision{Answer: AskUserQuestionAnswer{Answers: []AskUserQuestionAnswerItem{{ID: "plan", Selected: []string{"Approve"}}}}}
 	})
 	defer unsubscribe()
 	answer, err := service.Ask(Request{
@@ -198,7 +197,7 @@ func TestValidPlanReviewIntentAsks(t *testing.T) {
 
 func TestThrowingAnswererRestoresThroughAbortion(t *testing.T) {
 	service, registry, a := newTestService(t)
-	unsubscribe := registry.Events().OnWaterfall(EventUserQuestionsRequest, a.Scope, func(any, func(any) any) any {
+	unsubscribe := Requests(registry.Events()).On(a.Scope, func(Request, func(Request) QuestionDecision) QuestionDecision {
 		panic("ui exploded")
 	})
 	defer unsubscribe()
@@ -219,8 +218,8 @@ func TestThrowingAnswererRestoresThroughAbortion(t *testing.T) {
 
 func TestForeignAnswererErrorPropagates(t *testing.T) {
 	service, registry, a := newTestService(t)
-	unsubscribe := registry.Events().OnWaterfall(EventUserQuestionsRequest, a.Scope, func(any, func(any) any) any {
-		return context.DeadlineExceeded
+	unsubscribe := Requests(registry.Events()).On(a.Scope, func(Request, func(Request) QuestionDecision) QuestionDecision {
+		return QuestionDecision{Err: context.DeadlineExceeded}
 	})
 	defer unsubscribe()
 	if _, err := service.Ask(Request{Questions: oneQuestion(), Agent: a}); err != context.DeadlineExceeded {
