@@ -129,6 +129,15 @@ func (c *Controller) Set(agentObj *agent.Agent, active bool) (string, error) {
 	return OutcomeCommitted, nil
 }
 
+// QueueExit records the exit tool's approval: the selected inactive state
+// waits for the next accepted in-turn pre-step. Narrate is false because the
+// tool's own result already narrates the transition.
+func (c *Controller) QueueExit(sess *session.Session) {
+	c.mu.Lock()
+	c.pending[sess] = pendingIntent{active: false, narrate: false}
+	c.mu.Unlock()
+}
+
 // RegisterPreStep registers the pre-step waterfall listener for the
 // lifetime of the composition. Pre-step is outside Session.append
 // publication, so it can append the log-only mode event inside an open turn

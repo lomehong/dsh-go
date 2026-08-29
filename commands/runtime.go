@@ -9,6 +9,7 @@ import (
 	"sort"
 	"sync"
 
+	"dshgo/agent"
 	"dshgo/cordis"
 	"dshgo/scope"
 	"dshgo/session"
@@ -208,6 +209,13 @@ func (r *CommandRuntime) effective(scopeKey scope.ScopeKey) []CommandDefinition 
 // discarded and the execution settles as the context error. The receiving
 // agent stays explicit; the scope key travels beside it.
 func (r *CommandRuntime) Execute(ctx context.Context, scopeKey scope.ScopeKey, sess *session.Session, line string, images []any) (*CommandExecution, error) {
+	return r.ExecuteForAgent(ctx, nil, scopeKey, sess, line, images)
+}
+
+// ExecuteForAgent dispatches like Execute and additionally hands the
+// receiving agent to the handler (the source invocation always carries the
+// Agent; UI surfaces that resolved one pass it here).
+func (r *CommandRuntime) ExecuteForAgent(ctx context.Context, agentObj *agent.Agent, scopeKey scope.ScopeKey, sess *session.Session, line string, images []any) (*CommandExecution, error) {
 	parsed, ok := ParseCommand(line)
 	if !ok {
 		return nil, nil
@@ -294,8 +302,12 @@ func (r *CommandRuntime) Execute(ctx context.Context, scopeKey scope.ScopeKey, s
 		result, err := definition.Handler(Invocation{
 			CommandID:   commandID,
 			Session:     sess,
+			Agent:       agentObj,
 			RawInput:    parsed.RawInput,
 			Attachments: attachments,
+			// The dispatching UI request's cancellation: the AbortSignal
+			// counterpart handlers pass into long-running work.
+			Context: ctx,
 		})
 		done <- outcome{result: result, err: err}
 	}()

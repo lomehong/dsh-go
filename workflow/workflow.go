@@ -297,6 +297,11 @@ type StartRequest struct {
 	// Script is the plain-JS script body (top-level await allowed; ends
 	// with `return <json-value>`).
 	Script string
+	// Program is the Go-realm counterpart of Script: the compiled
+	// orchestration the engine executes when no JS worker realm is mounted.
+	// Exactly one of Script/Program is meaningful per deployment; the
+	// engine requires Program.
+	Program Script
 	// Meta is the workflow's identity block, as plain JSON data
 	// (shape-validated by the engine).
 	Meta any

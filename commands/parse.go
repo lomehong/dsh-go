@@ -1,10 +1,13 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
 
+	"dshgo/agent"
+	"dshgo/llm"
 	"dshgo/session"
 )
 
@@ -83,6 +86,9 @@ type Invocation struct {
 	// invocation carries the Agent; Go handlers take the session the
 	// lifecycle records belong to).
 	Session *session.Session
+	// Agent is the exact receiving agent, when the dispatching surface
+	// resolved one. Handlers that steer or switch agent state use it.
+	Agent *agent.Agent
 	// RawInput is the exact text following the registered command name,
 	// including separator whitespace.
 	RawInput string
@@ -93,6 +99,10 @@ type Invocation struct {
 	// them in this invocation returns an error so the dispatching composer
 	// retains the originals.
 	Attachments []ImageAttachment
+	// Context carries the dispatching UI request's cancellation (the
+	// source invocation's AbortSignal). Long-running handlers pass it into
+	// their work.
+	Context context.Context
 }
 
 // ImageAttachment is one durably admitted image block handed to a handler.
@@ -100,6 +110,10 @@ type ImageAttachment struct {
 	// Reference is the store-assigned attachment reference (opaque to the
 	// registry).
 	Reference any
+	// Block is the optional admitted image content block the composition's
+	// admission adapter retained for handlers that re-inject the image into
+	// model-visible messages (steering); nil when not retained.
+	Block *llm.ContentBlock
 }
 
 // normalizeDefinition rejects invalid command metadata before it can reach
