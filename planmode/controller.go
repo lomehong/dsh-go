@@ -144,15 +144,8 @@ func (c *Controller) QueueExit(sess *session.Session) {
 // without re-entering the session. A failed append remains pending for a
 // later accepted in-turn pre-step, and policy cannot block the step.
 func (c *Controller) RegisterPreStep(agents *agent.AgentRegistry, logger cordis.Logger) func() {
-	return agents.Events().OnWaterfall(agent.EventPreStep, nil, func(payload any, next func(any) any) any {
-		decision, ok := next(payload).(agent.PreStepDecision)
-		if !ok {
-			return decision
-		}
-		preStep, ok := payload.(agent.PreStepPayload)
-		if !ok {
-			return decision
-		}
+	return agents.Events().PreStep().On(nil, func(preStep agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
+		decision := next(preStep)
 		sess := preStep.Agent.Session
 		c.mu.Lock()
 		pending, hasPending := c.pending[sess]

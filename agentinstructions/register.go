@@ -284,16 +284,8 @@ func Register(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, logger co
 		return nil
 	}
 
-	preStepDetach := agents.Events().OnWaterfall(agent.EventPreStep, nil, func(payload any, next func(any) any) any {
-		stepPayload, ok := payload.(agent.PreStepPayload)
-		if !ok {
-			return next(payload)
-		}
-		result := next(payload)
-		decision, ok := result.(agent.PreStepDecision)
-		if !ok {
-			return result
-		}
+	preStepDetach := agents.Events().PreStep().On(nil, func(stepPayload agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
+		decision := next(stepPayload)
 		a := stepPayload.Agent
 		// Touches that arrived during an open step settle before this
 		// composition, mirroring the official step/end flush: the inline

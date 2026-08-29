@@ -196,13 +196,9 @@ func Register(runtime *tools.ToolRuntime, skills *skill.Registry, agents *agent.
 	// skill stays ordinary prose. This is the only entry point for skills
 	// the model may not invoke itself; the catalog and the `skill` tool
 	// never see those.
-	gestureDetach := agents.Events().OnWaterfall(agent.EventPreStep, nil, func(payload any, next func(any) any) any {
-		decision, ok := next(payload).(agent.PreStepDecision)
-		if !ok || decision.Kind != "enter" {
-			return decision
-		}
-		p, ok := payload.(agent.PreStepPayload)
-		if !ok {
+	gestureDetach := agents.Events().PreStep().On(nil, func(p agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
+		decision := next(p)
+		if decision.Kind != "enter" {
 			return decision
 		}
 		names := invokedSkillNames(p.Messages)
@@ -245,13 +241,9 @@ func Register(runtime *tools.ToolRuntime, skills *skill.Registry, agents *agent.
 	// the exact registration above. The comparison is against the
 	// registered definition pointer, not a name lookup, so a scoped shadow
 	// merely named `skill` cannot inherit this catalog.
-	catalogDetach := agents.Events().OnWaterfall(agent.EventPreStep, nil, func(payload any, next func(any) any) any {
-		decision, ok := next(payload).(agent.PreStepDecision)
-		if !ok || decision.Kind != "enter" {
-			return decision
-		}
-		p, ok := payload.(agent.PreStepPayload)
-		if !ok {
+	catalogDetach := agents.Events().PreStep().On(nil, func(p agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
+		decision := next(p)
+		if decision.Kind != "enter" {
 			return decision
 		}
 		if p.Signal != nil && p.Signal.Err() != nil {

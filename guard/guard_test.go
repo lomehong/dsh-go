@@ -254,10 +254,10 @@ func TestRepeatPreStepResetWiring(t *testing.T) {
 	guard.Observe(built, repeatExec("bash", map[string]any{"cmd": "ls"}))
 	// …a user interjection in the claimed input resets it.
 	fake := &agent.Agent{Scope: built}
-	registry.Events().Waterfall(agent.EventPreStep, nil, agent.PreStepPayload{
+	registry.Events().PreStep().Dispatch(nil, agent.PreStepPayload{
 		Agent:    fake,
 		Messages: []llm.Message{{Source: llm.MessageSource{Kind: llm.SourceUser}}},
-	}, func(payload any) any { return agent.PreStepEnter(nil) })
+	}, func(agent.PreStepPayload) agent.PreStepDecision { return agent.PreStepEnter(nil) })
 	if guard.Observe(built, repeatExec("bash", map[string]any{"cmd": "ls"})) != nil {
 		t.Fatal("chain survived user interjection")
 	}

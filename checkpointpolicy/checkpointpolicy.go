@@ -108,18 +108,14 @@ func Attach(llmRuntime *llm.Runtime, toolRuntime *tools.ToolRuntime, agents *age
 	}
 	detachPreStep := func() {}
 	if agents != nil {
-		detachPreStep = agents.Events().OnWaterfall(agent.EventPreStep, nil, func(payload any, next func(any) any) any {
-			preStep, ok := payload.(agent.PreStepPayload)
-			if !ok {
-				return next(payload)
-			}
+		detachPreStep = agents.Events().PreStep().On(nil, func(preStep agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
 			// Before each request, persist everything committed by the
 			// preceding step; the first step's call is an intentional no-op
 			// beyond any prompt intake.
 			if flusher != nil && preStep.Agent != nil && preStep.Agent.Session != nil {
 				_ = flusher.FlushSession(string(preStep.Agent.Session.ID()))
 			}
-			return next(payload)
+			return next(preStep)
 		})
 	}
 	return func() {

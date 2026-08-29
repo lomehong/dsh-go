@@ -179,18 +179,13 @@ func messageTexts(messages []llm.Message) []string {
 
 func runPreStep(f *fixture, turn int64, claimed ...llm.Message) agent.PreStepDecision {
 	f.t.Helper()
-	result := f.registry.Events().Waterfall(agent.EventPreStep, f.agent.Scope, agent.PreStepPayload{
+	return f.registry.Events().PreStep().Dispatch(f.agent.Scope, agent.PreStepPayload{
 		Agent:    f.agent,
 		Messages: claimed,
 		Turn:     turn,
 		Step:     1,
 		Signal:   context.Background(),
-	}, func(any) any { return agent.PreStepEnter(claimed) })
-	decision, ok := result.(agent.PreStepDecision)
-	if !ok {
-		f.t.Fatalf("pre-step result = %T", result)
-	}
-	return decision
+	}, func(agent.PreStepPayload) agent.PreStepDecision { return agent.PreStepEnter(claimed) })
 }
 
 // executeTool registers and runs a tool that carries a `command` argument

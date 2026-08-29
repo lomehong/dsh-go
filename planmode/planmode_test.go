@@ -195,9 +195,9 @@ func TestSetQueuesDuringOpenTurnAndPreStepCommits(t *testing.T) {
 	}
 
 	// The next accepted in-turn pre-step appends the mode and the narration.
-	decision := registry.Events().Waterfall(agent.EventPreStep, nil, agent.PreStepPayload{
+	decision := registry.Events().PreStep().Dispatch(nil, agent.PreStepPayload{
 		Agent: agentObj, Messages: nil, Turn: 1, Step: 1, Signal: context.Background(),
-	}, func(payload any) any { return agent.PreStepEnter(nil) }).(agent.PreStepDecision)
+	}, func(agent.PreStepPayload) agent.PreStepDecision { return agent.PreStepEnter(nil) })
 	if !FoldPlanMode(sess.Events(), -1) {
 		t.Fatal("the pre-step must have committed the pending selection")
 	}
@@ -210,9 +210,9 @@ func TestSetQueuesDuringOpenTurnAndPreStepCommits(t *testing.T) {
 	}
 
 	// A subsequent pre-step with nothing pending changes nothing.
-	decision2 := registry.Events().Waterfall(agent.EventPreStep, nil, agent.PreStepPayload{
+	decision2 := registry.Events().PreStep().Dispatch(nil, agent.PreStepPayload{
 		Agent: agentObj, Messages: nil, Turn: 1, Step: 2, Signal: context.Background(),
-	}, func(payload any) any { return agent.PreStepEnter(nil) }).(agent.PreStepDecision)
+	}, func(agent.PreStepPayload) agent.PreStepDecision { return agent.PreStepEnter(nil) })
 	if len(decision2.Messages) != 0 {
 		t.Fatalf("decision = %+v, want no further narration", decision2)
 	}

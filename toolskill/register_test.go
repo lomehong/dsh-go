@@ -143,14 +143,13 @@ func step(claimed ...llm.Message) agent.PreStepDecision {
 
 func (r *testRig) runPreStep(t *testing.T, claimed ...llm.Message) agent.PreStepDecision {
 	t.Helper()
-	decision := r.registry.Events().Waterfall(agent.EventPreStep, r.agent.Scope, agent.PreStepPayload{
+	return r.registry.Events().PreStep().Dispatch(r.agent.Scope, agent.PreStepPayload{
 		Agent:    r.agent,
 		Messages: claimed,
 		Signal:   context.Background(),
-	}, func(payload any) any {
+	}, func(agent.PreStepPayload) agent.PreStepDecision {
 		return step(claimed...)
-	}).(agent.PreStepDecision)
-	return decision
+	})
 }
 
 func (r *testRig) loadSkill(t *testing.T, name string) (any, error) {
@@ -411,12 +410,12 @@ func TestCatalogRequiresExactToolVisibility(t *testing.T) {
 func TestRejectDecisionPassesThrough(t *testing.T) {
 	rig := newRig(t, Config{})
 	rig.publish(summaryOf("deploy", true, false))
-	decision := rig.registry.Events().Waterfall(agent.EventPreStep, rig.agent.Scope, agent.PreStepPayload{
+	decision := rig.registry.Events().PreStep().Dispatch(rig.agent.Scope, agent.PreStepPayload{
 		Agent:  rig.agent,
 		Signal: context.Background(),
-	}, func(payload any) any {
+	}, func(agent.PreStepPayload) agent.PreStepDecision {
 		return agent.PreStepReject()
-	}).(agent.PreStepDecision)
+	})
 	if decision.Kind != "reject" {
 		t.Fatalf("decision = %+v", decision)
 	}
@@ -476,12 +475,12 @@ func TestCancellationLeavesDecisionUntouched(t *testing.T) {
 	rig.publish(summaryOf("deploy", true, false))
 	ctxCanceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	decision := rig.registry.Events().Waterfall(agent.EventPreStep, rig.agent.Scope, agent.PreStepPayload{
+	decision := rig.registry.Events().PreStep().Dispatch(rig.agent.Scope, agent.PreStepPayload{
 		Agent:  rig.agent,
 		Signal: ctxCanceled,
-	}, func(payload any) any {
+	}, func(agent.PreStepPayload) agent.PreStepDecision {
 		return step(userMessage("hello"))
-	}).(agent.PreStepDecision)
+	})
 	if len(decision.Messages) != 1 {
 		t.Fatalf("canceled step touched: %+v", decision.Messages)
 	}

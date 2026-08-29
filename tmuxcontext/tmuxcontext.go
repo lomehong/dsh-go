@@ -212,15 +212,8 @@ func Attach(agents *agent.AgentRegistry, bash ShellExecutor, logger cordis.Logge
 		return nil, err
 	}
 	processID := os.Getpid()
-	detach := agents.Events().OnWaterfall(agent.EventPreStep, nil, func(payload any, next func(any) any) any {
-		preStep, ok := payload.(agent.PreStepPayload)
-		if !ok {
-			return next(payload)
-		}
-		decision, ok := next(payload).(agent.PreStepDecision)
-		if !ok {
-			return decision
-		}
+	detach := agents.Events().PreStep().On(nil, func(preStep agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
+		decision := next(preStep)
 		if decision.Kind == "reject" || (preStep.Signal != nil && preStep.Signal.Err() != nil) || preStep.Step != 1 {
 			return decision
 		}

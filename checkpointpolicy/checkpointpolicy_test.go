@@ -254,9 +254,9 @@ func TestPreStepArmFlushesAgentSession(t *testing.T) {
 		t.Fatalf("session: %v", err)
 	}
 	built := agent.NewAgent(agent.AgentConfig{ID: sess.ID(), Options: agent.AgentOptions{}, Session: sess}, registry.Events())
-	registry.Events().Waterfall(agent.EventPreStep, nil, agent.PreStepPayload{
+	registry.Events().PreStep().Dispatch(nil, agent.PreStepPayload{
 		Agent: built, Turn: 1, Step: 1, Signal: context.Background(),
-	}, func(payload any) any { return agent.PreStepEnter(nil) })
+	}, func(agent.PreStepPayload) agent.PreStepDecision { return agent.PreStepEnter(nil) })
 	if len(flusher.flushed) != 1 || flusher.flushed[0] != "checkpoint-1" {
 		t.Fatalf("flushed = %v", flusher.flushed)
 	}

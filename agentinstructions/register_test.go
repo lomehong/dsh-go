@@ -141,14 +141,14 @@ func (f *testFixture) publish(msg llm.Message) {
 // base decision.
 func (f *testFixture) runPreStep(step int64, claimed ...llm.Message) agent.PreStepDecision {
 	f.t.Helper()
-	return f.registry.Events().Waterfall(agent.EventPreStep, f.agent.Scope, agent.PreStepPayload{
+	return f.registry.Events().PreStep().Dispatch(f.agent.Scope, agent.PreStepPayload{
 		Agent:    f.agent,
 		Messages: claimed,
 		Step:     step,
 		Signal:   context.Background(),
-	}, func(payload any) any {
+	}, func(agent.PreStepPayload) agent.PreStepDecision {
 		return agent.PreStepEnter(claimed)
-	}).(agent.PreStepDecision)
+	})
 }
 
 // touchWrite fires a successful `write` execution through the runtime so the
@@ -477,13 +477,13 @@ func TestDisposalStopsProjection(t *testing.T) {
 
 func TestRejectPassesThrough(t *testing.T) {
 	fixture := newFixture(t)
-	decision := fixture.registry.Events().Waterfall(agent.EventPreStep, fixture.agent.Scope, agent.PreStepPayload{
+	decision := fixture.registry.Events().PreStep().Dispatch(fixture.agent.Scope, agent.PreStepPayload{
 		Agent:  fixture.agent,
 		Step:   1,
 		Signal: context.Background(),
-	}, func(payload any) any {
+	}, func(agent.PreStepPayload) agent.PreStepDecision {
 		return agent.PreStepReject()
-	}).(agent.PreStepDecision)
+	})
 	if decision.Kind != "reject" {
 		t.Fatalf("reject must pass through, got %q", decision.Kind)
 	}

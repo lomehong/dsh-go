@@ -202,13 +202,9 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 
 	// UserPromptSubmit → PreStepDecision. The prompt text is the payload;
 	// no matcher subject (CC ignores matchers for this event).
-	disposers = append(disposers, agents.Events().OnWaterfall(agent.EventPreStep, nil, func(payload any, next func(any) any) any {
-		step, ok := payload.(agent.PreStepPayload)
-		if !ok {
-			return next(payload)
-		}
+	disposers = append(disposers, agents.Events().PreStep().On(nil, func(step agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
 		if len(step.Messages) == 0 {
-			return next(payload)
+			return next(step)
 		}
 		var blocks []llm.ContentBlock
 		for _, message := range step.Messages {
@@ -217,18 +213,14 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 		merged, runErr := b.runPoint(pointUserPromptSubmit, "", b.promptPayload(step.Agent, blocks), runPointOptions{agent: step.Agent, turn: step.Turn, hasTurn: true, signal: step.Signal})
 		if runErr != nil {
 			b.logger.Warn(fmt.Sprintf("hooks-claude-code: UserPromptSubmit hook failed: %v", runErr))
-			return next(payload)
+			return next(step)
 		}
 		if merged.Decision == hookprotocol.MergedDeny {
 			return agent.PreStepReject()
 		}
 		// Delegate so later listeners may still rewrite or reject, then
 		// prepend our context only to a downstream enter decision.
-		downstream := next(payload)
-		decision, ok := downstream.(agent.PreStepDecision)
-		if !ok {
-			return downstream
-		}
+		decision := next(step)
 		ours := contextFrom(b, merged)
 		if ours == nil || decision.Kind != "enter" {
 			return decision

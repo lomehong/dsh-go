@@ -130,9 +130,9 @@ func TestDeriveBrowserZoneContext(t *testing.T) {
 }
 
 func runPreStep(registry *agent.AgentRegistry, agentObj *agent.Agent, proposed []llm.Message, turn int64, step int64) agent.PreStepDecision {
-	return registry.Events().Waterfall(agent.EventPreStep, nil, agent.PreStepPayload{
+	return registry.Events().PreStep().Dispatch(nil, agent.PreStepPayload{
 		Agent: agentObj, Messages: proposed, Turn: turn, Step: step, Signal: context.Background(),
-	}, func(payload any) any { return agent.PreStepEnter(proposed) }).(agent.PreStepDecision)
+	}, func(agent.PreStepPayload) agent.PreStepDecision { return agent.PreStepEnter(proposed) })
 }
 
 func TestPreStepInjectsDurableReadings(t *testing.T) {
@@ -229,18 +229,18 @@ func TestRejectAndPoisonedZoneShortCircuit(t *testing.T) {
 	t.Cleanup(undo)
 	decision := runPreStep(registry, agentObj, nil, 2, 1)
 	_ = decision
-	rejected := registry.Events().Waterfall(agent.EventPreStep, nil, agent.PreStepPayload{
+	rejected := registry.Events().PreStep().Dispatch(nil, agent.PreStepPayload{
 		Agent: agentObj, Messages: nil, Turn: 2, Step: 1, Signal: context.Background(),
-	}, func(payload any) any { return agent.PreStepReject() }).(agent.PreStepDecision)
+	}, func(agent.PreStepPayload) agent.PreStepDecision { return agent.PreStepReject() })
 	if rejected.Kind != "reject" {
 		t.Fatalf("decision = %+v, want reject passthrough", rejected)
 	}
 	poisoned := []llm.Message{llm.NewUserMessage(
 		[]llm.ContentBlock{{Type: llm.BlockText, Text: "hi"}},
 		llm.MessageSource{Kind: llm.SourceUser, RPCID: "r1", ClientTimeZone: "Mars/Olympus"})}
-	decision2 := registry.Events().Waterfall(agent.EventPreStep, nil, agent.PreStepPayload{
+	decision2 := registry.Events().PreStep().Dispatch(nil, agent.PreStepPayload{
 		Agent: agentObj, Messages: poisoned, Turn: 2, Step: 1, Signal: context.Background(),
-	}, func(payload any) any { return agent.PreStepEnter(poisoned) }).(agent.PreStepDecision)
+	}, func(agent.PreStepPayload) agent.PreStepDecision { return agent.PreStepEnter(poisoned) })
 	if decision2.Kind != "reject" {
 		t.Fatalf("decision = %+v, want the poisoned-zone step rejection", decision2)
 	}

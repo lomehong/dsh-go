@@ -228,3 +228,46 @@ func (b *SubjectEventBus) Waterfall(event string, agentScope scope.ScopeKey, pay
 	}
 	return eventListeners.Dispatch(agentScope, payload, base)
 }
+
+// TypedWaterfall binds one waterfall event name to its payload and result
+// types. It drives the same any-erased listener table as the raw
+// OnWaterfall/Waterfall pair; the only type assertions in the path sit at
+// this boundary, where construction guarantees they hold, so every listener
+// downstream of a typed event works with real types instead of an
+// assert-and-decode ritual. Register and dispatch one event name through
+// exactly one accessor: a raw listener on a typed event's name would
+// receive values its assertions cannot decode (Go has no generic methods,
+// hence the value-typed handle rather than bus-level type parameters).
+type TypedWaterfall[T any, R any] struct {
+	bus   *SubjectEventBus
+	event string
+}
+
+// NewTypedWaterfall binds an event name to its payload and result types.
+func NewTypedWaterfall[T any, R any](bus *SubjectEventBus, event string) TypedWaterfall[T, R] {
+	return TypedWaterfall[T, R]{bus: bus, event: event}
+}
+
+// On registers an around-middleware listener; first-registered is
+// outermost. The handler must call next to delegate.
+func (w TypedWaterfall[T, R]) On(listenerScope scope.ScopeKey, fn func(payload T, next func(T) R) R) func() {
+	return w.bus.OnWaterfall(w.event, listenerScope, func(payload any, next func(any) any) any {
+		return fn(payload.(T), func(value T) R {
+			return next(value).(R)
+		})
+	})
+}
+
+// Dispatch composes the chain in the agent's scope with base as the
+// innermost default.
+func (w TypedWaterfall[T, R]) Dispatch(agentScope scope.ScopeKey, payload T, base func(T) R) R {
+	return w.bus.Waterfall(w.event, agentScope, payload, func(value any) any {
+		return base(value.(T))
+	}).(R)
+}
+
+// PreStep is the typed accessor for the agent/pre-step waterfall: whether
+// and with which messages the loop enters a proposed step.
+func (b *SubjectEventBus) PreStep() TypedWaterfall[PreStepPayload, PreStepDecision] {
+	return NewTypedWaterfall[PreStepPayload, PreStepDecision](b, EventPreStep)
+}

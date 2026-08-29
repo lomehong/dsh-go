@@ -65,10 +65,9 @@ func newLoopAgent(t *testing.T, id string) (*agent.Agent, *session.Session) {
 
 func runPreStep(t *testing.T, registry *agent.AgentRegistry, built *agent.Agent, turn int64, step int64, proposed []llm.Message) agent.PreStepDecision {
 	t.Helper()
-	decision := registry.Events().Waterfall(agent.EventPreStep, nil, agent.PreStepPayload{
+	return registry.Events().PreStep().Dispatch(nil, agent.PreStepPayload{
 		Agent: built, Messages: proposed, Turn: turn, Step: step, Signal: context.Background(),
-	}, func(payload any) any { return agent.PreStepEnter(proposed) }).(agent.PreStepDecision)
-	return decision
+	}, func(agent.PreStepPayload) agent.PreStepDecision { return agent.PreStepEnter(proposed) })
 }
 
 func TestQueryRejectsInheritedEnvironmentAndBadOutput(t *testing.T) {

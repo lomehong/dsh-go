@@ -138,9 +138,14 @@ func TestRunHookEnvAndWorkdir(t *testing.T) {
 
 func TestRunHookTimeoutIsNonBlocking(t *testing.T) {
 	withSeamShell(t)
-	command := "ping -n 5 127.0.0.1 >nul"
+	// R11: the command must outlast the assertion cap by a wide margin —
+	// sleep 5 against a 4s cap left only 1s of slack, so under a fully
+	// loaded machine the natural exit occasionally beat the timeout kill
+	// and failed the test. A 30s command makes the kill the only way the
+	// call returns inside the cap; the assertion is unchanged.
+	command := "ping -n 30 127.0.0.1 >nul"
 	if os.PathSeparator != '\\' {
-		command = "sleep 5"
+		command = "sleep 30"
 	}
 	started := time.Now()
 	result := RunHook(CommandHook{Command: command, TimeoutSec: floatPtr(1)}, RunHookOptions{
@@ -181,9 +186,12 @@ func TestRunHookSpawnFailureIsNonBlocking(t *testing.T) {
 
 func TestRunHookSignalCancellationIsNonBlocking(t *testing.T) {
 	withSeamShell(t)
-	command := "ping -n 5 127.0.0.1 >nul"
+	// R11: same margin argument as the timeout test — a 30s command
+	// ensures the measured return is the signal cancellation, never the
+	// command finishing first on a loaded machine.
+	command := "ping -n 30 127.0.0.1 >nul"
 	if os.PathSeparator != '\\' {
-		command = "sleep 5"
+		command = "sleep 30"
 	}
 	signal, cancel := context.WithCancel(context.Background())
 	go func() {

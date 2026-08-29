@@ -296,16 +296,14 @@ func (g *RepeatToolReminder) Reset(agentKey scope.ScopeKey) {
 // because repetition across a context change is not a loop. Always delegates
 // — attaching nothing, vetoing nothing. The returned disposer detaches it.
 func (g *RepeatToolReminder) AttachPreStepReset(agents *agent.AgentRegistry) func() {
-	return agents.Events().OnWaterfall(agent.EventPreStep, nil, func(payload any, next func(any) any) any {
-		if preStep, ok := payload.(agent.PreStepPayload); ok {
-			for _, message := range preStep.Messages {
-				if message.Source.Kind == llm.SourceUser {
-					g.Reset(preStep.Agent.Scope)
-					break
-				}
+	return agents.Events().PreStep().On(nil, func(preStep agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
+		for _, message := range preStep.Messages {
+			if message.Source.Kind == llm.SourceUser {
+				g.Reset(preStep.Agent.Scope)
+				break
 			}
 		}
-		return next(payload)
+		return next(preStep)
 	})
 }
 

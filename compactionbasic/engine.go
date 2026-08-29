@@ -405,11 +405,7 @@ func linkCancellation(operationSignal context.Context, cancel context.CancelCaus
 func (e *Engine) RegisterAutomaticCompaction(bus *agent.SubjectEventBus, listenerScope agent.ScopeKey) (dispose func()) {
 	disposers := make([]func(), 0, 3)
 
-	disposers = append(disposers, bus.OnWaterfall(agent.EventPreStep, listenerScope, func(payload any, next func(any) any) any {
-		preStep, ok := payload.(agent.PreStepPayload)
-		if !ok {
-			return next(payload)
-		}
+	disposers = append(disposers, bus.PreStep().On(listenerScope, func(preStep agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
 		if signalErr(preStep.Signal) == nil {
 			result, err := e.CompactIfNeeded(ViewAgent(preStep.Agent), TriggerPressure, preStep.Signal)
 			if err != nil {
@@ -420,7 +416,7 @@ func (e *Engine) RegisterAutomaticCompaction(bus *agent.SubjectEventBus, listene
 					e.warnedPressureConfigTargets[pressureErr.TargetKey] = true
 					e.mu.Unlock()
 					if alreadyWarned {
-						return next(payload)
+						return next(preStep)
 					}
 				}
 				e.logWarn(fmt.Sprintf("step compaction failed: %s; continuing the turn", llm.ErrorChain(err)))
@@ -428,7 +424,7 @@ func (e *Engine) RegisterAutomaticCompaction(bus *agent.SubjectEventBus, listene
 				e.logResult(*result, "step pressure")
 			}
 		}
-		return next(payload)
+		return next(preStep)
 	}))
 
 	disposers = append(disposers, bus.OnEmit(agent.EventAgentStatus, listenerScope, func(payload any) error {

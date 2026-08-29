@@ -538,15 +538,15 @@ func (d *ReactLoopAgent) preStep(signal context.Context, target agent.InboxTarge
 	if projected.ID != "" || len(projected.Content) > 0 {
 		messages = append(append([]llm.Message{}, claimed...), projected)
 	}
-	decision := d.Events().Waterfall(agent.EventPreStep, d.Scope, agent.PreStepPayload{
+	decision := d.Events().PreStep().Dispatch(d.Scope, agent.PreStepPayload{
 		Agent:    d.Agent,
 		Messages: claimed,
 		Turn:     turn,
 		Step:     step,
 		Signal:   signal,
-	}, func(payload any) any {
+	}, func(agent.PreStepPayload) agent.PreStepDecision {
 		return agent.PreStepEnter(messages)
-	}).(agent.PreStepDecision)
+	})
 	if err := signal.Err(); err != nil {
 		return preparedStep{}, err
 	}

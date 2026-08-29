@@ -193,15 +193,8 @@ func Register(ctx *cordis.Context, agents *agent.AgentRegistry, config Config) (
 		// zone when no name is recoverable.
 		fallbackTimeZone = fallbackFormatter.String()
 	}
-	undo := agents.Events().OnWaterfall(agent.EventPreStep, nil, func(payload any, next func(any) any) any {
-		preStep, ok := payload.(agent.PreStepPayload)
-		if !ok {
-			return next(payload)
-		}
-		decision, ok := next(payload).(agent.PreStepDecision)
-		if !ok {
-			return decision
-		}
+	undo := agents.Events().PreStep().On(nil, func(preStep agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
+		decision := next(preStep)
 		if decision.Kind == "reject" || preStep.Signal.Err() != nil {
 			return decision
 		}

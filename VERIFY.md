@@ -474,3 +474,9 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 **测试**：21 个行为测试（id 规则边界、错误串逐字表、ClassifyFailure 全映射、specifier 分类含 Windows 绝对路径、metadata 读写降级表、shape 全错误串、健康解析（缺文件/缺包/装包后恢复/多条列表/disabled 真假值/坏 YAML）、包 walk 上溯+subpath、scanRoot 排序/broken/跳过非 id/不存在/文件根 fail loud、first-root-wins、WritableRoot、copy 全路径（树/tighten/metadata 重写/占用/失败无残留）、delete 三拒绝、roster 全流程（列表/resolve 顺序/unknown available 列表/broken mount/ReadDocument/copy/remove 拒系统/清默认）、stamp（Chtimes 确定性——同尺寸两写可落同一 mtime 刻度，满载翻车一次后改为显式推时间戳）、persona 影子/根冲突/complete+抑制、投影 fold/decode）。
 
 **门禁**：go.mod gopkg.in/yaml.v3 转直接依赖（go mod tidy）；PKGS=68 PASS=956 FAIL=0（满载时 hookprotocol TestRunHookSignalCancellationIsNonBlocking 偶发超时为已知负载敏感项，单跑 0.29s 全绿，与本包无关）。
+
+[DSH → omp] 2026-08-29: 架构重构轮 1（类型化事件总线样板）+ R10/R11 关闭，门禁 68 包 / 959 测试全绿：
+- R11 已修：hookprotocol 两个非阻塞测试的命令 sleep 5→30（ping -n 30 / sleep 30），4s 断言上限不变——被测路径（超时杀 / 信号取消）成为 4s 内唯一可能 ends 的路径，负载免疫。断言强度不变。
+- R10 已关：README workflow 表行补引擎交付事实（engine.go ScriptAPI 六件/发布前四门/cap+派发 fatal/parallel 保序/pipeline 无栅栏/settle 恰一次/Dispose 幂等/RunTraceValidator 13 违例面）；语义决策记录新增"Go 原生函数域替代 worker-thread plain-JS realm"条目（含明示兼容边界：官方 JS 脚本源文本在 Go 域不执行，Program 即 Go 侧脚本形态）；路线图 workflow 行改为已完成。
+- ① 样板落地：agent/events.go 新增 TypedWaterfall[T,R]（值类型句柄绕过 Go 无泛型方法限制）+ Events().PreStep().On/Dispatch 访问器；any 断言只在类型边界一处（构造保证成立）。EventPreStep 全部生产消费方（agentloop driver 派发点 + agentinstructions/checkpointpolicy/guard/compactionbasic/planmode/timecontext/tmuxcontext/toolskill/hooksclaudecode/hookscodex 十个监听器）已迁移，assert-and-decode 仪式全部消灭；15 处测试调用点同步迁移；新增 3 个类型化契约测试（组合次序/base-innermost/无监听走 base）。raw 站点残留 0。事件词汇/wire/作用域准入/次序契约零变化，同一张 any 表驱动。决策记录已补。
+- 下一轮：②③④（init 收拢装配层 / projection 泛型+显式 changed 门 / cordis 类型化服务键），⑤ weakmap 逐点评估随后。

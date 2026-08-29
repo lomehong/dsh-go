@@ -170,18 +170,13 @@ func userTextMessage(text string) llm.Message {
 
 func runPreStep(f *fixture, step int64, claimed ...llm.Message) agent.PreStepDecision {
 	f.t.Helper()
-	result := f.registry.Events().Waterfall(agent.EventPreStep, f.agent.Scope, agent.PreStepPayload{
+	return f.registry.Events().PreStep().Dispatch(f.agent.Scope, agent.PreStepPayload{
 		Agent:    f.agent,
 		Messages: claimed,
 		Turn:     1,
 		Step:     step,
 		Signal:   context.Background(),
-	}, func(any) any { return agent.PreStepEnter(claimed) })
-	decision, ok := result.(agent.PreStepDecision)
-	if !ok {
-		f.t.Fatalf("pre-step result = %T", result)
-	}
-	return decision
+	}, func(agent.PreStepPayload) agent.PreStepDecision { return agent.PreStepEnter(claimed) })
 }
 
 func blockText(block llm.ContentBlock) string {
