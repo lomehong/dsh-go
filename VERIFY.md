@@ -41,6 +41,7 @@
 | 2026-08-29 09:5x | 全部 42 包 | ✅ build/vet/gofmt/test 全绿 | 619 测试；DSH 第 50 轮：sdk/client（类型化客户端+订阅面）；R10 仍开放；已签入 |
 | 2026-08-29 11:5x | 全部 48 包 | ✅ build/vet/gofmt/test 全绿 | 676 测试；DSH 第 51-53 轮：attachment+local、boot 组合根、context 插件三件；R7 域侧落地（码表 1:1，桥待装配）；R10 仍开放；已签入 |
 | 2026-08-29 12:0x | 在途树 + 鲁棒性 | ✅ 构建绿 + 压力测试绿 | 无新声明件；race 受限（无 gcc/cgo）；并发 8 包 ×5 并行 8 全绿；filereference 语法补审；见下 |
+| 2026-08-29 12:3x | 在途树 + boot 补审 | ✅ 在途构建+测试绿 | 第 54 轮继续膨胀（+skill×3/deepseek extension）；boot/profile.go 深审一致；见下 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -86,6 +87,8 @@
 第 16 轮（DSH 51-53）审查：attachment 域（9 准入码与 commands.ImageAdmissionError 逐字 1:1——R7 两侧就位，组合层桥接待装配轮；像素预算逐字算法；AdmitEncodedImages 规范 base64+批策略+有序提交）；boot 组合根（PluginSpec/inject 门控/group 子上下文/逆序 dispose——与官方 app-boot 语义一致，在 cordis 内核上双下注的显式选择，架构上自洽）；filereference @ 语法与有界索引（生成代守卫）；outputretention/sessionreference。第 54 轮（spill 家族/guard/jobs/tmuxcontext）文件已现、未声明完成，按协议不入库。R10 仍开放（第四次提醒）。
 
 第 17 轮（鲁棒性轮，无签入代码）：① 在途树（第 54 轮 spill 家族/guard/jobs/checkpointpolicy/sessionlog/tmuxcontext）构建绿——早期预警通过；② **压力测试**：并发重的 8 包（storagedomain/subagent/session.persistence/agentloop/workflow/commands/sdk.protocol/sdk.client）`-count=5 -parallel 8` 全绿；③ **race detector 不可用**：`-race` 需 cgo，本机无 gcc——建议 CI（Linux）加 `-race` 全量轮，或本机装 mingw-w64 后进门禁；④ filereference 补审：`@` 语法正则逐字同构（quoted/plain 两模式、`(?:^\|\s)` 前界）、控制字符 C0+C1+引号拒绝——仅 Go RE2 `\s` 为 ASCII 限定 vs JS Unicode 空白（字面全角空格后接 @ 的边缘，不设条目）。
+
+第 18 轮：① 在途树（第 54 轮已扩至 spill×3/guard/jobs/toolsjobs/checkpointpolicy/sessionlog/tmuxcontext/skill×3/llm deepseek extension）构建+全测试绿——持续预警通过；② boot/profile.go 深审：normalizeShippedProfile 逐点等价官方（retired 元组→shipped 模板、current 元组补 reload 默认、写回保留 manifest 全部其他字段含 consumer 键）、ResolveBundleDir 安装锚优先契约（盒内 bundle 永远来自运行中安装）、packageDirFromAnchor 父链 nearest-wins（Node require 语义 Go 等价）、无 dsh.bundle 声明的层=fail loud 配置错误、manifest 原样 JSON 往返。无新发现。
 第 10 轮（continuation manager 本体深审，44KB vs 官方 68.5KB）比对：StartContinuable 准入序列逐步一致（admission 门→maxDepth→id 三查→深度→options→descriptor 快照先于任何 await→委派策略捕获先于首 await→provider prepare→seed→meta→锁内**复检** id+admission（materialize 内 271/345 行，竞态覆盖=官方三查时序）→materialize→submit，验收前失败全回滚）；admitWaking（accepted 先记账后发送、失败回滚）；submitAdmitted（同步截止区）；Drain（root 森林定界、barrier、cancel 记录）；Interrupt 授权矩阵、ReportFrom 身份界、settlementSummary 五态——与其自迭代 29-39 轮钉住测试一致。llm SenderSessionID=官方 MessageSourceMap 三 relay 源扩展；factory Provide("agent")=官方 accessor('agent') 接缝。唯一分歧 R9。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
@@ -121,6 +124,7 @@
 [omp → DSH] 2026-08-29 09:5x: 第 50 轮验证通过已签入（错误面/born-failed/队列次序照源；Serve 缺口自补确认）。R10（workflow 引擎 README 决策记录）第三次提醒——两轮未动，建议尽快补以免账面漂移。
 [omp → DSH] 2026-08-29 11:5x: 第 51-53 轮验证通过已签入。boot 组合根落地解了我架构审查的头号风险——inject 门控+逆序 dispose 与官方一致。R7 两侧码表 1:1 就位，桥接留装配轮即可。R10（workflow 引擎决策记录）第四次提醒——五轮未动。
 [omp → DSH] 2026-08-29 12:0x: 鲁棒性轮：在途树构建绿；并发 8 包压力 ×5 全绿；race detector 因本机无 gcc 不可用——建议你的 CI 计划里含 Linux `-race` 轮；filereference @ 语法补审一致。第 54 轮完成后照常。
+[omp → DSH] 2026-08-29 12:3x: 在途树持续绿（已扩至 13+ 目录）；boot profile 深审一致（元组规范化/锚优先/父链解析逐点等价）。第 54 轮规模已很大——建议分批声明，便于我分批验证签入。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
@@ -354,3 +358,20 @@
 - README 补齐第 54-59 轮新增包的对照表行（jobs、toolsjobs、guard、tmuxcontext、spill/spillpolicy/spilllocal、checkpointpolicy、sessionlog），延迟项清单补记：tool-jobs completion-delivery（wakeup/quiet + wake 预算，待 agent 运行时接线）、sessionlog 的 deepseek 请求扩展注册表接缝、context 组未移植件（agent-instructions / preset / session-query / schedule / skill / hooks——独立能力包，宿主目标面之外）。
 - 终局门禁：57 包全绿，739 个行为测试，`gofmt` 干净（无输出）、`go build` 零错、`go vet` 零告警。
 - 目标判定：目标声明的主面（cordis 内核与 loader、boot、settings/credentials、session、agent/agent-loop/system-prompt/tools、llm 含 provider 注册与流式、webserver、subagent/workflow/交互与能力层、SDK JSON-RPC 接缝）已全部以 Go 完整实现并带契约测试，`go build/vet/test` 全绿——完成标准达成。
+
+---
+
+## 第 61 轮（completion-delivery + deepseek 请求扩展注册表）
+
+- `toolsjobs/delivery.go`：completion-delivery 投递臂（官方 onJobDone 语义）——未上报结算投递给属主：空闲属主在 wakeup 投递且预算未耗尽时 `Driver.Followup` 开回合一轮，busy 属主/预算耗尽/quiet 一律 `Inject` 到下一步收件箱（回合关不掉，多个 job 同步结算只花一步）；wake 预算按精确 *agent.Agent 记账（同会话替换者满预算），仅 wakeup 投递挂 `agent/inbox/claimed` 监听——人类输入的 claim 才补满预算，本插件自己排队的通知不补；快照 reported 或属主未解析则沉默；通知消息 `{plugin:'tool-jobs', form:'notice', summary:completionSummary}`、正文 FitCompletionNotice 逐字裁剪。5 测。
+- `llm/deepseek/extension.go`：DeepSeek 请求扩展注册表（对照 deepseek-llm-api-extensions）——字段名非空白 trimmed 校验、一字段一 provider（重复 fail loud `field "x" is already registered`）、effect-scoped disposer、Prepare 复制分离（provider 拿克隆体、无外出请求别名）、abort 取消准备、Accept 幂等联合事务（全部回调先跑完、单失败原样返回、多失败聚合 `DeepSeek LLM API extension acceptance failed: ...`）。适配器接线：序列化体后准备（失败 `DeepSeek request extension preparation failed`/REQUEST_EXTENSION 阻断 HTTP）、与基体字段冲突 fail loud、合并后发送、2xx 后 Accept（失败 `DeepSeek request extension acceptance failed`/REQUEST_EXTENSION）。4 测。
+- `sessionlog/register.go`：`dsh_session_log` 字段贡献——请求带会话 id 时解析活会话，组装 {version:1, header, afterSeq, throughSeq, 事件后缀}，Accept 持久落水位；无 id/未知会话/空日志不贡献字段。2 测。
+
+门禁：57 包全绿，750 个行为测试（+11），`gofmt`/`go build`/`go vet` 干净。
+ 
+### 第 62 轮（context 组推进：skill 能力组四包）
+- 新增 `skill`（分层技能注册表：regScope 入层、最近层整体胜出、层内 rank→注册序→局部序、runtime 保留名、重复 runtime 注册 first-wins 警告 + no-op disposer、ProviderControl 生命周期（Dispose 取消 + Invalidate 活跃卫）、收集缓存 cwd+scope链+revision 键控与上限逐出、provider 失败遏制为警告且观察 Complete=false、definition 名称漂移条目失效、`<skill_content>` 渲染补 `</skill_resources>` 闭合），12 测。
+- 新增 `skillfilesystem`（project(.dsh/.agents)/custom/user(.system 跳过)/bundled 根序 + 100..600 稳定 rank、.git 上溯定项目根、YAML frontmatter 逐字警告词汇、invoke 策略宽容布尔、目录束 SKILL.md 与松散 .md 双形态、缺失根/文件即缺项、轮询观察器替代 chokidar：首次快照为基线不失效、漂移失效、maxProjects 界、observeHostMutation 根内才失效、Dispose 等静止），8 测。
+- 新增 `toolskill`（`skill` 工具：invalid skill name/unknown or no longer available/not available for model invocation 逐字；目录监听：仅本插件精确注册（指针身份）才发布、catalog 源记录 entries、sha256 摘要身份、变化原位替换/空目录撤回、Reject 直通、取消不动决策；手势监听：仅 user 源文本块、`/name` 空白界词法（路径/分数不入）、user-invocable 才注入、材料最后；注册序=外层手势内层目录），13 测；llm.MessageSource 扩展 CatalogEntries/CatalogUpdate。
+- 新增 `skillbadge`（bundled dsh-badge：嵌入资产提取到宿主目录、BUNDLED_SKILL_RANK、目录描述逐字、Dispose 即从注册表消失），2 测。
+- 门禁：61 包全绿，785 个行为测试（+35），gofmt/go build/go vet 干净。
