@@ -15,10 +15,10 @@ import (
 // compaction.
 const EventSubagentDescriptor = "subagent/descriptor"
 
-func init() {
-	if err := session.RegisterEventType(EventSubagentDescriptor); err != nil {
-		panic(fmt.Sprintf("subagent: %v", err))
-	}
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	session.EnsureEventTypes(EventSubagentDescriptor)
 }
 
 // SubagentDescriptorVersion is the current descriptor format version,

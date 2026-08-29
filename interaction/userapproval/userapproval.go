@@ -44,12 +44,10 @@ const (
 // request or call next to delegate.
 const EventApprovalRequest = "approval/request"
 
-func init() {
-	for _, eventType := range []string{EventApprovalPolicy, EventApprovalAsked, EventApprovalDecided} {
-		if err := session.RegisterEventType(eventType); err != nil {
-			panic(fmt.Sprintf("userapproval: %v", err))
-		}
-	}
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	session.EnsureEventTypes(EventApprovalPolicy, EventApprovalAsked, EventApprovalDecided)
 }
 
 // ApprovalOutcome is the closed approval outcome vocabulary: a one-shot

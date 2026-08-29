@@ -10,7 +10,6 @@ package permissionpresets
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"dshgo/interaction/userapproval"
 	"dshgo/session"
@@ -51,12 +50,10 @@ const (
 	SandboxDangerFullAccess = "danger-full-access"
 )
 
-func init() {
-	for _, eventType := range []string{EventPermissionPreset, EventSandboxMode} {
-		if err := session.RegisterEventType(eventType); err != nil {
-			panic(fmt.Sprintf("permissionpresets: register %s: %v", eventType, err))
-		}
-	}
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	session.EnsureEventTypes(EventPermissionPreset, EventSandboxMode)
 }
 
 // EffectivePermissionPreset folds the last selected preset from the durable

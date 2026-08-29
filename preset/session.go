@@ -20,10 +20,10 @@ import (
 	"dshgo/session/projection"
 )
 
-func init() {
-	if err := session.RegisterEventType("agent-preset/selected"); err != nil {
-		panic(err)
-	}
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	session.EnsureEventTypes("agent-preset/selected")
 }
 
 // EventSelected is the session-log event type: the session's agent preset

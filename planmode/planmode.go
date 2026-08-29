@@ -26,10 +26,10 @@ type PlanModeData struct {
 	Active bool `json:"active"`
 }
 
-func init() {
-	if err := session.RegisterEventType(EventPlanMode); err != nil {
-		panic(fmt.Sprintf("planmode: register %s: %v", EventPlanMode, err))
-	}
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	session.EnsureEventTypes(EventPlanMode)
 }
 
 // FoldPlanMode reports whether plan mode is active after the first `end`

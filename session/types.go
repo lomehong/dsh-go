@@ -118,13 +118,24 @@ func KnownEventType(eventType string) bool {
 }
 
 // RegisterEventType extends the known vocabulary (the plugin-merge path).
-// It returns an error when the type is already known.
+// It returns an error when the type is already known. The assembly layer
+// uses EnsureEventTypes instead: idempotent, error-free.
 func RegisterEventType(eventType string) error {
 	if knownEventTypes[eventType] {
 		return fmt.Errorf("session: event type %q is already known", eventType)
 	}
 	knownEventTypes[eventType] = true
 	return nil
+}
+
+// EnsureEventTypes extends the known vocabulary with every named type,
+// idempotently: already-known types are no-ops, so the assembly layer can
+// register the static build's full vocabulary on every assembly without
+// tracking what ran before.
+func EnsureEventTypes(eventTypes ...string) {
+	for _, eventType := range eventTypes {
+		knownEventTypes[eventType] = true
+	}
 }
 
 // TurnEndCancelCause kinds: why an active agent driver was cancelled.

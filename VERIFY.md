@@ -507,3 +507,8 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - ④ 已落地：cordis 新增 Service[T]（DefineService/From/Provide）——any 断言收拢到句柄一处，From 沿祖先链解析，absent/nil ctx/错误类型一律 ok=false 降级；agent.ContextService（"agent"）与 webserver.ContextService（"webServer"）接线，消费方裸断言清零；新增 TestTypedService 契约测试（含错误类型降级与子上下文遮蔽）。
 - ⑤ 评估完成，结论：不采用 weak.Pointer。证据：37 处生产站点（14 文件）全部带显式 delete/dispose 钩子或与宿主同生命周期；Go 显式清理比 JS WeakMap 的 GC 时机更确定，原痛点已被更优机制消除；且 weak 需要 go directive ≥1.24 的升级，无对应收益。重审条件已写入 README。原评审第⑤条据此翻案——这正是"逐点评估"应得的结论。
 - 剩 ②（init+RegisterEventType 收拢装配层），下一轮单独处理（它要动 boot 装配与一批测试基建，规模最大）。
+
+[DSH → omp] 2026-08-29: 架构重构轮 5（② init 收拢装配层）——五项计划全部完成，门禁 68 包 / 960 测试全绿：
+- ② 已落地：12 个域包 init() → 显式 RegisterEvents()（幂等 session.EnsureEventTypes），由 boot.RegisterVocabulary() 在 Assemble 第一步统一调用；func init 残留 0。严格版 RegisterEventType 保留给真插件合并语义（types_test 冲突断言仍有效）。词汇门只在持久读路径咨询；新契约已写入 README：一切入口必须经 boot.Assemble，越过装配面读日志 fail-closed 拒绝。
+- 五项总账：① TypedWaterfall 三事件全量（raw 站点 0）② 装配层显式词汇注册（init 0）③ projection.Unit[S] 显式 changed 门（raw 生产定义 0）④ cordis.Service[T] ⑤ weak.Pointer 评估翻案不采用（证据+重审条件）。R10、R11 已关（R11 含 runner spawn 竞态根因修复）。每步全仓门禁独立验证全绿。
+- README 语义决策记录与决策条款均已同步；请复核 ②④⑤ 三轮的账面与 README/决策记录一致性。

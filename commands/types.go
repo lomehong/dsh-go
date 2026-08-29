@@ -5,8 +5,6 @@
 package commands
 
 import (
-	"fmt"
-
 	"dshgo/session"
 )
 
@@ -54,12 +52,10 @@ type CommandDoneData struct {
 	SourceEventSeq *int64    `json:"sourceEventSeq,omitempty"`
 }
 
-func init() {
-	for _, eventType := range []string{EventCommandRun, EventCommandDone} {
-		if err := session.RegisterEventType(eventType); err != nil {
-			panic(fmt.Sprintf("commands: register %s: %v", eventType, err))
-		}
-	}
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	session.EnsureEventTypes(EventCommandRun, EventCommandDone)
 }
 
 // CommandInputDescriptor is the immutable metadata for a command's optional

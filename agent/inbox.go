@@ -20,11 +20,12 @@ const EventAgentInboxSpliced = "agent/inbox/spliced"
 // claims.
 const InboxOutcomeCanceled = "canceled"
 
-func init() {
-	// The agent package owns this vocabulary member: importing the package
-	// extends every session's known-event set, and builds that do not know
-	// the type refuse the log (fail-closed).
-	_ = session.RegisterEventType(EventAgentInboxSpliced)
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	// The agent package owns this vocabulary member: a build that does not
+	// know the type refuses the log (fail-closed).
+	session.EnsureEventTypes(EventAgentInboxSpliced)
 }
 
 // InboxSplicedData is the agent/inbox/spliced payload.

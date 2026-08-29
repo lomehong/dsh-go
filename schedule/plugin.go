@@ -10,10 +10,10 @@ import (
 	"dshgo/tools"
 )
 
-func init() {
-	if err := session.RegisterEventType("schedule/change"); err != nil {
-		panic(err)
-	}
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	session.EnsureEventTypes("schedule/change")
 }
 
 // Options carries the services required before future root agents can

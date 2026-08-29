@@ -7,7 +7,6 @@ package hookprotocol
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"dshgo/session"
@@ -21,12 +20,10 @@ const (
 	EventHookResult = "hook/result"
 )
 
-func init() {
-	for _, eventType := range []string{EventHookInvoked, EventHookResult} {
-		if err := session.RegisterEventType(eventType); err != nil {
-			panic(fmt.Sprintf("hookprotocol: %v", err))
-		}
-	}
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	session.EnsureEventTypes(EventHookInvoked, EventHookResult)
 }
 
 // HookInvocation is what identifies a hook invocation across its

@@ -1221,13 +1221,8 @@ var _ ContinuationManager = (*SubagentContinuationManager)(nil)
 // The factory publishes the built agent into its own context so setup
 // closures can reach the child's session and scope.
 func agentFromContext(childCtx *cordis.Context) *agent.Agent {
-	if childCtx == nil {
-		return nil
-	}
-	if built, ok := childCtx.Get("agent").(*agent.Agent); ok {
-		return built
-	}
-	return nil
+	built, _ := agent.ContextService.From(childCtx)
+	return built
 }
 
 // derefString reads an optional descriptor scalar; nil and empty both stay

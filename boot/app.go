@@ -39,6 +39,7 @@ type App struct {
 // Failure wording matches the official updateError: failures are prefixed
 // with the stage and the entry identity.
 func Assemble(ctx *cordis.Context, entries []loader.Entry, resolver PluginResolver) (*App, error) {
+	RegisterVocabulary()
 	app := &App{root: ctx}
 	if err := app.mount(ctx, entries, resolver, nil); err != nil {
 		return nil, err

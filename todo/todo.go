@@ -26,10 +26,10 @@ const (
 // narrowing (the registry enforces it through the schema enum).
 var statuses = map[string]bool{StatusPending: true, StatusInProgress: true, StatusCompleted: true}
 
-func init() {
-	if err := session.RegisterEventType(EventTodoWrite); err != nil {
-		panic(fmt.Sprintf("todo: register %s: %v", EventTodoWrite, err))
-	}
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	session.EnsureEventTypes(EventTodoWrite)
 }
 
 // TodoItem is one entry in an agent's todo list — the unit of the

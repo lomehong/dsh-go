@@ -9,8 +9,6 @@
 package compaction
 
 import (
-	"fmt"
-
 	"dshgo/llm"
 	"dshgo/session"
 )
@@ -32,14 +30,12 @@ const (
 	EventCompactionPrune   = "compaction/prune"
 )
 
-func init() {
-	for _, eventType := range []string{
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	session.EnsureEventTypes(
 		EventCompactionStart, EventCompactionSummary, EventCompactionEnd, EventCompactionPrune,
-	} {
-		if err := session.RegisterEventType(eventType); err != nil {
-			panic(fmt.Sprintf("compaction: register %s: %v", eventType, err))
-		}
-	}
+	)
 }
 
 // SeqRange is one surface-position span: the seqs of the first (Start) and

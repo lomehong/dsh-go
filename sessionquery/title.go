@@ -75,10 +75,10 @@ type SessionTitleUserMessage struct {
 	Text string `json:"text"`
 }
 
-func init() {
-	if err := session.RegisterEventType("session/title"); err != nil {
-		panic("sessionquery: " + err.Error())
-	}
+// RegisterEvents extends the session vocabulary with this package's event
+// types; the assembly layer (boot) calls it for the static build.
+func RegisterEvents() {
+	session.EnsureEventTypes("session/title")
 }
 
 // FoldSessionTitle folds the latest logged title without consulting mutable
