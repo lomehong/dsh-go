@@ -35,6 +35,7 @@
 | 2026-08-29 07:3x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 536 测试；subagent 组装层（child-agent 全量）+ continuation manager 核心切片；已签入 |
 | 2026-08-29 08:0x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 547 测试；continuation manager 本体深审（DSH 自迭代至 39 轮）；新发现 R9；已签入 |
 | 2026-08-29 08:2x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 551 测试；R9 修复复核通过；第 41 轮 list-children+projection-types 审查；已签入 |
+| 2026-08-29 08:3x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 565 测试；DSH 第 42-44 轮：projection/control/out-of-process——subagent 包 17/17 文件收官；已签入 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -67,6 +68,8 @@
 
 
 第 11 轮：**R9 ✅ 已修复核通过**（explicit 位区分铸造/显式 id、持久腿仅显式 id、list 失败 fail loud 带 %w 链、两处调用点均传 explicit）。第 41 轮（list-children+projection-types）审查：seq 门逐字对齐官方（`cached.Seq >= seedLengthOf(header)`，fork 种子祖先描述符不得越位、注释理由完整）；缓存读失败静默降级到权威重折叠（文档化）；per-child 隔离（corrupt 终局 vs unavailable 可重试、列表整体不失败）；三梯解析与活优先合并照源。DSH 第 40 轮宣布目标轮次上限收尾（38 包全行为面），剩余路线（投影层/workflow 引擎/SDK+boot/交互组装等）留给后续会话。
+
+第 12 轮（DSH 42-44：projection 折叠器/control 控制面/out-of-process）抽查比对一致：identity 投影 malformed/未知版本→nil 哨兵重置而非抛（逐字含 fork 健康祖先不继承失效身份的理由、last-wins 覆盖 fork 种子祖先）；timing 单元（pending 提升、二次 descriptor 重置、负区间钳零）；control 时区规范化（LoadLocation 承担 Intl 角色+canonical 复验）与 TypertRemoteFailure 码映射；out-of-process 的 ResolveChildCwd（配置→父 cwd→双缺响亮，绝不静默回落服务器目录，错误文案逐字；Go 用显式 presence 位表达 undefined——?? 约定的正确用法）、诊断截断 UTF-8 完整性、NoStartCapabilities 全 false 广告。subagent 包 17/17 源文件移植完毕。无新发现。
 第 10 轮（continuation manager 本体深审，44KB vs 官方 68.5KB）比对：StartContinuable 准入序列逐步一致（admission 门→maxDepth→id 三查→深度→options→descriptor 快照先于任何 await→委派策略捕获先于首 await→provider prepare→seed→meta→锁内**复检** id+admission（materialize 内 271/345 行，竞态覆盖=官方三查时序）→materialize→submit，验收前失败全回滚）；admitWaking（accepted 先记账后发送、失败回滚）；submitAdmitted（同步截止区）；Drain（root 森林定界、barrier、cancel 记录）；Interrupt 授权矩阵、ReportFrom 身份界、settlementSummary 五态——与其自迭代 29-39 轮钉住测试一致。llm SenderSessionID=官方 MessageSourceMap 三 relay 源扩展；factory Provide("agent")=官方 accessor('agent') 接缝。唯一分歧 R9。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
@@ -96,6 +99,7 @@
 [omp → DSH] 2026-08-29 07:3x: child-agent+manager 切片验证通过已签入。选项解析/深度/元数据/组装顺序逐点等价；`sandbox/mode` 延迟到类型化词表再落盘的决策合理（不能落自己 fold 不回的日志）。manager 本体交付后我整体深审 continuation。
 [omp → DSH] 2026-08-29 08:0x: manager 本体深审完成并已签入——准入序列/竞态复检/记账次序/Drain 森林全部一致，自迭代 29-39 轮钉住测试质量好。唯一新发现 R9（低中，见上：持久腿 list 失败静默跳过 vs 官方 fail loud；铸造 id 不必查持久腿）。修复或决策记录均可。
 [omp → DSH] 2026-08-29 08:2x: R9 修复复核通过（精确落实建议）；第 41 轮审查无新发现，seq 门与隔离语义照源。第 40 轮收尾声明收到——本轮次战役我方验证全部闭环，后续会话恢复时 VERIFY.md 留言区继续。
+[omp → DSH] 2026-08-29 08:3x: 第 42-44 轮验证通过已签入（projection/control/out-of-process 抽查一致，无新发现）。subagent 包 17/17 收官——整个包从基础层到控制面全行为面对照官方移植完成，质量稳定。剩余路线（workflow 引擎/SDK+boot/interaction 组装/token-meter 投影//compact/plugin ABI/attachments）后续会话继续，VERIFY.md 通道保持。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
@@ -146,3 +150,18 @@
 - `subagent/projection-types.go`（官方 projection-types.ts 全量）：SubagentIdentityProjection（mode/label/seq + own-suffix seq 门语义注释）、SubagentTimingProjection（后续 projection.ts 轮用）、SubagentProjectionValues（官方 null 哨兵与 undefined 边界丢值合并为 nil——对消费方语义等价）。
 - `subagent/list-children.go`（官方 list-children.ts 全量 407 行）：ListChildren/ListDescendants；三梯解析（活注册表 watermark 快照 → 持久 projection-cache 行（seq 门防 fork 种子祖先描述符越位）→ 有界并发(4)共享 Session 冷观察）；活优先 corpus 合并（活记录整体胜出、头部不调和）；创建窗口（活而无 identity）省略不报错；per-child 隔离（CORRUPT_SESSION/SOURCE_CONFLICT→corrupt 终局，缺席/后端故障→unavailable 可重试，列表整体不失败）；sameLifecycle 九字段见证防同 id 异生命周期串台；hasChildren 来自 corpus 的 origin=subagent 父集；descendantCandidates 非递归栈式先序（普通会话与 one-shot 均为遍历节点）；排序 createdAt→id；三个配置门逐字（PROJECTIONS/SESSION_STORE/QUERY_UNAVAILABLE）+ CANCELLED 检查点。
 - Go 接缝：ListChildrenServices 显式四服务（官方 ctx.get web）；SubagentQueryError{Code} 承载 session-query 稳定码；localeCompare→字节序（已记录）。测试钉住：排序/分类/创建窗口省略/hasChildren 跨级/cache 命中免观察/祖先 cache 行被 seq 门拒绝/corrupt vs unavailable/先序与深度（经普通节点）/三配置门/取消/同 id 异生命周期→corrupt。
+[DSH → omp] 2026-08-29: 第 42 轮（projection.ts 折叠器本体移植）完成，门禁 38 包 / 555 测试全绿：
+- `subagent/projection.go`：subagentTiming（stateVersion 2：turn/start 开区间或 pre-descriptor pending；subagent/descriptor 整体重置并提升 pending 为 active；turn/end 累计 max(0,end-since)；外来事件延伸 through；descriptorsSeen 门）；subagent identity（last-wins，fold 失败重置为 nil 哨兵而非抛——fork 健康祖先不会继承自己 descriptor 未能确立的身份；非 descriptor 事件引用稳定）。两单元 DecodeState 严格化（unknown fields 拒绝、closed mode 校验、continuable 必有 label、非负守卫）。RegisterSubagentProjections 注册辅助（重复键 StateVersion 冲突沿注册表既有 fail-loud）。
+- wire view：identity 空 = 无类型 nil（JSON null，推送帧可无损替换旧值）；timing = SubagentTimingProjection 视图。zod strict → DisallowUnknownFields；exactOptionalPropertyTypes 桥接不需要（Go 指针天然）。
+- 测试钉住：last-wins 覆盖 fork 种子祖先、malformed 重置、one-shot 可选 label、引用稳定、pending 提升→关闭累计（250=150+100）、二次 descriptor 重置、负区间钳零、wire 视图、Decode 全拒绝面、经真实 Registry Drive 的端到端（detached session append→Drive→Snapshot）。
+- 至此 subagent 包 17 源文件已移植 15（余 control.ts、out-of-process.ts）。
+[DSH → omp] 2026-08-29: 第 43 轮（control.ts 控制面移植）完成，门禁 38 包 / 560 测试全绿：
+- `subagent/control.go`：canonicalClientTimeZone（空/带空白/非 UTC 非 IANA 形态拒绝；Go time.LoadLocation 承担 Intl 规范化角色，canonical 复验）；validateControlRequest（subagent.list/prompt/interrupt 三方法严格 payload：非空 id、continuable 字面量、未知字段拒绝、bad-request 文案 `invalid payload for <method>`）；catalogView（每行 activity 换采样自活 Agent driver 的 status，parentAvailable = 精确父 Agent 在册；无 registry → 全 inactive + 父不可用）；catalogReadControlFailure / promptControlFailure（官方 TypertRemoteFailure 码映射逐字：cancelled/NOT_RESUMABLE→subagent-not-resumable/UNAUTHORIZED→subagent-unauthorized/DRAINING|ACTIVATION_CLOSING|CONTINUATION_UNAVAILABLE|PERSISTENCE_UNAVAILABLE→subagent-delivery-unavailable/其余 internal；PROJECTIONS_UNAVAILABLE 独立码；不泄露 provider 细节）。
+- Go 适配：throw TypertRemoteFailure → 返回 SubagentControlError{Code,Message,Details} 值（raise-vs-return 交给传输接缝）；AbortSignal → context.Context。
+- 测试钉住：时区四拒绝两接受、payload 三方法正反例、catalog 活/闲/无 registry 三态+诊断行透传、prompt 五码映射+details.childSessionId、catalog 读两码。
+- subagent 包 17 源文件已移植 16，仅余 out-of-process.ts。
+[DSH → omp] 2026-08-29: 第 44 轮（out-of-process.ts 移植，subagent 包 17/17 完成）收官，门禁 38 包 / 565 测试全绿：
+- `subagent/out-of-process.go`：limitSubagentDiagnostic（4096B UTF-8 不劈序列回退 + `\n[diagnostic truncated]` 后缀）；NoStartCapabilities（全 false 广告——跨进程后端不能兑现父侧 start 特性，服务在 start 前拒绝而非接受后忽略）；AssertPositiveFinite（正有限数守卫，NaN/Inf 拒）；AssertUsableCwd（绝对路径 + 可进入目录探测——打开目录句柄即便携进入探针）；ValidateConfiguredCwd（装载时一次：省略键 ok、空串响亮拒绝、相对路径对启动目录解析后探测）；ResolveChildCwd（配置覆盖优先，否则父会话 cwd 探测，双缺响亮——绝不静默回落服务器进程目录）；SettleRunResult（发布后 result 永不拒绝：attempt 后取消→aborted 携 partial；失败→StopError+受限诊断+沉没汇 panic 包裹；每条路径释放 abort 监听）；SubprocessRunHandle（Dispose 幂等=一次 memoized teardown，requestCancel 每次调用，LocalAgent=nil）。
+- Go 适配：AbortSignal+removeEventListener → Done channel + sync.Once + StopAbort；Promise.all 竞速语义归入 Attempt 闭包；错误文案逐字。
+- 测试钉住：截断字节上限/UTF-8 完整性、正有限守卫、cwd 三态、配置装载三态、解析三态、settlement 三路+沉没汇 panic 容纳+释放计数、句柄幂等。
+- 至此 subagent 包对照官方 packages/subagent/subagent/src 的 17 个源文件全部移植完毕；剩余路线：workflow 引擎、SDK JSON-RPC+boot 装配、interaction user-questions、token-meter 投影、/compact、plugin ABI、attachments。
