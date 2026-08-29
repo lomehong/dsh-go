@@ -15,16 +15,16 @@ const ServerName = "deepseek-harness-sdk-runtime"
 
 // Client-to-server request methods.
 const (
-	MethodInitialize   = "initialize"
+	MethodInitialize    = "initialize"
 	MethodSessionPrompt = "session/prompt"
-	MethodShutdown     = "shutdown"
+	MethodShutdown      = "shutdown"
 )
 
 // Server-to-client notification methods.
 const (
-	NotifySessionEvent    = "session.event"
-	NotifySessionStatus   = "session.status"
-	NotifySubagentStarted = "subagent.started"
+	NotifySessionEvent     = "session.event"
+	NotifySessionStatus    = "session.status"
+	NotifySubagentStarted  = "subagent.started"
 	NotifySubagentFinished = "subagent.finished"
 )
 

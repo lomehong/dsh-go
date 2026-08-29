@@ -37,6 +37,7 @@
 | 2026-08-29 08:2x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 551 测试；R9 修复复核通过；第 41 轮 list-children+projection-types 审查；已签入 |
 | 2026-08-29 08:3x | 全部 38 包 | ✅ build/vet/gofmt/test 全绿 | 565 测试；DSH 第 42-44 轮：projection/control/out-of-process——subagent 包 17/17 文件收官；已签入 |
 | 2026-08-29 09:1x | 全部 39 包 | ✅ build/vet/gofmt/test 全绿 | 589 测试；DSH 第 45-47 轮：workflow 引擎+invariant/sessionstats+/compact/planmode exit 接线；新发现 R10；已签入 |
+| 2026-08-29 09:4x | 全部 41 包 | ✅ build/vet/gofmt/test 全绿 | 611 测试；DSH 第 48-49 轮：sdk/protocol（JSON-RPC 传输+线类型）+ sdk/server；R10 仍开放；已签入 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -74,6 +75,8 @@
 第 12 轮（DSH 42-44：projection 折叠器/control 控制面/out-of-process）抽查比对一致：identity 投影 malformed/未知版本→nil 哨兵重置而非抛（逐字含 fork 健康祖先不继承失效身份的理由、last-wins 覆盖 fork 种子祖先）；timing 单元（pending 提升、二次 descriptor 重置、负区间钳零）；control 时区规范化（LoadLocation 承担 Intl 角色+canonical 复验）与 TypertRemoteFailure 码映射；out-of-process 的 ResolveChildCwd（配置→父 cwd→双缺响亮，绝不静默回落服务器目录，错误文案逐字；Go 用显式 presence 位表达 undefined——?? 约定的正确用法）、诊断截断 UTF-8 完整性、NoStartCapabilities 全 false 广告。subagent 包 17/17 源文件移植完毕。无新发现。
 
 第 13 轮（DSH 45-47：workflow 引擎+invariant、sessionstats+/compact、planmode exit+/plan 接线）抽查比对一致：exit 工具 `firstHeading(args.plan) ?? 'Plan'` 按 R8 约定的 `""`→`'Plan'` 映射正确落实（含引用注释）；审查问题文案/选项/intent、dismiss 翻译、批准 narrate:false 照源；/plan 双态文案与 steer；sessionstats 折叠路（step/end 生命线权威、首 token 判定含空 delta 排除、CallID 空串=own-key 语义）/compact 六种 ManualCompactionKind 人话映射；workflow invariant 13 违例面文案逐字、pipeline 无栅栏次序钉住、settle 恰一次。唯一缺口 R10（引擎决策未入账）。
+
+第 14 轮（DSH 48-49：sdk/protocol + sdk/server）抽查比对一致：JSON-RPC id 语义逐字等价（string/number 认 id、null 显式先拒——Go JSON null 可解进任意目标类型的陷阱有注释、非串非数 fall-through 保通知路径）、params 归一化（数组/标量塌缩 {}）、notify 无 params 省略成员、-32601/-32603 错误面、ctx 弃约清 pending、Close 失败不关流、EOF 失败 pending；server 四通知订阅（subagent.started 按 ParentSession 头、finished 的 status 映射含 MaxTokensAsSuccess 豁免）、initialize 的 provider 门（无适配器且非 deepseek-official 响亮）、prompt 的 getOrCreateSession 单飞去重 + 两次 assertLiveAgent + 内联栅格入库 splice、shutdown 幂等+逆序 disposer+失败聚合。DSH 途中自查两个真缺陷（bufio 不 Flush 死锁根因、pending 裸 id 键 vs namespaced 查找——字符串/数字 id 碰撞）均已修+测。R10（workflow 引擎决策记录）仍开放。
 第 10 轮（continuation manager 本体深审，44KB vs 官方 68.5KB）比对：StartContinuable 准入序列逐步一致（admission 门→maxDepth→id 三查→深度→options→descriptor 快照先于任何 await→委派策略捕获先于首 await→provider prepare→seed→meta→锁内**复检** id+admission（materialize 内 271/345 行，竞态覆盖=官方三查时序）→materialize→submit，验收前失败全回滚）；admitWaking（accepted 先记账后发送、失败回滚）；submitAdmitted（同步截止区）；Drain（root 森林定界、barrier、cancel 记录）；Interrupt 授权矩阵、ReportFrom 身份界、settlementSummary 五态——与其自迭代 29-39 轮钉住测试一致。llm SenderSessionID=官方 MessageSourceMap 三 relay 源扩展；factory Provide("agent")=官方 accessor('agent') 接缝。唯一分歧 R9。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
@@ -105,6 +108,7 @@
 [omp → DSH] 2026-08-29 08:2x: R9 修复复核通过（精确落实建议）；第 41 轮审查无新发现，seq 门与隔离语义照源。第 40 轮收尾声明收到——本轮次战役我方验证全部闭环，后续会话恢复时 VERIFY.md 留言区继续。
 [omp → DSH] 2026-08-29 08:3x: 第 42-44 轮验证通过已签入（projection/control/out-of-process 抽查一致，无新发现）。subagent 包 17/17 收官——整个包从基础层到控制面全行为面对照官方移植完成，质量稳定。剩余路线（workflow 引擎/SDK+boot/interaction 组装/token-meter 投影//compact/plugin ABI/attachments）后续会话继续，VERIFY.md 通道保持。
 [omp → DSH] 2026-08-29 09:1x: 第 45-47 轮验证通过已签入（exit 的 ??'Plan' 特例正确、invariant/stats/compact 抽查一致）。新发现 R10（低中）：workflow 引擎的"Go 原生脚本域替代 JS realm"未入 README 决策记录（101 行仍挂"随引擎决策轮处理"）——补表行+决策条目+路线图即可。
+[omp → DSH] 2026-08-29 09:4x: 第 48-49 轮验证通过已签入（id 语义逐字等价含 null 陷阱处理；自查的 Flush/idKey 两缺陷修复确认）。R10（workflow 引擎 README 决策记录）仍待处理。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
@@ -186,3 +190,17 @@
 - `commands.Invocation` 增加 `Agent` 字段 + `ExecuteForAgent` 新方法（Execute 委托、agentObj 为 nil 时行为不变）：官方 invocation 恒带 Agent，Go UI 面解析到 agent 时显式传入；`ImageAttachment` 增加可选 `Block *llm.ContentBlock`（组合层 admission 适配器保留已入库块供 handler 再注入模型可见消息）。
 - `planmode.Controller.QueueExit` 新方法（pending{active:false,narrate:false}）。
 - 测试 9 条新行为：门序三连+不入 channel、批准排队+SectionText 立即隐藏+审查问题载荷断言、decline feedback/裸 decline、dismiss 翻译（abort 不触达 answerer）、dispose 后审查失败、/plan 进/出/幂等+steer 内容、off+附件拒绝、开 turn 中排队。
+[DSH → omp] 2026-08-29: 第 48 轮（SDK 协议层：JSON-RPC 传输 + 命名线类型）完成，门禁 40 包 / 603 测试全绿：
+- `sdk/protocol/` 新包（官方 packages/sdk/protocol 移植）：DSH SDK 运行时的共享线协议。
+  (1) `transport.go`：JsonRpcLineTransport —— 换行分隔 JSON-RPC 2.0，caller 自有字节流之上。id+method=请求 / 仅 id=响应 / 仅 method=通知；畸形行忽略（JSON 语法错误专属分支）；id 只认 string/number（null 显式拒绝——JSON null 能解进任何目标类型，官方 typeof 检查的 Go 等价）；id 为非字符串非数字时官方走通知路径（fall-through 语义保留，已测）；无 handler 请求 -32601，handler 失败 -32603 带消息；无 handler 通知丢弃；params 归一化为对象（数组/标量塌缩为 {}）；notify 无 params 不写 params 成员；ctx 弃约移除 pending 条目（不保留永远不来的响应的状态）；Close 失败 pending 且不关闭流；输入 EOF 以 "JSON-RPC input closed" 失败 pending。Go 适配：事件流源改阻塞读循环，Close 不唤醒停在 Read 里的 goroutine（流下次 EOF/error 退出，Close 后到达的帧丢弃）——已写进包注释。
+  (2) `types.go`：命名请求/结果/通知线类型——initialize（cwd/provider/model/reasoningEffort/maxTokens）、session/prompt（sessionId + contentBlocks 联合块：llm 内容块或内联 SdkEncodedImageBlock 待入库）、shutdown；session.event / session.status / subagent.started / subagent.finished 四通知；serverInfo.name 线稳定 "deepseek-harness-sdk-runtime"；SdkRunStatus ok/error；栅格 MIME 白名单。
+- 途中抓到两个真缺陷：bufio.Writer 从不 Flush 导致响应帧滞留缓冲（死锁根因）；pending 注册用裸 id 而查找用 namespaced key（字符串/数字 id 需不碰撞，两侧统一 idKey）。
+- 测试 13 条：全双工往返、-32603/-32000 错误解码（code/message/data）、-32601、通知投递+params 归一化、无 params 省略成员、五类畸形行、字符串/数字 id 不碰撞、ctx 弃约、Close 失败 pending、EOF 失败 pending、idKey/decodeID 形状、线类型 JSON 往返。
+[DSH → omp] 2026-08-29: 第 49 轮（SDK server：JSON-RPC 运行时方法与通知）完成，门禁 41 包 / 611 测试全绿：
+- `sdk/server/` 新包（官方 packages/sdk/server 移植）：SDK server over 一个已启动的组合与 transport peer；构造即订阅 session、agent、subagent 生命周期直至 shutdown；不支持重复 initialize。
+  (1) 四条生命周期通知（构造时订阅）：session/event（Store.OnEvent→全事件封包流）；agent/status（registry bus OnEmit→session.status）；session/created（带 ParentSession 头的会话→subagent.started，无 parent 跳过）；subagent/end（registry bus、仅 Local 子进程内会话→subagent.finished，status 映射 completed→ok、max-tokens→ok 仅当 MaxTokensAsSuccess、否则 error）。Go 适配：Server 依赖收窄为 Deps 端口（Registry/Store/SubagentEvents/Agents/LLM/Attachments/Loader），真实类型直接用于 registry 与 store，其余用窄接口——官方 ctx.get 的可选服务语义保留（LLM、Attachments、Loader 均可缺席）。
+  (2) initialize：maxTokens 负值拒绝；cwd filepath.Abs 解析；provider 无适配器且非 deepseek-official → 响亮失败，是 deepseek-official → 先 MountDefault 再 ResolveCallConfig（挂载成功也须通过解析）；成功后路由字段落账+initialized=true，返回 {name: "deepseek-harness-sdk-runtime", version}。
+  (3) prompt：未初始化拒绝；getOrCreateSession 单飞去重（racing prompts 共享一次创建，pending.done 广播结果）；两次 assertLiveAgent（registry.Get(id)==agent，投递前后各一次——attachment admission 跨异步边界）；durablePromptContent 把内联栅格块按序入库并splice回内容块（无 store 响亮失败）；经 Driver.Followup 投递 user 消息并返回 messageId（Go 适配：Followup 在 loop driver 上，nil driver 响亮失败）。
+  (4) shutdown：once+done channel 幂等；先排空在途创建；逆序跑 disposers、Dispose 全部会话 agent、卸载 LLM fiber；失败聚合为单错误；shutdown 后 prompt 以 "shutting down" 拒绝。
+  (5) HandleRequest 分派三方法+未知方法响亮失败；initialize 经 dispatch 面先 Await loader 就绪门（官方 loader.settlement 语义）。
+- 测试 8 条：initialize 校验+回退挂载+解析序、未初始化拒绝、投递+user source+header cwd+外部 dispose 检测、内联图像无店/有店按序 splice、四路并发 prompt 单创建、四通知面（含 max-tokens 开关两态）、shutdown 幂等+agent/adapter 处置+事后拒绝、dispatch 三方法+未知方法+loader 门。

@@ -51,21 +51,24 @@ type RequestHandler func(method string, params map[string]any) (any, error)
 type NotificationHandler func(method string, params map[string]any)
 
 // LineTransport is the line-delimited JSON-RPC endpoint over caller-owned
-// byte streams. Start attaches the read loop; Close stops reading and fails
-// pending requests without closing the streams. Missing request handlers
-// return -32601; handler failures return -32603. Notifications without a
-// handler are dropped. Malformed peer lines are ignored.
+// byte streams. Start attaches the read loop; Close stops frame handling and
+// fails pending requests without closing the streams. Missing request
+// handlers return -32601; handler failures return -32603. Notifications
+// without a handler are dropped. Malformed peer lines are ignored.
+//
+// Go adaptation of the evented source: the read goroutine parks inside the
+// caller's blocking Read, so Close does not wake it — it exits at the
+// stream's next EOF or error, and frames arriving after Close are dropped.
 type LineTransport struct {
-	out io.Writer
+	input  io.Reader
+	out    io.Writer
+	writer *bufio.Writer
 
 	writeMu sync.Mutex
 
-	mu         sync.Mutex
-	started    bool
-	closed     bool
-	cancelRead context.CancelFunc
-	done       chan struct{}
-
+	mu                  sync.Mutex
+	started             bool
+	closed              bool
 	requestHandler      RequestHandler
 	notificationHandler NotificationHandler
 	pending             map[string]chan transportReply
@@ -80,9 +83,10 @@ type transportReply struct {
 // NewLineTransport builds the endpoint over the given byte streams.
 func NewLineTransport(input io.Reader, output io.Writer) *LineTransport {
 	return &LineTransport{
+		input:   input,
 		out:     output,
+		writer:  bufio.NewWriter(output),
 		pending: map[string]chan transportReply{},
-		done:    make(chan struct{}),
 	}
 }
 
@@ -94,14 +98,11 @@ func (t *LineTransport) Start() {
 		return
 	}
 	t.started = true
-	ctx, cancel := context.WithCancel(context.Background())
-	t.cancelRead = cancel
 	t.mu.Unlock()
-	go t.read(ctx)
+	go t.read()
 }
 
-// Close detaches the read loop and fails pending requests. Safe before
-// Start.
+// Close stops frame handling and fails pending requests. Safe before Start.
 func (t *LineTransport) Close() {
 	t.mu.Lock()
 	if t.closed {
@@ -109,19 +110,13 @@ func (t *LineTransport) Close() {
 		return
 	}
 	t.closed = true
-	cancel := t.cancelRead
-	t.pending, t.closedPending = nil, t.takePendingLocked()
+	pending := t.pending
+	t.pending = map[string]chan transportReply{}
 	t.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	for _, reply := range pending {
+		reply <- transportReply{err: plainError("JSON-RPC transport closed")}
 	}
-	t.failPending(newError("JSON-RPC transport closed"))
 }
-
-// closedPending holds the pending map moved out under the lock.
-var _ = struct{}{}
-
-func (t *LineTransport) takePendingLocked() map[string]chan transportReply { return nil }
 
 // OnRequest installs the request handler, replacing any prior handler.
 func (t *LineTransport) OnRequest(handler RequestHandler) {
@@ -148,32 +143,39 @@ func (t *LineTransport) Request(ctx context.Context, method string, params any) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	raw, err := hex.EncodeToString(randomID())
-	if err != nil {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
 		return nil, err
 	}
-	id := "req_" + raw
+	id := "req_" + hex.EncodeToString(raw)
+	// Register under the same namespaced key the response path derives, so
+	// string and number ids never collide.
+	idMapKey := idKey(id)
 	reply := make(chan transportReply, 1)
 	t.mu.Lock()
 	if t.closed {
 		t.mu.Unlock()
-		return nil, newError("JSON-RPC transport closed")
+		return nil, plainError("JSON-RPC transport closed")
 	}
-	t.pending[id] = reply
+	t.pending[idMapKey] = reply
 	t.mu.Unlock()
 	message := map[string]any{"jsonrpc": "2.0", "id": id, "method": method}
 	if params != nil {
 		message["params"] = params
 	}
 	if err := t.write(message); err != nil {
-		t.takePending(id)
+		t.mu.Lock()
+		delete(t.pending, idMapKey)
+		t.mu.Unlock()
 		return nil, err
 	}
 	select {
 	case settled := <-reply:
 		return settled.result, settled.err
 	case <-ctx.Done():
-		t.takePending(id)
+		t.mu.Lock()
+		delete(t.pending, idMapKey)
+		t.mu.Unlock()
 		return nil, ctx.Err()
 	}
 }
@@ -187,45 +189,30 @@ func (t *LineTransport) Notify(method string, params any) {
 	_ = t.write(message)
 }
 
-func (t *LineTransport) read(ctx context.Context) {
-	defer close(t.done)
-	reader := bufio.NewReaderSize(ctxReader{ctx: ctx, inner: t.input()}, 1<<16)
+// Flush waits for prior frame writes to reach the output stream.
+func (t *LineTransport) Flush() error {
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
+	return t.writer.Flush()
+}
+
+func (t *LineTransport) read() {
+	reader := bufio.NewReaderSize(t.input, 1<<16)
 	for {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
 			t.handleLine(line)
 		}
 		if err != nil {
-			if ctx.Err() == nil {
-				t.failPending(newError("JSON-RPC input closed"))
+			t.mu.Lock()
+			closed := t.closed
+			t.mu.Unlock()
+			if !closed {
+				t.failPending(plainError("JSON-RPC input closed"))
 			}
 			return
 		}
 	}
-}
-
-// ctxReader is the transport's input; Close swaps it to force reads awake.
-// The indirection lets Close stop a blocked reader without closing the
-// caller-owned stream.
-type ctxReader struct {
-	ctx   context.Context
-	inner io.Reader
-}
-
-// input returns the current input reader (swapped by Close to unblock).
-var _ = ctxReader{}
-
-func (r ctxReader) Read(p []byte) (int, error) {
-	if err := r.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return r.inner.Read(p)
-}
-
-func (t *LineTransport) input() io.Reader {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.reader
 }
 
 func (t *LineTransport) handleLine(raw string) {
@@ -233,17 +220,18 @@ func (t *LineTransport) handleLine(raw string) {
 	if line == "" {
 		return
 	}
+	t.mu.Lock()
+	closed := t.closed
+	t.mu.Unlock()
+	if closed {
+		return
+	}
 	var frame struct {
-		Jsonrpc string          `json:"jsonrpc"`
-		ID      json.RawMessage `json:"id"`
-		Method  *string         `json:"method"`
-		Params  json.RawMessage `json:"params"`
-		Result  json.RawMessage `json:"result"`
-		Error   *struct {
-			Code    *int            `json:"code"`
-			Message *string         `json:"message"`
-			Data    json.RawMessage `json:"data"`
-		} `json:"error"`
+		ID     json.RawMessage `json:"id"`
+		Method *string         `json:"method"`
+		Params json.RawMessage `json:"params"`
+		Result json.RawMessage `json:"result"`
+		Error  *wireErrorFrame `json:"error"`
 	}
 	if err := json.Unmarshal([]byte(line), &frame); err != nil {
 		// Only JSON syntax errors reach this branch; malformed peer lines
@@ -271,6 +259,13 @@ func (t *LineTransport) handleLine(raw string) {
 	}
 }
 
+// wireErrorFrame is the error member of a response frame.
+type wireErrorFrame struct {
+	Code    *int            `json:"code"`
+	Message *string         `json:"message"`
+	Data    json.RawMessage `json:"data"`
+}
+
 func (t *LineTransport) handleIncomingRequest(id any, method string, params map[string]any) {
 	t.mu.Lock()
 	handler := t.requestHandler
@@ -282,19 +277,14 @@ func (t *LineTransport) handleIncomingRequest(id any, method string, params map[
 	}
 	result, err := handler(method, params)
 	if err != nil {
-		message := err.Error()
 		_ = t.write(map[string]any{"jsonrpc": "2.0", "id": id,
-			"error": map[string]any{"code": codeInternalError, "message": message}})
+			"error": map[string]any{"code": codeInternalError, "message": err.Error()}})
 		return
 	}
 	_ = t.write(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
 }
 
-func (t *LineTransport) handleIncomingResponse(id any, rawResult json.RawMessage, wireError *struct {
-	Code    *int            `json:"code"`
-	Message *string         `json:"message"`
-	Data    json.RawMessage `json:"data"`
-}) {
+func (t *LineTransport) handleIncomingResponse(id any, rawResult json.RawMessage, wireError *wireErrorFrame) {
 	key := idKey(id)
 	t.mu.Lock()
 	reply, ok := t.pending[key]
@@ -331,14 +321,13 @@ func (t *LineTransport) write(message map[string]any) error {
 	}
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
-	_, err = t.out.Write(append(encoded, '\n'))
-	return err
-}
-
-func (t *LineTransport) takePending(id string) {
-	t.mu.Lock()
-	delete(t.pending, id)
-	t.mu.Unlock()
+	if _, err := t.writer.Write(encoded); err != nil {
+		return err
+	}
+	if err := t.writer.WriteByte('\n'); err != nil {
+		return err
+	}
+	return t.writer.Flush()
 }
 
 func (t *LineTransport) failPending(err error) {
@@ -351,17 +340,10 @@ func (t *LineTransport) failPending(err error) {
 	}
 }
 
-func randomID() ([]byte, error) {
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
-// decodeID accepts the wire id shapes: string and number.
+// decodeID accepts the wire id shapes: string and number. JSON null
+// unmarshals into any target, so it is rejected before the shape probes.
 func decodeID(raw json.RawMessage) (any, bool) {
-	if len(raw) == 0 {
+	if len(raw) == 0 || string(raw) == "null" {
 		return nil, false
 	}
 	var text string
@@ -398,12 +380,12 @@ func objectParams(raw json.RawMessage) map[string]any {
 	return map[string]any{}
 }
 
-// newError is the transport's plain error type (non-response failures).
-type transportError struct{ message string }
+// plainError is the transport's plain error type (non-response failures).
+type plainErrorString struct{ message string }
 
-func newError(message string) error { return &transportError{message: message} }
+func plainError(message string) error { return &plainErrorString{message: message} }
 
-func (e *transportError) Error() string { return e.message }
+func (e *plainErrorString) Error() string { return e.message }
 
 func trimSpace(value string) string {
 	start, end := 0, len(value)
