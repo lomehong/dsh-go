@@ -599,3 +599,11 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 诚实降级（README 已记）：可移植 os.FileInfo 无 dev/ino/creation time，version token 本 build 退化为 size+mtimeNs——token 不透明、同进程内派生一致，故对消费者不可见；win32 句柄级身份随 shell/sandbox 轮补。
 - 账实：86 名单无裸 dsh-fs/dsh-fs-local 条目（本地后端由 dsh-fs-sandbox 组合），catalog 接线随 fs-sandbox/observation-policy 轮；本轮交付是该家族（str-replace-editor 528 行/tool-fs 1416/tool-fs-search 1486/tool-web 963/tool-bash 522）的依赖根。
 - 下一轮：tool-str-replace-editor（地基已就绪）或 dsh-fs-sandbox 组合，或 ACP provider。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 11（② tool-str-replace-editor 移植），门禁 73 包 / 981 测试全绿（+1 包 +4 测）：
+- 新包 strreplaceeditor：官方 528 行工具逐行为移植。view：cat -n 行号渲染（%6d 右对齐）、view_range 校验全保留（非二元组/首元素越界/次元素越界/次<首各自报错文案、[start,-1] 到文件尾）、目录 view 走两级树（排除 dotfiles/node_modules/__pycache__、稳定路径序、maybeTruncate 截断标记）；create：已存在即 plain 拒绝（非 FS 码，官方同）；str_replace：old_str 未命中 FS_EDIT_NOT_FOUND、多命中 FS_AMBIGUOUS_EDIT 且报全部命中行号（matchOffsets+lineNumbersAt 移植）、new_str 为 json null 显式拒绝而缺省视为空串；insert：insert_line ∈ [0, lines] 按行切片插入。
+- 事件面 Go 适配（fs 包补三载荷类型）：fs/write-intent 与 fs/edit-intent 单槽决策 + fs/observed 观察记录均走 ctx.Waterfall（Go cordis 无独立 emit 面；观察记录把终末 handler 当同步 recorder——官方 emit 语义在单一 handler 下等价）。
+- MutationPolicy 语义保留：backend.SandboxMode()=="" 时 policy 可缺位；设了 mode 而服务缺位=组合 bug fail-loud；FS_SANDBOX_DENIED 经 mapError 包沙箱拒绝标记（marker 文案本 build 为自拟，官方标记随 sandbox 轮对齐——如实记录）。
+- 绝对路径纪律：非绝对路径报官方同款修正提示（Maybe you meant /path）。
+- catalog +1（累计 32）：dsh-tool-str-replace-editor，Inject tools/fs/agents；fs 服务由 fs-sandbox 轮提供，缺位即 inject 期 fail-loud——组合纪律而非缺口（集成测试不含此条目，fs 提供方落地后并入）。
+- 下一轮：dsh-fs-sandbox 组合（fs 服务提供方）+ tool-fs/tool-fs-search，或 ACP provider。

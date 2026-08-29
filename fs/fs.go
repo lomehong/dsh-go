@@ -233,9 +233,10 @@ type SandboxExecutionPolicy struct {
 	WorkspaceRoot string
 }
 
-// Cordis event names (official declare-module events). Go adaptation: the
-// waterfall decisions ride ctx.On(event, WaterfallHandler) and the
-// observation record rides a plain emit; no registry entry is required.
+// Cordis event names (official declare-module events). Go adaptation: all
+// three ride ctx.Waterfall — the two decision events read the returned intent
+// and the observation record treats the terminal handler as the synchronous
+// recorder.
 const (
 	// EventWriteIntent is the single-slot decision for the next
 	// WriteText: the first listener returning an intent owns the decision
@@ -248,6 +249,30 @@ const (
 	// observation; listeners must be synchronous recorders.
 	EventObserved = "fs/observed"
 )
+
+// WriteIntentEvent is the payload riding EventWriteIntent. A handler returns
+// a *WriteIntent to own the decision, or calls next with its value and
+// returns nil to defer; a nil result applies the caller's default.
+type WriteIntentEvent struct {
+	Target Target
+	// Actor is the opaque tool-execution context the decider keys off
+	// (the calling *agent.Agent when one exists).
+	Actor any
+}
+
+// EditIntentEvent is the payload riding EventEditIntent. A handler returns a
+// *Version to impose its guard.
+type EditIntentEvent struct {
+	Target Target
+	Actor  any
+}
+
+// ObservedEvent is the payload riding EventObserved.
+type ObservedEvent struct {
+	Target      Target
+	Observation Observation
+	Actor       any
+}
 
 // FileSystem is the abstract filesystem provider for one execution world
 // (official ctx.fs). Targets must preserve identity across aliases; reads

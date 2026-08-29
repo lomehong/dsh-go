@@ -473,3 +473,6 @@ func (l *Local) EditText(ctx context.Context, target fs.Target, edit fs.EditRequ
 // SandboxMode implements fs.FileSystem: the bare local backend never
 // confines by default.
 func (l *Local) SandboxMode() string { return "" }
+
+// Cwd exposes the backend's resolution base (tests and diagnostics).
+func (l *Local) Cwd() string { return l.cwd }

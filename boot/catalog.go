@@ -19,6 +19,7 @@ import (
 	"dshgo/compactionbasic"
 	"dshgo/cordis"
 	"dshgo/credentials"
+	"dshgo/fs"
 	"dshgo/guard"
 	"dshgo/host/webserver"
 	"dshgo/interaction/permissionpresets"
@@ -35,6 +36,7 @@ import (
 	"dshgo/settings"
 	"dshgo/settings/file"
 	"dshgo/skill"
+	"dshgo/strreplaceeditor"
 	"dshgo/subagent"
 	"dshgo/subagentcontrol"
 	"dshgo/systemprompt"
@@ -68,6 +70,7 @@ const (
 	ServicePlanMode          = "planMode"
 	ServiceTokenMeter        = "tokenMeter"
 	ServiceCompaction        = "compaction"
+	ServiceFS                = "fs"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -813,6 +816,33 @@ var batchThreeBuilders = map[string]pluginBuilder{
 						Projections: ctx.Get(ServiceProjections).(*projection.Registry),
 						Coordinator: ctx.Get(ServiceSessionPersist).(*persistence.Coordinator),
 					},
+				)
+				return err
+			},
+		}
+	},
+
+	// The str_replace_editor tool over the mounted fs backend; the fs
+	// service itself arrives with the dsh-fs-sandbox composition, so a
+	// profile listing the editor without a filesystem backend fails loud
+	// at inject time (correct composition discipline, not a gap).
+	"@deepseek-ai/dsh-tool-str-replace-editor": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools, ServiceFS, ServiceAgents},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg strreplaceeditor.Config
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				_, err := strreplaceeditor.Register(
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					strreplaceeditor.Deps{
+						FS:     ctx.Get(ServiceFS).(fs.FileSystem),
+						Ctx:    ctx,
+						Agents: ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					},
+					cfg,
 				)
 				return err
 			},
