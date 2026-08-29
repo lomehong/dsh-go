@@ -405,6 +405,11 @@ type AgentSetupCommit struct {
 // publication commit. Setup composes, it never drives.
 type AgentSetup func(agentCtx *cordis.Context) (AgentSetupCommit, error)
 
+// ContextService is the typed "agent" context service: the factory publishes
+// the built agent into its own context so creation-window setup closures can
+// reach it (the assertion lives here, not at every consumer).
+var ContextService = cordis.DefineService[*Agent]("agent")
+
 // CreateAgentMeta is the session creation metadata a factory caller supplies.
 // Durable session data, so the session boundary validates and snapshots it
 // before asynchronous setup begins.

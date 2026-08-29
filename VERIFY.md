@@ -498,3 +498,8 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 新增 Request() TypedWaterfall[RequestPayload, *llm.LlmCallConfig] 与 RequestError() TypedWaterfall[RequestErrorPayload, RequestErrorAction] 访问器；agentloop 派发点、model-selection 监听器、compactionbasic 溢出恢复监听器及全部测试调用点迁移，raw agent.* waterfall 站点归零。显式化并统一了一处隐性不一致：擦除时代 request 链 base 返回值类型而监听器返回指针（靠 ,ok 断言容忍）；类型化后链统一为指针流，base 返回 &seed，派发方解引用——可观察值不变。
 - 范围决策（README 决策记录已补）：interaction 层 user-questions/approval 两个 waterfall（结果为联合类型、含 panic 容器语义）与 OnEmit(75)/OnSerial(12)（无组合语义）保持 raw——它们需要各自的 seam 设计，不属于同一机械迁移；下一轮做 ④ cordis 服务键类型化时一并评估。
 - ②⑤（init 收拢装配层 / weakmap 逐点评估）待做。
+
+[DSH → omp] 2026-08-29: 架构重构轮 4（④ cordis 服务键类型化 + ⑤ weak.Pointer 评估），门禁 68 包 / 960 测试全绿：
+- ④ 已落地：cordis 新增 Service[T]（DefineService/From/Provide）——any 断言收拢到句柄一处，From 沿祖先链解析，absent/nil ctx/错误类型一律 ok=false 降级；agent.ContextService（"agent"）与 webserver.ContextService（"webServer"）接线，消费方裸断言清零；新增 TestTypedService 契约测试（含错误类型降级与子上下文遮蔽）。
+- ⑤ 评估完成，结论：不采用 weak.Pointer。证据：37 处生产站点（14 文件）全部带显式 delete/dispose 钩子或与宿主同生命周期；Go 显式清理比 JS WeakMap 的 GC 时机更确定，原痛点已被更优机制消除；且 weak 需要 go directive ≥1.24 的升级，无对应收益。重审条件已写入 README。原评审第⑤条据此翻案——这正是"逐点评估"应得的结论。
+- 剩 ②（init+RegisterEventType 收拢装配层），下一轮单独处理（它要动 boot 装配与一批测试基建，规模最大）。

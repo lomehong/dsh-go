@@ -176,16 +176,20 @@ func (w *recordedWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
+// ContextService is the typed "webServer" service handle; the assertion for
+// the registry lookup lives here instead of at every consumer.
+var ContextService = cordis.DefineService[*Registry]("webServer")
+
 // AsPlugin exposes the registry as a cordis plugin providing the "webServer"
 // service, mirroring the official package's plugin face. Consumers resolve it
-// with ctx.Get("webServer").(*Registry).
+// with webserver.ContextService.From(ctx).
 func AsPlugin(logger cordis.Logger) *cordis.Plugin {
 	registry := New(logger)
 	return &cordis.Plugin{
 		Name:    "dsh-host-webserver",
 		Provide: []string{"webServer"},
 		Apply: func(ctx *cordis.Context) error {
-			ctx.Provide("webServer", registry)
+			ContextService.Provide(ctx, registry)
 			return nil
 		},
 	}

@@ -126,6 +126,34 @@ func (c *Context) Get(name string) any {
 	return nil
 }
 
+// Service is a typed handle for one context service name. The any assertion
+// lives at the definition site instead of at every consumer: From reports
+// ok=false both for an absent service and, defensively, for a value of the
+// wrong type.
+type Service[T any] struct {
+	Name string
+}
+
+// DefineService binds a service name to its Go type.
+func DefineService[T any](name string) Service[T] {
+	return Service[T]{Name: name}
+}
+
+// From resolves the service along the ancestor chain.
+func (s Service[T]) From(ctx *Context) (T, bool) {
+	var zero T
+	if ctx == nil {
+		return zero, false
+	}
+	typed, ok := ctx.Get(s.Name).(T)
+	return typed, ok
+}
+
+// Provide registers the service on this context.
+func (s Service[T]) Provide(ctx *Context, value T) {
+	ctx.Provide(s.Name, value)
+}
+
 // Provide registers a service on this context, then runs every deferred
 // injection this made satisfiable, in declaration order. An injection that
 // fails at activation is logged, never silent.

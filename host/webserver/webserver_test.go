@@ -190,7 +190,7 @@ func TestCordisSeamEndToEnd(t *testing.T) {
 	if err := ctx.Mount(AsPlugin(nil)); err != nil {
 		t.Fatalf("mount failed: %v", err)
 	}
-	registry, ok := ctx.Get("webServer").(*Registry)
+	registry, ok := ContextService.From(ctx)
 	if !ok || registry == nil {
 		t.Fatal("webServer service must resolve from the mounted plugin")
 	}

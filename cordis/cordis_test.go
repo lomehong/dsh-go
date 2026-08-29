@@ -303,3 +303,37 @@ func TestMountPropagatesApplyError(t *testing.T) {
 		t.Fatalf("Apply error must propagate, got %v", err)
 	}
 }
+
+// Typed services pin the assertion at the definition site: From resolves
+// through the ancestor chain, ok=false on absence, on a nil context, and
+// defensively on a wrong-typed value under the same name.
+func TestTypedService(t *testing.T) {
+	type greeting string
+	svc := DefineService[greeting]("greeting")
+	if _, ok := svc.From(nil); ok {
+		t.Fatal("nil context must not resolve")
+	}
+	root := NewRoot(Discard{})
+	if _, ok := svc.From(root); ok {
+		t.Fatal("absent service must not resolve")
+	}
+	svc.Provide(root, "hello")
+	if got, ok := svc.From(root); !ok || got != "hello" {
+		t.Fatalf("From = %q %v, want hello true", got, ok)
+	}
+	// The chain walks ancestors only.
+	_ = root.Mount(&Plugin{Name: "child-holder", Apply: func(child *Context) error {
+		svc.Provide(child, "child-greeting")
+		if got, _ := svc.From(child); got != "child-greeting" {
+			t.Fatalf("child resolution = %q, want the child's own service", got)
+		}
+		return nil
+	}})
+	// A wrong-typed value under the same name degrades to absent instead
+	// of panicking at the consumer.
+	wrong := NewRoot(Discard{})
+	wrong.Provide("greeting", 42)
+	if _, ok := svc.From(wrong); ok {
+		t.Fatal("wrong-typed service must not resolve")
+	}
+}
