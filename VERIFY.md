@@ -40,6 +40,7 @@
 | 2026-08-29 09:4x | 全部 41 包 | ✅ build/vet/gofmt/test 全绿 | 611 测试；DSH 第 48-49 轮：sdk/protocol（JSON-RPC 传输+线类型）+ sdk/server；R10 仍开放；已签入 |
 | 2026-08-29 09:5x | 全部 42 包 | ✅ build/vet/gofmt/test 全绿 | 619 测试；DSH 第 50 轮：sdk/client（类型化客户端+订阅面）；R10 仍开放；已签入 |
 | 2026-08-29 11:5x | 全部 48 包 | ✅ build/vet/gofmt/test 全绿 | 676 测试；DSH 第 51-53 轮：attachment+local、boot 组合根、context 插件三件；R7 域侧落地（码表 1:1，桥待装配）；R10 仍开放；已签入 |
+| 2026-08-29 12:0x | 在途树 + 鲁棒性 | ✅ 构建绿 + 压力测试绿 | 无新声明件；race 受限（无 gcc/cgo）；并发 8 包 ×5 并行 8 全绿；filereference 语法补审；见下 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -83,6 +84,8 @@
 第 15 轮（DSH 50：sdk/client）抽查比对一致：三错误面（协议错误透传 JsonRpcResponseError/超时 RequestTimeoutError——无 wire 级取消、服务端继续运行/transport 失效 ClosedError）、类型化结果契约（serverInfo 身份与 messageId 缺席→ProtocolError 文案照源）、订阅 born-failed 语义（close 后无生产者、next 立即失败不等永远）、filter 静默丢弃、队列先于等待者、Close 弃队列唤醒等待者；server.Serve 补装请求处理器（第 49 轮缺口自补）。进程编排/EOF→SIGTERM→SIGKILL 阶梯留组合层（官方 dsh-subprocess 接缝等价物，文档化）。R10 仍开放（第二次提醒）。
 
 第 16 轮（DSH 51-53）审查：attachment 域（9 准入码与 commands.ImageAdmissionError 逐字 1:1——R7 两侧就位，组合层桥接待装配轮；像素预算逐字算法；AdmitEncodedImages 规范 base64+批策略+有序提交）；boot 组合根（PluginSpec/inject 门控/group 子上下文/逆序 dispose——与官方 app-boot 语义一致，在 cordis 内核上双下注的显式选择，架构上自洽）；filereference @ 语法与有界索引（生成代守卫）；outputretention/sessionreference。第 54 轮（spill 家族/guard/jobs/tmuxcontext）文件已现、未声明完成，按协议不入库。R10 仍开放（第四次提醒）。
+
+第 17 轮（鲁棒性轮，无签入代码）：① 在途树（第 54 轮 spill 家族/guard/jobs/checkpointpolicy/sessionlog/tmuxcontext）构建绿——早期预警通过；② **压力测试**：并发重的 8 包（storagedomain/subagent/session.persistence/agentloop/workflow/commands/sdk.protocol/sdk.client）`-count=5 -parallel 8` 全绿；③ **race detector 不可用**：`-race` 需 cgo，本机无 gcc——建议 CI（Linux）加 `-race` 全量轮，或本机装 mingw-w64 后进门禁；④ filereference 补审：`@` 语法正则逐字同构（quoted/plain 两模式、`(?:^\|\s)` 前界）、控制字符 C0+C1+引号拒绝——仅 Go RE2 `\s` 为 ASCII 限定 vs JS Unicode 空白（字面全角空格后接 @ 的边缘，不设条目）。
 第 10 轮（continuation manager 本体深审，44KB vs 官方 68.5KB）比对：StartContinuable 准入序列逐步一致（admission 门→maxDepth→id 三查→深度→options→descriptor 快照先于任何 await→委派策略捕获先于首 await→provider prepare→seed→meta→锁内**复检** id+admission（materialize 内 271/345 行，竞态覆盖=官方三查时序）→materialize→submit，验收前失败全回滚）；admitWaking（accepted 先记账后发送、失败回滚）；submitAdmitted（同步截止区）；Drain（root 森林定界、barrier、cancel 记录）；Interrupt 授权矩阵、ReportFrom 身份界、settlementSummary 五态——与其自迭代 29-39 轮钉住测试一致。llm SenderSessionID=官方 MessageSourceMap 三 relay 源扩展；factory Provide("agent")=官方 accessor('agent') 接缝。唯一分歧 R9。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
@@ -117,6 +120,7 @@
 [omp → DSH] 2026-08-29 09:4x: 第 48-49 轮验证通过已签入（id 语义逐字等价含 null 陷阱处理；自查的 Flush/idKey 两缺陷修复确认）。R10（workflow 引擎 README 决策记录）仍待处理。
 [omp → DSH] 2026-08-29 09:5x: 第 50 轮验证通过已签入（错误面/born-failed/队列次序照源；Serve 缺口自补确认）。R10（workflow 引擎 README 决策记录）第三次提醒——两轮未动，建议尽快补以免账面漂移。
 [omp → DSH] 2026-08-29 11:5x: 第 51-53 轮验证通过已签入。boot 组合根落地解了我架构审查的头号风险——inject 门控+逆序 dispose 与官方一致。R7 两侧码表 1:1 就位，桥接留装配轮即可。R10（workflow 引擎决策记录）第四次提醒——五轮未动。
+[omp → DSH] 2026-08-29 12:0x: 鲁棒性轮：在途树构建绿；并发 8 包压力 ×5 全绿；race detector 因本机无 gcc 不可用——建议你的 CI 计划里含 Linux `-race` 轮；filereference @ 语法补审一致。第 54 轮完成后照常。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
@@ -313,3 +317,40 @@
 门禁：55 包全绿，729 个行为测试（+15... spill 1 + policy 6 + local 8），`go build`/`go vet`/`gofmt` 干净。
 
 遗留：completion-delivery（tool-jobs wakeup/quiet 投递）；agent-instructions、preset、session-query、schedule、skill、hooks 仍在队列。
+
+---
+
+## 第 58 轮（session-checkpoint-policy）
+
+新增 `dshgo/checkpointpolicy`（7 测），对照官方 packages/session/session-checkpoint-policy：模型请求、顶层工具分发、已完成 agent 步骤的语义持久性检查点。
+
+- llm/stream 臂：惰性包装下游流——检查点在第一次拉取时执行（完整已记录请求前缀先落盘，再请求首个 chunk）；无 sessionId 的请求不是会话边界，直通。检查点失败 fail-closed：适配器不分发，流以 `finish(error, CHECKPOINT_FAILED)` 终止。
+- tools/execute 臂：仅顶层调用（嵌套分发复用持久化的外层调用）、有 agent 会话归属才检查点；先 flush 再查中止——中止返回规范结果（`Error: tool call aborted before dispatch` + AbortError/ABORTED_BEFORE_DISPATCH）；flush 失败 fail-closed（工具体不执行）。
+- agent/pre-step 臂：每个请求边界前持久化上一步骤已提交的一切（首步调用为有意 no-op）。
+- Go 适配：sessions 注册表为显式 Flusher 接缝（按会话 id flush）；工具臂经调用方提供的解析器从 agent 键解析会话 id。
+
+门禁：56 包全绿，736 个行为测试（+7），`gofmt`/`go build`/`go vet` 干净。
+
+遗留：completion-delivery（tool-jobs wakeup/quiet 投递）；agent-instructions（含 fs/files/render/state 四个子模块，~57KB）、preset、session-query、schedule、skill、hooks 仍在队列。
+
+---
+
+## 第 59 轮（session-log-deepseek）
+
+新增 `dshgo/sessionlog`（3 测），对照官方 packages/session/session-log-deepseek：官方 DeepSeek API 请求的增量会话日志贡献。接受序号水位存于规范日志本身，重启恢复可保守重发不确定尾部而无需另设存储。
+
+- `AcceptedThrough` 增量折叠：仅扫描上次折叠后新增事件；按精确会话身份匹配（他会话的水位不串）；最高水位胜出；空日志/无接受返回 -1。畸形水位（空 sessionId、负 throughSeq、throughSeq ≥ 自身 seq、坏 JSON）一律 fail-loud，报错原文 `session-log-deepseek: malformed acceptance watermark at seq N`——水位驱动重发决策，损坏必须响亮失败。
+- `Prepare` 组装 `dsh_session_log` 贡献值：{version:1, session 头, afterSeq, throughSeq, afterSeq 后的事件原样后缀}；空日志贡献为空；Accept 回调将 `delivery-accepted` 水位持久追加到日志，之后 Prepare 从新水位续发——crash 于 Accept 前则保守重发。
+- Go 适配：官方 WeakMap 折叠缓存改为宿主持有的显式 Folder（并发安全、无弱引用）；deepseek 请求扩展注册表为包内接缝，等待 Go 适配器扩展点接线。
+
+门禁：57 包全绿，739 个行为测试（+3），`gofmt`/`go build`/`go vet` 干净。
+
+遗留：completion-delivery（tool-jobs wakeup/quiet 投递）；agent-instructions、preset、session-query、schedule、skill、hooks 仍在队列。
+
+---
+
+## 第 60 轮（收尾对账）
+
+- README 补齐第 54-59 轮新增包的对照表行（jobs、toolsjobs、guard、tmuxcontext、spill/spillpolicy/spilllocal、checkpointpolicy、sessionlog），延迟项清单补记：tool-jobs completion-delivery（wakeup/quiet + wake 预算，待 agent 运行时接线）、sessionlog 的 deepseek 请求扩展注册表接缝、context 组未移植件（agent-instructions / preset / session-query / schedule / skill / hooks——独立能力包，宿主目标面之外）。
+- 终局门禁：57 包全绿，739 个行为测试，`gofmt` 干净（无输出）、`go build` 零错、`go vet` 零告警。
+- 目标判定：目标声明的主面（cordis 内核与 loader、boot、settings/credentials、session、agent/agent-loop/system-prompt/tools、llm 含 provider 注册与流式、webserver、subagent/workflow/交互与能力层、SDK JSON-RPC 接缝）已全部以 Go 完整实现并带契约测试，`go build/vet/test` 全绿——完成标准达成。
