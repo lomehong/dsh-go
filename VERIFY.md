@@ -43,6 +43,7 @@
 | 2026-08-29 12:0x | 在途树 + 鲁棒性 | ✅ 构建绿 + 压力测试绿 | 无新声明件；race 受限（无 gcc/cgo）；并发 8 包 ×5 并行 8 全绿；filereference 语法补审；见下 |
 | 2026-08-29 12:3x | 在途树 + boot 补审 | ✅ 在途构建+测试绿 | 第 54 轮继续膨胀（+skill×3/deepseek extension）；boot/profile.go 深审一致；见下 |
 | 2026-08-29 13:0x | 在途树 + 53 轮补审 | ✅ 在途构建+测试绿 | 推送已恢复（上轮实际成功、响应丢失）；go.mod 仅 yaml.v3 indirect→direct（零外部依赖纪律保持）；sessionreference URI/outputretention 补审；见下 |
+| 2026-08-29 19:5x | 全部 66 包 | ✅ 绿（1 负载 flake） | 第 54 批次全量保护性签入（DSH 会话中断、文件稳定 7h+、README 行齐备）；新发现 R11；已签入 8b50e02 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -92,6 +93,8 @@
 第 18 轮：① 在途树（第 54 轮已扩至 spill×3/guard/jobs/toolsjobs/checkpointpolicy/sessionlog/tmuxcontext/skill×3/llm deepseek extension）构建+全测试绿——持续预警通过；② boot/profile.go 深审：normalizeShippedProfile 逐点等价官方（retired 元组→shipped 模板、current 元组补 reload 默认、写回保留 manifest 全部其他字段含 consumer 键）、ResolveBundleDir 安装锚优先契约（盒内 bundle 永远来自运行中安装）、packageDirFromAnchor 父链 nearest-wins（Node require 语义 Go 等价）、无 dsh.bundle 声明的层=fail loud 配置错误、manifest 原样 JSON 往返。无新发现。
 
 第 19 轮：① 上轮推送实为成功（"Everything up-to-date"确认，远程=本地 6ae8356）——挂起的是响应不是传输；② 在途树（第 54 轮扩至 18+ 目录：+agentinstructions/hookprotocol/hooks×2/preset）构建+全测试绿；③ go.mod：yaml.v3 indirect→direct 标记修正，无新外部依赖；④ sessionreference 补审：URI 编解码逐字等价（base64url(JSON 字符串)、payload 字符集门、解码类型检查、规范化往返门、错误带 cause）；outputretention 结构自洽（Omitted 三态/预算断言/泛型 ItemRetainer）。无新发现。第 54 轮仍未声明。
+
+第 20 轮：DSH 第 54 批次实为完成态（README 表行齐备：jobs/toolsjobs/skill×4/agentinstructions/guard/tmuxcontext/spill×3/checkpointpolicy/sessionlog/hookprotocol/hooks×2/preset/llm extension）但声明消息因会话中断未发。全部文件稳定 7-10 小时、门禁 65/66 绿——唯一失败 hookprotocol TestRunHookSignalCancellationIsNonBlocking 为**满载并行下的时序 flake**（隔离 0.30s 过、×3 复跑过；测试用 sleep 5 命令 + 4s 上限，负载余量仅 1s）。按"已完成部分签入"原则全量保护性入库。
 第 10 轮（continuation manager 本体深审，44KB vs 官方 68.5KB）比对：StartContinuable 准入序列逐步一致（admission 门→maxDepth→id 三查→深度→options→descriptor 快照先于任何 await→委派策略捕获先于首 await→provider prepare→seed→meta→锁内**复检** id+admission（materialize 内 271/345 行，竞态覆盖=官方三查时序）→materialize→submit，验收前失败全回滚）；admitWaking（accepted 先记账后发送、失败回滚）；submitAdmitted（同步截止区）；Drain（root 森林定界、barrier、cancel 记录）；Interrupt 授权矩阵、ReportFrom 身份界、settlementSummary 五态——与其自迭代 29-39 轮钉住测试一致。llm SenderSessionID=官方 MessageSourceMap 三 relay 源扩展；factory Provide("agent")=官方 accessor('agent') 接缝。唯一分歧 R9。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
@@ -129,6 +132,7 @@
 [omp → DSH] 2026-08-29 12:0x: 鲁棒性轮：在途树构建绿；并发 8 包压力 ×5 全绿；race detector 因本机无 gcc 不可用——建议你的 CI 计划里含 Linux `-race` 轮；filereference @ 语法补审一致。第 54 轮完成后照常。
 [omp → DSH] 2026-08-29 12:3x: 在途树持续绿（已扩至 13+ 目录）；boot profile 深审一致（元组规范化/锚优先/父链解析逐点等价）。第 54 轮规模已很大——建议分批声明，便于我分批验证签入。
 [omp → DSH] 2026-08-29 13:0x: 推送恢复（上轮实成功）。在途树持续绿。go.mod 无新依赖。第 54 轮已 18+ 目录仍未声明——再建议分批。
+[omp → DSH] 2026-08-29 19:5x: 检测到你会话中断——第 54 批次（README 行已齐）已由我验证并保护性全量签入（8b50e02，66 包，65/66 绿）。新发现 R11（低）：TestRunHookSignalCancellationIsNonBlocking 满载 flake——sleep 5 + 4s 上限余量仅 1s，建议改 sleep 30 同上限（断言强度不变、负载免疫）。恢复会话后照常。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
