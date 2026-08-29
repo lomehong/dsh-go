@@ -12,32 +12,45 @@ import (
 	"path/filepath"
 
 	"dshgo/agent"
+	"dshgo/agentloop"
 	"dshgo/commands"
 	"dshgo/cordis"
 	"dshgo/credentials"
 	"dshgo/host/webserver"
+	"dshgo/interaction/permissionpresets"
+	"dshgo/interaction/userapproval"
+	"dshgo/interaction/userquestions"
 	"dshgo/llm"
 	"dshgo/llm/deepseek"
 	"dshgo/session"
+	"dshgo/session/persistence"
 	"dshgo/session/persistence/jsonl"
 	"dshgo/session/projection"
 	"dshgo/settings"
 	"dshgo/settings/file"
+	"dshgo/subagent"
+	"dshgo/systemprompt"
 	"dshgo/tools"
 )
 
 // Service names plugins publish and consume through ctx inject lists.
 const (
-	ServiceTools          = "tools"
-	ServiceCommands       = "commands"
-	ServiceSettings       = "settings"
-	ServiceWebServer      = "webServer"
-	ServiceCredential     = "credentials"
-	ServiceSessions       = "sessions"
-	ServiceProjections    = "projections"
-	ServiceAgents         = "agents"
-	ServiceLlm            = "llm"
-	ServiceSessionPersist = "sessionPersistence"
+	ServiceTools             = "tools"
+	ServiceCommands          = "commands"
+	ServiceSettings          = "settings"
+	ServiceWebServer         = "webServer"
+	ServiceCredential        = "credentials"
+	ServiceSessions          = "sessions"
+	ServiceProjections       = "projections"
+	ServiceAgents            = "agents"
+	ServiceLlm               = "llm"
+	ServiceSessionPersist    = "sessionPersistence"
+	ServiceUserQuestions     = "userQuestions"
+	ServiceUserApproval      = "userApproval"
+	ServicePermissionPresets = "permissionPresets"
+	ServiceSystemPrompt      = "systemPrompt"
+	ServiceAgentLoop         = "agentLoop"
+	ServiceSubagentRuntime   = "subagentRuntime"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -74,10 +87,29 @@ func adaptSessionLogger(logger cordis.Logger) session.Logger {
 	return sessionLogger{logger: logger}
 }
 
+// adaptPersistenceLogger adapts to the coordinator's identical minimal face.
+func adaptPersistenceLogger(logger cordis.Logger) persistence.Logger {
+	return sessionLogger{logger: logger}
+}
+
 func (s sessionLogger) Warn(message string) {
 	if s.logger != nil {
 		s.logger.Warn(message)
 	}
+}
+
+// decodeConfigJSON funnels a composition row's raw config through the
+// target's json shape (the settings-section shape), failing loud on a shape
+// the plugin cannot read.
+func decodeConfigJSON(config any, out any) error {
+	if config == nil {
+		return nil
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, out)
 }
 
 var builders = map[string]pluginBuilder{
@@ -241,12 +273,13 @@ var builders = map[string]pluginBuilder{
 		}
 	},
 
-	// The jsonl persistence backend: physical session-log artifacts under
-	// the profile home (config.root overrides). The store's consumption
-	// contract lands with the storage-hub round; until then the backend is
-	// provided as its own service.
+	// The jsonl persistence plugin: the physical session-log backend under
+	// the profile home (config.root overrides), composed into the
+	// coordinator that owns preparation, write-behind, and snapshots. The
+	// coordinator is the service consumers inject.
 	"@deepseek-ai/dsh-session-persistence-jsonl": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
+			Inject:  []string{ServiceSessions},
 			Provide: []string{ServiceSessionPersist},
 			Apply: func(ctx *cordis.Context, config any) error {
 				root := filepath.Join(deps.Home, "sessions")
@@ -259,7 +292,180 @@ var builders = map[string]pluginBuilder{
 						}
 					}
 				}
-				ctx.Provide(ServiceSessionPersist, jsonl.NewBackend(root, jsonl.CompressionNone))
+				backend := jsonl.NewBackend(root, jsonl.CompressionNone)
+				coordinator, err := persistence.NewCoordinator(
+					backend,
+					persistence.NewSessionsAdapter(ctx.Get(ServiceSessions).(*session.Store)),
+					adaptPersistenceLogger(deps.Logger),
+					persistence.CoordinatorOptions{},
+				)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceSessionPersist, coordinator)
+				return nil
+			},
+		}
+	},
+
+	// The user-questions waterfall: ask-user questions resolve through the
+	// typed request seam.
+	"@deepseek-ai/dsh-user-questions": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceAgents},
+			Provide: []string{ServiceUserQuestions},
+			Apply: func(ctx *cordis.Context, config any) error {
+				ctx.Provide(ServiceUserQuestions, userquestions.NewService(
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry)))
+				return nil
+			},
+		}
+	},
+
+	// The user-approval waterfall: tool approval resolves through the
+	// approval decision seam. Config may pin the policy
+	// (`config.policy`: ask|never); the ask default is the schema default.
+	"@deepseek-ai/dsh-user-approval": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceAgents},
+			Provide: []string{ServiceUserApproval},
+			Apply: func(ctx *cordis.Context, config any) error {
+				policy := userapproval.PolicyAsk
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["policy"].(string); ok && raw != "" {
+						policy = userapproval.ApprovalPolicy(raw)
+					}
+				}
+				cfg, err := userapproval.NewConfig(policy)
+				if err != nil {
+					return err
+				}
+				service, err := userapproval.NewService(
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry), cfg)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceUserApproval, service)
+				return nil
+			},
+		}
+	},
+
+	// The permission-presets service: the knob table behind sandbox-mode
+	// and approval-policy presets, and the sandbox-override source for
+	// delegation. Config may replace the preset table (`config.presets`
+	// and `config.names`, `config.sandboxDefault`); the default lands on
+	// the schema-defaulted table over workspace-write.
+	"@deepseek-ai/dsh-permission-presets": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServicePermissionPresets},
+			Apply: func(ctx *cordis.Context, config any) error {
+				presets, names := permissionpresets.DefaultPresets()
+				cfg := permissionpresets.Config{
+					Presets:        presets,
+					Names:          names,
+					SandboxDefault: permissionpresets.SandboxWorkspaceWrite,
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				service, err := permissionpresets.NewService(cfg)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServicePermissionPresets, service)
+				return nil
+			},
+		}
+	},
+
+	// The system-prompt registry: harness-owned base sections plus scoped
+	// layers. Config funnels through the prompt config json shape.
+	"@deepseek-ai/dsh-system-prompt": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceSystemPrompt},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg systemprompt.Config
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				prompt, err := systemprompt.NewSystemPrompt(cfg)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceSystemPrompt, prompt)
+				return nil
+			},
+		}
+	},
+
+	// The agent loop: the per-agent react-loop factory over the composed
+	// registries. This is also the manager's child create/resume seam.
+	"@deepseek-ai/dsh-agent-loop": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceAgents, ServiceLlm, ServiceTools, ServiceSystemPrompt},
+			Provide: []string{ServiceAgentLoop},
+			Apply: func(ctx *cordis.Context, config any) error {
+				loop, err := agentloop.NewAgentLoop(
+					ctx,
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					deps.Logger,
+					ctx.Get(ServiceLlm).(*llm.Runtime),
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt),
+					agentloop.AgentLoopConfig{},
+				)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceAgentLoop, loop)
+				return nil
+			},
+		}
+	},
+
+	// The subagent runtime + continuation manager, production-composed:
+	// the manager's extension services come from the composition (host =
+	// runtime, snapshots = persistence coordinator, sandbox overrides =
+	// permission presets, child world = prompt + tool registry), and the
+	// child runtime installs the agent loop under this composition context
+	// as the structural activation owner. Provider plugins
+	// (spawn/fork-in-process) register on the provided runtime.
+	"@deepseek-ai/dsh-subagent": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{
+				ServiceAgents, ServiceAgentLoop, ServiceSessionPersist,
+				ServiceTools, ServiceSystemPrompt, ServicePermissionPresets,
+				ServiceUserApproval,
+			},
+			Provide: []string{ServiceSubagentRuntime},
+			Apply: func(ctx *cordis.Context, config any) error {
+				registry := ctx.Get(ServiceAgents).(*agent.AgentRegistry)
+				runtime := subagent.NewSubagentRuntime(subagent.RuntimeConfig{
+					Logger: deps.Logger,
+					Events: registry.Events(),
+				})
+				manager := subagent.NewSubagentContinuationManager(subagent.ManagerDeps{
+					Logger: deps.Logger,
+					Agents: registry,
+					Setup:  runtime.SetupRegistry(),
+				})
+				manager.SetChildRuntime(
+					ctx.Get(ServiceAgentLoop).(subagent.ChildRuntime), ctx)
+				manager.SetManagerExt(subagent.ManagerExt{
+					Host:      runtime,
+					Snapshots: ctx.Get(ServiceSessionPersist).(subagent.SnapshotLister),
+					Composition: subagent.ChildCompositionDeps{
+						Prompt:   ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt),
+						Registry: ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					},
+					Sandbox: ctx.Get(ServicePermissionPresets).(subagent.SandboxOverrideService),
+					// The approval service is in the inject list: a
+					// profile composing subagents composes approval.
+					HasApproval: true,
+				})
+				runtime.SetContinuations(manager)
+				ctx.Provide(ServiceSubagentRuntime, runtime)
 				return nil
 			},
 		}

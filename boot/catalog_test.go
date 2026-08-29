@@ -58,6 +58,12 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		{ID: "llm", Name: "@deepseek-ai/dsh-llm"},
 		{ID: "deepseek", Name: "@deepseek-ai/dsh-llm-deepseek"},
 		{ID: "persistence", Name: "@deepseek-ai/dsh-session-persistence-jsonl"},
+		{ID: "user-questions", Name: "@deepseek-ai/dsh-user-questions"},
+		{ID: "user-approval", Name: "@deepseek-ai/dsh-user-approval"},
+		{ID: "permission-presets", Name: "@deepseek-ai/dsh-permission-presets"},
+		{ID: "system-prompt", Name: "@deepseek-ai/dsh-system-prompt"},
+		{ID: "agent-loop", Name: "@deepseek-ai/dsh-agent-loop"},
+		{ID: "subagent", Name: "@deepseek-ai/dsh-subagent"},
 	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
 	if err != nil {
 		t.Fatalf("assemble: %v", err)
@@ -66,6 +72,8 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 	for _, service := range []string{
 		ServiceTools, ServiceCommands, ServiceSettings, ServiceCredential, ServiceWebServer,
 		ServiceSessions, ServiceProjections, ServiceAgents, ServiceLlm, ServiceSessionPersist,
+		ServiceUserQuestions, ServiceUserApproval, ServicePermissionPresets,
+		ServiceSystemPrompt, ServiceAgentLoop, ServiceSubagentRuntime,
 	} {
 		if ctx.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)

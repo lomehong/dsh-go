@@ -549,3 +549,10 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 新接线 6/86（累计 11）：dsh-session（session.NewStore——session.Logger 的 Warn(string) 极小面与 cordis.Logger Warn(...any) 不同形，按 store.go 注释意图落显式适配器 adaptSessionLogger，不做接口改动）/dsh-session-projection（NewRegistry+Attach 事件订阅随 ctx 生命周期）/dsh-agent（NewAgentRegistry，agent 事件总线随 registry 诞生）/dsh-llm（NewRuntime）/dsh-llm-deepseek（deepseek.Apply 完整装配层接入 catalog：Inject llm+settings+credentials 三服务，静态 config 经插件 json 形态解码，settings 热载与受管凭证由组合序决定生产形态）/dsh-session-persistence-jsonl（Backend 独立服务；store 消费契约确实未建——如实标注随 storage-hub 轮，不硬接）。
 - 集成测试升级：TestCatalogAssemblesCoreServicesThroughAssemble 走 boot.Assemble 生产 mount 路径（非手工 Apply），11 条目注入序/服务齐全/Shutdown 三验。
 - 下一轮：ManagerExt 生产装配（Host/Snapshots/Sandbox 三服务进 catalog+owner context）或 top-level 组合骨架，视 subagent 组合面盘点结果定序。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 4（① subagent 生产链七插件+store↔coordinator 接缝），门禁 68 包 / 966 测试全绿：
+- ManagerExt 生产装配完成（此前仅测试装配的缺口消除）：catalog 新增 dsh-user-questions/dsh-user-approval（config.policy ask|never 校验）/dsh-permission-presets（DefaultPresets 兜底、SandboxWorkspaceWrite 默认、config 可整表覆写）/dsh-system-prompt/dsh-agent-loop/dsh-subagent 六项，并升级 dsh-session-persistence-jsonl 为 Coordinator 形态。
+- dsh-subagent 装配：runtime+manager 构造后 SetChildRuntime(loop, 组合 ctx 作为 owner context) + SetManagerExt{Host=runtime, Snapshots=coordinator, Sandbox=presets 服务, Composition={Prompt,Registry}, HasApproval=true（approval 在注入表=组合了 approval 插件）} + SetContinuations。类型断言全部实查成立：AgentLoop 实现 ChildRuntime、Coordinator 实现 SnapshotLister、presets 服务实现 SandboxOverrideService。
+- 接缝补全：session/persistence/storeadapter.go——StoreSessions 适配器（Get 带存在位/List 会话形/Prepare=NewRestored 未发布构建），独立钉缝测试三验；集成测试升级 17 条目 16 服务全链装配。
+- 如实记录：spawn/fork-in-process provider 未移植（包内无 SubagentProvider 实现）——已列入待续，subagent 运行时缺它们不产子代理。
+- 下一轮：顶层组合骨架（profile→roster→entries→Assemble→main）或 spawn/fork provider，视 catalog 缺口优先级定。
