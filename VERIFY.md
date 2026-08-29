@@ -556,3 +556,10 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 接缝补全：session/persistence/storeadapter.go——StoreSessions 适配器（Get 带存在位/List 会话形/Prepare=NewRestored 未发布构建），独立钉缝测试三验；集成测试升级 17 条目 16 服务全链装配。
 - 如实记录：spawn/fork-in-process provider 未移植（包内无 SubagentProvider 实现）——已列入待续，subagent 运行时缺它们不产子代理。
 - 下一轮：顶层组合骨架（profile→roster→entries→Assemble→main）或 spawn/fork provider，视 catalog 缺口优先级定。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 5（① 顶层组合+可运行入口），门禁 69 包 / 968 测试全绿：
+- boot/appboot.go：AssembleProfile（LoadProfile 层序→ComposeEntries→Assemble 一体；warnings 透传）+ App.Root() 服务访问器；双测（fixture bundle 组装+缺 bundle fail-loud）。
+- cmd/dsh：仓库第一个可运行入口。实跑验证（临时 fixture：sdk-minimal 模板 profile 自动初始化→@deepseek-ai/dsh-sdk-minimal bundle 从 node_modules 解析→cordis.patch.yml 组合→catalog mount→-list 服务表打印 tools/commands true 其余 false——与 fixture 内容精确一致）：exit=0。-list 即出即停；默认信号等待+Shutdown。
+- 实跑修正两处：锚点语义（packageDirFromAnchor 从 anchor 父目录起走 node_modules，锚应传树内文件路径——与 ResolveBundleDir 第二锚点同形）；默认 profile 名改 headless（ProfileTemplates 无 "base" 键——acp/web/headless/sdk/sdk-minimal 五模板）。
+- README 路线图更新：关键路径改述为"目录与顶层组合均已落地，余量在插件覆盖"（17/86）；patchReload watch/live 后半轮与插件管理 CLI 如实列入待续。
+- 下一轮：spawn/fork-in-process provider 移植（subagent 运行时能真正产子代理）或 catalog 插件批量补线。
