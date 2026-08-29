@@ -65,6 +65,9 @@ type AdapterOptions struct {
 	// ResolveUserID resolves the harness-home anonymous id shared with
 	// telemetry and feedback.
 	ResolveUserID func() string
+	// Extensions registers independently owned top-level request fields;
+	// nil carries none.
+	Extensions *ExtensionRegistry
 	// HTTPClient overrides the transport (tests); nil uses the default.
 	HTTPClient *http.Client
 }
@@ -248,6 +251,43 @@ func (a *Adapter) streamWithConnection(options llm.GenerateOptions, connection *
 			fail(llm.NewLlmError("DeepSeek request serialization failed", "INVALID_REQUEST", llm.LlmFailure{}))
 			return
 		}
+		// Extension fields merge into the serialized body: preparation
+		// failure or a base-field collision fails the dispatch before any
+		// HTTP traffic; acceptance commits after the 2xx status.
+		accept := func() error { return nil }
+		if a.config.Extensions != nil {
+			facts := RequestFacts{Signal: ctx, SessionID: options.SessionID, Purpose: options.Purpose}
+			if json.Unmarshal(payload, &facts.Body) != nil {
+				fail(llm.NewLlmError("DeepSeek request serialization failed", "INVALID_REQUEST", llm.LlmFailure{}))
+				return
+			}
+			// Providers see a detached clone: they retain no mutable alias
+			// to the outgoing request.
+			visible := cloneJSONValue(facts.Body).(map[string]any)
+			prepared, err := a.config.Extensions.Prepare(ctx, RequestFacts{
+				Body: visible, SessionID: facts.SessionID, Purpose: facts.Purpose, Signal: facts.Signal,
+			})
+			if err != nil {
+				fail(llm.NewLlmError("DeepSeek request extension preparation failed", "REQUEST_EXTENSION", llm.LlmFailure{}))
+				return
+			}
+			for field := range prepared.Fields {
+				if _, taken := facts.Body[field]; taken {
+					fail(llm.NewLlmError(fmt.Sprintf("DeepSeek request extension field %q collides with the base request", field), "REQUEST_EXTENSION", llm.LlmFailure{}))
+					return
+				}
+			}
+			for field, value := range prepared.Fields {
+				facts.Body[field] = value
+			}
+			merged, err := json.Marshal(facts.Body)
+			if err != nil {
+				fail(llm.NewLlmError("DeepSeek request serialization failed", "INVALID_REQUEST", llm.LlmFailure{}))
+				return
+			}
+			payload = merged
+			accept = prepared.Accept
+		}
 
 		// The idle watchdog: one stable signal reaches both the initial
 		// fetch and body reads. Caller aborts map to ABORTED; the
@@ -277,7 +317,7 @@ func (a *Adapter) streamWithConnection(options llm.GenerateOptions, connection *
 			idle.Reset(time.Duration(connection.StreamIdleTimeoutMs) * time.Millisecond)
 		}
 
-		chunks, err := a.request(watchCtx, options, connection, apiKey, userID, payload, pulse)
+		chunks, err := a.request(watchCtx, options, connection, apiKey, userID, payload, accept, pulse)
 		watchCancel()
 		<-watchDone
 		if err != nil {
@@ -315,6 +355,7 @@ func (a *Adapter) request(
 	connection *ConnectionOptions,
 	apiKey, userID string,
 	payload []byte,
+	acceptExtensions func() error,
 	onActivity func(),
 ) (llm.Seq, error) {
 	headers := map[string]string{
@@ -367,6 +408,14 @@ func (a *Adapter) request(
 			failure.RequestID = llm.ProviderRequestID(id)
 		}
 		return nil, llm.NewLlmError(message, code, failure)
+	}
+	// Acceptance commits only after the 2xx status; its failure fails the
+	// request as REQUEST_EXTENSION even though the provider answered.
+	if acceptExtensions != nil {
+		if err := acceptExtensions(); err != nil {
+			response.Body.Close()
+			return nil, llm.NewLlmError("DeepSeek request extension acceptance failed", "REQUEST_EXTENSION", llm.LlmFailure{})
+		}
 	}
 	if response.Body == nil {
 		return nil, llm.NewLlmError("DeepSeek API returned no response body", llm.EmptyResponseCode, llm.LlmFailure{})

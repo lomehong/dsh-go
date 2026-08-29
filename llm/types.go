@@ -115,6 +115,34 @@ type MessageSource struct {
 	// is always 1.
 	ReferenceVersion int                     `json:"version,omitempty"`
 	References       []SessionReferenceEntry `json:"references,omitempty"`
+	// Skill-catalog source: whether this publication replaces every
+	// earlier catalog and exactly the entries it published, in catalog
+	// order. Consumers presenting the list must read these entries, not
+	// re-parse the model-facing prose frame.
+	CatalogUpdate  bool           `json:"catalogUpdate,omitempty"`
+	CatalogEntries []CatalogEntry `json:"catalogEntries,omitempty"`
+	// Agent-instructions source: whether this message is the complete
+	// startup/resume baseline, the discovery/precedence/budget identity
+	// that validates a resumed baseline, and the instruction transitions
+	// it renders.
+	Baseline         bool                `json:"baseline,omitempty"`
+	BaselineIdentity string              `json:"baselineIdentity,omitempty"`
+	Changes          []InstructionChange `json:"changes,omitempty"`
+}
+
+// InstructionChange is one workspace-instruction state transition rendered
+// by an agent-instructions context.
+type InstructionChange struct {
+	Action string `json:"action"` // "set" | "replace" | "remove"
+	Scope  string `json:"scope"`
+	Path   string `json:"path"`
+	Digest string `json:"digest,omitempty"`
+}
+
+// CatalogEntry is one skill-catalog publication entry.
+type CatalogEntry struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // SessionReferenceEntry is one source session cited by a session-reference
