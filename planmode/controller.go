@@ -284,30 +284,26 @@ type PlanProjection struct {
 // it. Pending is thereby a pure replay quantity: host restarts, other tabs,
 // and cold reads all recover it from the log alone.
 func ProjectionDefinition() projection.Definition {
-	return projection.Definition{
+	return projection.Unit[planUnitState]{
 		Key:          "plan",
 		StateVersion: 2,
-		Init: func(header session.SessionHeader) any {
+		Init: func(header session.SessionHeader) planUnitState {
 			return planUnitState{Active: false, Wanted: nil, Running: nil}
 		},
-		Apply: func(state any, event session.Event) any {
-			current, ok := state.(planUnitState)
-			if !ok {
-				return state
-			}
+		Apply: func(current planUnitState, event session.Event) (planUnitState, bool) {
 			switch event.Type {
 			case "command/run":
 				var data commandRunData
 				if err := json.Unmarshal(event.Data, &data); err != nil || data.Name != "plan" || data.Args == nil {
-					return current
+					return current, false
 				}
 				wanted := strings.TrimSpace(*data.Args) != "off"
 				return planUnitState{Active: current.Active, Wanted: current.Wanted,
-					Running: &runningCommand{CommandID: data.CommandID, Wanted: wanted}}
+					Running: &runningCommand{CommandID: data.CommandID, Wanted: wanted}}, true
 			case "command/done":
 				var done commandDoneData
 				if err := json.Unmarshal(event.Data, &done); err != nil || current.Running == nil || done.CommandID != current.Running.CommandID {
-					return current
+					return current, false
 				}
 				var next planUnitState
 				if done.Kind == "success" && current.Running.Wanted != current.Active {
@@ -316,40 +312,34 @@ func ProjectionDefinition() projection.Definition {
 				} else {
 					next = planUnitState{Active: current.Active, Wanted: nil, Running: nil}
 				}
-				return next
+				return next, true
 			case EventPlanMode:
 				var data PlanModeData
 				if err := json.Unmarshal(event.Data, &data); err != nil {
-					return current
+					return current, false
 				}
-				return planUnitState{Active: data.Active, Wanted: nil, Running: current.Running}
+				return planUnitState{Active: data.Active, Wanted: nil, Running: current.Running}, true
 			default:
-				return current
+				return current, false
 			}
 		},
-		Wire: &projection.WireView{
-			View: func(state any) any {
-				current, ok := state.(planUnitState)
-				if !ok {
-					return PlanProjection{Active: false, Pending: false}
-				}
-				wanted := current.Wanted
-				if current.Running != nil {
-					value := current.Running.Wanted
-					wanted = &value
-				}
-				pending := wanted != nil && *wanted != current.Active
-				return PlanProjection{Active: current.Active, Pending: pending}
-			},
+		View: func(current planUnitState) any {
+			wanted := current.Wanted
+			if current.Running != nil {
+				value := current.Running.Wanted
+				wanted = &value
+			}
+			pending := wanted != nil && *wanted != current.Active
+			return PlanProjection{Active: current.Active, Pending: pending}
 		},
-		DecodeState: func(raw json.RawMessage) (any, error) {
+		DecodeState: func(raw json.RawMessage) (planUnitState, error) {
 			var decoded planUnitState
 			if err := json.Unmarshal(raw, &decoded); err != nil {
-				return nil, fmt.Errorf("plan unit state: %w", err)
+				return planUnitState{}, fmt.Errorf("plan unit state: %w", err)
 			}
 			return decoded, nil
 		},
-	}
+	}.Definition()
 }
 
 // commandRunData is the `command/run` payload subset the fold reads; the

@@ -52,14 +52,15 @@ type identityState struct {
 // and the healthy catalog admits only a child with exactly one descriptor in
 // its own suffix, making the final reset the child's authoritative timing
 // origin.
-var subagentTimingProjection = projection.Definition{
+// subagentTimingUnit is the typed unit; subagentTimingProjection its
+// erased runtime record for registry registration.
+var subagentTimingUnit = projection.Unit[*timingState]{
 	Key:          ProjectionKeySubagentTiming,
 	StateVersion: 2,
-	Init: func(session.SessionHeader) any {
+	Init: func(session.SessionHeader) *timingState {
 		return &timingState{}
 	},
-	Apply: func(state any, event session.Event) any {
-		current := state.(*timingState)
+	Apply: func(current *timingState, event session.Event) (*timingState, bool) {
 		switch event.Type {
 		case session.EventTurnStart:
 			if current.DescriptorSeen {
@@ -67,14 +68,14 @@ var subagentTimingProjection = projection.Definition{
 					SettledMs:      current.SettledMs,
 					DescriptorSeen: true,
 					Active:         &TimingInterval{Since: event.Time, Through: event.Time},
-				}
+				}, true
 			}
 			start := event.Time
 			return &timingState{
 				SettledMs:        current.SettledMs,
 				PendingTurnStart: &start,
 				DescriptorSeen:   false,
-			}
+			}, true
 		case EventSubagentDescriptor:
 			next := &timingState{DescriptorSeen: true}
 			var activeSince *int64
@@ -86,45 +87,44 @@ var subagentTimingProjection = projection.Definition{
 			if activeSince != nil {
 				next.Active = &TimingInterval{Since: *activeSince, Through: event.Time}
 			}
-			return next
+			return next, true
 		case session.EventTurnEnd:
 			if !current.DescriptorSeen {
 				if current.PendingTurnStart == nil {
-					return state
+					return current, false
 				}
-				return &timingState{SettledMs: current.SettledMs}
+				return &timingState{SettledMs: current.SettledMs}, true
 			}
 			if current.Active == nil {
-				return state
+				return current, false
 			}
 			return &timingState{
 				SettledMs:      current.SettledMs + maxInt64(0, event.Time-current.Active.Since),
 				DescriptorSeen: true,
-			}
+			}, true
 		default:
 			if current.Active == nil {
-				return state
+				return current, false
 			}
 			return &timingState{
 				SettledMs:        current.SettledMs,
 				Active:           &TimingInterval{Since: current.Active.Since, Through: event.Time},
 				PendingTurnStart: current.PendingTurnStart,
 				DescriptorSeen:   current.DescriptorSeen,
-			}
+			}, true
 		}
 	},
-	Wire: &projection.WireView{
-		View: func(state any) any {
-			timing := state.(*timingState)
-			view := SubagentTimingProjection{SettledMs: timing.SettledMs}
-			if timing.Active != nil {
-				view.Active = &SubagentTimingActive{Since: timing.Active.Since, Through: timing.Active.Through}
-			}
-			return view
-		},
+	View: func(timing *timingState) any {
+		view := SubagentTimingProjection{SettledMs: timing.SettledMs}
+		if timing.Active != nil {
+			view.Active = &SubagentTimingActive{Since: timing.Active.Since, Through: timing.Active.Through}
+		}
+		return view
 	},
 	DecodeState: decodeTimingState,
 }
+
+var subagentTimingProjection = subagentTimingUnit.Definition()
 
 // subagentIdentityProjection folds the durable mode/label identity from
 // `subagent/descriptor` events, last-wins: a fork seed may replay an
@@ -133,37 +133,36 @@ var subagentTimingProjection = projection.Definition{
 // unknown-version payload resets to the nil sentinel instead of throwing, so
 // a fork of a healthy ancestor never inherits an identity its own descriptor
 // failed to establish.
-var subagentIdentityProjection = projection.Definition{
+var subagentIdentityUnit = projection.Unit[*identityState]{
 	Key:          ProjectionKeySubagent,
 	StateVersion: 2,
-	Init: func(session.SessionHeader) any {
+	Init: func(session.SessionHeader) *identityState {
 		return &identityState{}
 	},
-	Apply: func(state any, event session.Event) any {
+	Apply: func(current *identityState, event session.Event) (*identityState, bool) {
 		if event.Type != EventSubagentDescriptor {
-			return state
+			return current, false
 		}
 		identity := descriptorIdentity(event)
 		if identity == nil {
-			return &identityState{}
+			return &identityState{}, true
 		}
-		return &identityState{Identity: identity}
+		return &identityState{Identity: identity}, true
 	},
-	Wire: &projection.WireView{
-		// The view returns the serializable nil sentinel — never an absent
-		// key — so every registry read and push frame survives JSON
-		// losslessly and a consumer holding an earlier identity replaces it
-		// instead of keeping it stale.
-		View: func(state any) any {
-			identity := state.(*identityState).Identity
-			if identity == nil {
-				return nil
-			}
-			return identity
-		},
+	// The view returns the serializable nil sentinel — never an absent
+	// key — so every registry read and push frame survives JSON
+	// losslessly and a consumer holding an earlier identity replaces it
+	// instead of keeping it stale.
+	View: func(state *identityState) any {
+		if state.Identity == nil {
+			return nil
+		}
+		return state.Identity
 	},
 	DecodeState: decodeIdentityState,
 }
+
+var subagentIdentityProjection = subagentIdentityUnit.Definition()
 
 // descriptorIdentity interprets one `subagent/descriptor` event's identity;
 // nil when the payload cannot be trusted. Only a malformed current-version
@@ -195,7 +194,7 @@ func RegisterSubagentProjections(registry *projection.Registry) (func(), error) 
 
 // decodeTimingState validates and reifies a persisted timing row (strict:
 // unknown fields reject, matching the official .strict() state schema).
-func decodeTimingState(raw json.RawMessage) (any, error) {
+func decodeTimingState(raw json.RawMessage) (*timingState, error) {
 	var state timingState
 	if err := strictUnmarshal(raw, &state); err != nil {
 		return nil, err
@@ -213,7 +212,7 @@ func decodeTimingState(raw json.RawMessage) (any, error) {
 }
 
 // decodeIdentityState validates and reifies a persisted identity row.
-func decodeIdentityState(raw json.RawMessage) (any, error) {
+func decodeIdentityState(raw json.RawMessage) (*identityState, error) {
 	var state identityState
 	if err := strictUnmarshal(raw, &state); err != nil {
 		return nil, err

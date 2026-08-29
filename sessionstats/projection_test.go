@@ -25,9 +25,9 @@ func foldEvents(t *testing.T, events []session.Event) *State {
 	t.Helper()
 	state := SessionStatsProjection.Init(session.SessionHeader{})
 	for _, event := range events {
-		state = SessionStatsProjection.Apply(state, event)
+		state, _ = SessionStatsProjection.Apply(state, event)
 	}
-	return state.(*State)
+	return state
 }
 
 func TestSessionStatsHappyPathFold(t *testing.T) {
@@ -43,7 +43,7 @@ func TestSessionStatsHappyPathFold(t *testing.T) {
 		statsEvent(session.EventToolResult, 7, 350, payload(t, session.ToolResultData{Turn: 1, Step: 1, Message: llm.Message{Source: llm.MessageSource{CallID: "c1"}}})),
 		statsEvent(session.EventStepEnd, 8, 360, payload(t, session.StepEndData{Turn: 1, Step: 1})),
 	})
-	view := SessionStatsProjection.Wire.View(state).(Projection)
+	view := SessionStatsProjection.View(state).(Projection)
 	if view.Turns != 1 || view.Steps != 1 {
 		t.Fatalf("counts = %+v", view)
 	}
@@ -72,7 +72,7 @@ func TestSessionStatsUninterestingEventsPreserveReference(t *testing.T) {
 		statsEvent(session.EventTurnEnd, 6, 115, payload(t, session.TurnEndData{Turn: 1})),
 	}
 	for _, event := range foreign {
-		if next := SessionStatsProjection.Apply(state, event); next != any(state) {
+		if _, changed := SessionStatsProjection.Apply(state, event); changed {
 			t.Fatalf("%s must preserve the state reference", event.Type)
 		}
 	}
@@ -85,7 +85,7 @@ func TestSessionStatsCancelledStepUncounted(t *testing.T) {
 		// The step never assembles a message; step/end still lands.
 		statsEvent(session.EventStepEnd, 3, 200, payload(t, session.StepEndData{Turn: 3, Step: 1})),
 	})
-	view := SessionStatsProjection.Wire.View(state).(Projection)
+	view := SessionStatsProjection.View(state).(Projection)
 	if view.Turns != 1 || view.Steps != 1 {
 		t.Fatalf("counts = %+v", view)
 	}
@@ -135,8 +135,8 @@ func TestSessionStatsDecodeState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openStep row rejected: %v", err)
 	}
-	if decoded.(*State).OpenStep == nil || decoded.(*State).OpenStep.Step != 2 {
-		t.Fatalf("openStep = %+v", decoded.(*State).OpenStep)
+	if decoded.OpenStep == nil || decoded.OpenStep.Step != 2 {
+		t.Fatalf("openStep = %+v", decoded.OpenStep)
 	}
 	// A persisted row without a pendingCalls table reifies the empty map.
 	state := foldEvents(t, nil)

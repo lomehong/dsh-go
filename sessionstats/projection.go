@@ -57,16 +57,15 @@ type State struct {
 }
 
 // SessionStatsProjection is the unit registered on a projection registry.
-var SessionStatsProjection = projection.Definition{
+var SessionStatsProjection = projection.Unit[*State]{
 	Key:          ProjectionKey,
 	StateVersion: 1,
-	Init: func(session.SessionHeader) any {
+	Init: func(session.SessionHeader) *State {
 		return &State{PendingCalls: map[string]int64{}}
 	},
-	Apply: func(state any, event session.Event) any {
-		current := state.(*State)
-		// Every uninteresting event returns the same reference (the
-		// change feed gates on pointer identity).
+	Apply: func(current *State, event session.Event) (*State, bool) {
+		// Every uninteresting event reports no change (zero downstream
+		// work: the registry passes the previous state through).
 		switch event.Type {
 		case session.EventStepStart:
 			start := decode[session.StepStartData](event)
@@ -78,15 +77,15 @@ var SessionStatsProjection = projection.Definition{
 				LastTurn:     current.LastTurn,
 				OpenStep:     &openStep{Turn: start.Turn, Step: start.Step, StartTime: event.Time},
 				PendingCalls: copyPending(current.PendingCalls),
-			}
+			}, true
 		case session.EventAssistantChunk:
 			chunked := decode[chunkEnvelope](event)
 			open := current.OpenStep
 			if open == nil || open.Turn != chunked.Turn || open.Step != chunked.Step {
-				return state
+				return current, false
 			}
 			if open.FirstTokenTime != nil || !isTokenDelta(chunked.Chunk) {
-				return state
+				return current, false
 			}
 			first := event.Time
 			return &State{
@@ -97,12 +96,12 @@ var SessionStatsProjection = projection.Definition{
 				LastTurn:     current.LastTurn,
 				OpenStep:     &openStep{Turn: open.Turn, Step: open.Step, StartTime: open.StartTime, FirstTokenTime: &first},
 				PendingCalls: copyPending(current.PendingCalls),
-			}
+			}, true
 		case session.EventAssistantMsg:
 			message := decode[session.AssistantMessageData](event)
 			open := current.OpenStep
 			if open == nil || open.Turn != message.Turn || open.Step != message.Step {
-				return state
+				return current, false
 			}
 			// One assembled message per step: closing the boundary means a
 			// defensive duplicate cannot accrue twice.
@@ -125,7 +124,7 @@ var SessionStatsProjection = projection.Definition{
 					next.DecodeTokens += *outputTokens
 				}
 			}
-			return next
+			return next, true
 		case session.EventToolCall:
 			call := decode[session.ToolCallData](event)
 			pending := copyPending(current.PendingCalls)
@@ -138,7 +137,7 @@ var SessionStatsProjection = projection.Definition{
 				LastTurn:     current.LastTurn,
 				OpenStep:     current.OpenStep,
 				PendingCalls: pending,
-			}
+			}, true
 		case session.EventToolResult:
 			result := decode[session.ToolResultData](event)
 			callID := string(result.Message.Source.CallID)
@@ -147,7 +146,7 @@ var SessionStatsProjection = projection.Definition{
 			// unmatched rather than poisoning toolMs.
 			dispatched, matched := current.PendingCalls[callID]
 			if !matched {
-				return state
+				return current, false
 			}
 			pending := copyPending(current.PendingCalls)
 			delete(pending, callID)
@@ -160,7 +159,7 @@ var SessionStatsProjection = projection.Definition{
 				LastTurn:     current.LastTurn,
 				OpenStep:     current.OpenStep,
 				PendingCalls: pending,
-			}
+			}, true
 		case session.EventStepEnd:
 			end := decode[session.StepEndData](event)
 			next := &State{
@@ -177,13 +176,13 @@ var SessionStatsProjection = projection.Definition{
 			} else {
 				next.Turns = current.Turns + 1
 			}
-			return next
+			return next, true
 		case session.EventTurnEnd:
 			// A call whose result never landed belongs to a cancelled or
 			// failed turn; results always land within their turn, so drop
 			// the leftovers instead of growing persisted state forever.
 			if len(current.PendingCalls) == 0 {
-				return state
+				return current, false
 			}
 			return &State{
 				Turns: current.Turns, Steps: current.Steps,
@@ -193,21 +192,18 @@ var SessionStatsProjection = projection.Definition{
 				LastTurn:     current.LastTurn,
 				OpenStep:     current.OpenStep,
 				PendingCalls: map[string]int64{},
-			}
+			}, true
 		default:
-			return state
+			return current, false
 		}
 	},
-	Wire: &projection.WireView{
-		View: func(state any) any {
-			folded := state.(*State)
-			return Projection{
-				Turns: folded.Turns, Steps: folded.Steps,
-				LlmMs: folded.LlmMs, ToolMs: folded.ToolMs,
-				TtftMs: folded.TtftMs, TtftSteps: folded.TtftSteps,
-				DecodeMs: folded.DecodeMs, DecodeTokens: folded.DecodeTokens,
-			}
-		},
+	View: func(folded *State) any {
+		return Projection{
+			Turns: folded.Turns, Steps: folded.Steps,
+			LlmMs: folded.LlmMs, ToolMs: folded.ToolMs,
+			TtftMs: folded.TtftMs, TtftSteps: folded.TtftSteps,
+			DecodeMs: folded.DecodeMs, DecodeTokens: folded.DecodeTokens,
+		}
 	},
 	DecodeState: decodeState,
 }
@@ -272,7 +268,7 @@ func maxInt64(a, b int64) int64 {
 // decodeState validates and reifies a persisted state row after its
 // version gate (strict: unknown fields reject, matching the official
 // .strict() state schema).
-func decodeState(raw json.RawMessage) (any, error) {
+func decodeState(raw json.RawMessage) (*State, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var state State

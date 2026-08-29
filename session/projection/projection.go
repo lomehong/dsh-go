@@ -58,6 +58,69 @@ type Definition struct {
 	DecodeState func(raw json.RawMessage) (any, error)
 }
 
+// Unit is the typed authoring surface for one projection unit. Apply is the
+// pure transition returning the next state and an explicit changed flag:
+// false passes the previous state through untouched (zero downstream work,
+// no change-feed notification), true publishes next. The flag replaces the
+// erased reference-identity gate a hand-built Definition relies on — a fold
+// that allocates a fresh-but-unchanged state can no longer lie about
+// changing.
+type Unit[S any] struct {
+	// Key is the projection key this unit owns.
+	Key string
+	// StateVersion guards persisted rows: bump whenever the serialized
+	// state fields or fold semantics change. Must be a non-negative integer.
+	StateVersion int
+	// Init builds the state for the empty log from immutable metadata.
+	Init func(header session.SessionHeader) S
+	// Apply is the pure transition: previous state + one committed event →
+	// (next state, changed). Uninteresting events return (state, false).
+	Apply func(state S, event session.Event) (S, bool)
+	// View maps the current state to the whole client value; nil for
+	// host-only units.
+	View func(state S) any
+	// DecodeState validates and reifies a persisted row value (the zod
+	// stateSchema role); nil makes every restored row unusable for this
+	// unit.
+	DecodeState func(raw json.RawMessage) (S, error)
+}
+
+// Definition erases the typed unit to the registry's runtime record. The
+// any assertions live here, at the type boundary, and are guaranteed by
+// construction: every state the registry holds for this unit was produced
+// by the same unit's Init, Apply, or DecodeState. A false changed flag
+// returns the previous state value verbatim, preserving the registry's
+// reference-identity fast path exactly.
+func (u Unit[S]) Definition() Definition {
+	erased := Definition{
+		Key:          u.Key,
+		StateVersion: u.StateVersion,
+		Init: func(header session.SessionHeader) any {
+			return u.Init(header)
+		},
+		Apply: func(state any, event session.Event) any {
+			current, _ := state.(S)
+			next, changed := u.Apply(current, event)
+			if !changed {
+				return state
+			}
+			return next
+		},
+	}
+	if u.View != nil {
+		erased.Wire = &WireView{View: func(state any) any {
+			current, _ := state.(S)
+			return u.View(current)
+		}}
+	}
+	if u.DecodeState != nil {
+		erased.DecodeState = func(raw json.RawMessage) (any, error) {
+			return u.DecodeState(raw)
+		}
+	}
+	return erased
+}
+
 // Row is one unit's checkpoint: its detached state (plain JSON), the seq of
 // the last event folded into it, and the unit StateVersion that produced it
 // — the persisted `(sessionId, key, ver, seq, val)` row minus the two outer

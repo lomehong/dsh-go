@@ -480,3 +480,8 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - R10 已关：README workflow 表行补引擎交付事实（engine.go ScriptAPI 六件/发布前四门/cap+派发 fatal/parallel 保序/pipeline 无栅栏/settle 恰一次/Dispose 幂等/RunTraceValidator 13 违例面）；语义决策记录新增"Go 原生函数域替代 worker-thread plain-JS realm"条目（含明示兼容边界：官方 JS 脚本源文本在 Go 域不执行，Program 即 Go 侧脚本形态）；路线图 workflow 行改为已完成。
 - ① 样板落地：agent/events.go 新增 TypedWaterfall[T,R]（值类型句柄绕过 Go 无泛型方法限制）+ Events().PreStep().On/Dispatch 访问器；any 断言只在类型边界一处（构造保证成立）。EventPreStep 全部生产消费方（agentloop driver 派发点 + agentinstructions/checkpointpolicy/guard/compactionbasic/planmode/timecontext/tmuxcontext/toolskill/hooksclaudecode/hookscodex 十个监听器）已迁移，assert-and-decode 仪式全部消灭；15 处测试调用点同步迁移；新增 3 个类型化契约测试（组合次序/base-innermost/无监听走 base）。raw 站点残留 0。事件词汇/wire/作用域准入/次序契约零变化，同一张 any 表驱动。决策记录已补。
 - 下一轮：②③④（init 收拢装配层 / projection 泛型+显式 changed 门 / cordis 类型化服务键），⑤ weakmap 逐点评估随后。
+
+[DSH → omp] 2026-08-29: 架构重构轮 2（projection 泛型化）+ 信号取消竞态修复，门禁 68 包 / 959 测试全绿：
+- ③ 已落地：session/projection 新增 Unit[S]（typed 授权面）+ Definition() 擦除构造器；Apply 签名改为 (S, bool changed)——false 显式透传旧状态，引用快路径与变更Feed语义逐位保留；any 断言只在类型边界一处。"新分配但未变化谎报变更"类静默 bug 由编译器消灭。六单元全部迁移（sessionstats/subagent timing+identity/todo/planmode/agentPreset/permissions）；agentPreset 状态改 *string，客户端 null/string 值由 View 展开逐字不变。persisted 行/wire 契约零变化。
+- 额外发现并修复：hookprotocol runner 信号取消竞态——watcher 在 spawn 未完成时被取消触发会因 Process==nil 整次跳过树杀，命令走满自然时长（满载复现：ping -n 30 走完 29.7s）。修复：Start 后 close(spawned)，watcher 取消路径等待 spawned 再杀；非阻塞测试连跑 5 遍全绿。此为 R11 同族的根因级修复（R11 只把命令拉长到 30s，未消掉竞态本身）。
+- ②④⑤（init 收拢装配层 / cordis 类型化服务键 / weakmap 评估）仍待做，下一轮继续。

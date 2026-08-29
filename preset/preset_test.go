@@ -219,11 +219,11 @@ func TestApplyPersonaCompleteAndRuntimeContext(t *testing.T) {
 // --- session projection ----------------------------------------------------
 
 func TestAgentPresetProjectionFold(t *testing.T) {
-	definition := AgentPresetProjection
+	definition := AgentPresetUnit
 	if definition.Key != "agentPreset" || definition.StateVersion != 1 {
 		t.Fatalf("definition header = %+v", definition)
 	}
-	if got := definition.Init(session.SessionHeader{AgentPreset: "standard"}); got != "standard" {
+	if got := definition.Init(session.SessionHeader{AgentPreset: "standard"}); got == nil || *got != "standard" {
 		t.Fatalf("init with header preset = %v", got)
 	}
 	if got := definition.Init(session.SessionHeader{}); got != nil {
@@ -234,20 +234,20 @@ func TestAgentPresetProjectionFold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	advanced := definition.Apply(state, session.Event{Type: EventSelected, Data: data})
-	if advanced != "ptc" {
-		t.Fatalf("selection = %v", advanced)
+	advanced, changed := definition.Apply(state, session.Event{Type: EventSelected, Data: data})
+	if !changed || advanced == nil || *advanced != "ptc" {
+		t.Fatalf("selection = %v changed=%v", advanced, changed)
 	}
-	// An uninteresting event returns the same reference (the change gate).
-	if definition.Apply(advanced, session.Event{Type: "user/message"}) != advanced {
-		t.Fatal("uninteresting event changed the state reference")
+	// An uninteresting event reports no change.
+	if next, changed := definition.Apply(advanced, session.Event{Type: "user/message"}); changed || next != advanced {
+		t.Fatal("uninteresting event changed the state")
 	}
-	cleared := definition.Apply(advanced, session.Event{Type: EventSelected, Data: json.RawMessage(`{"agentPreset":""}`)})
-	if cleared != nil {
-		t.Fatalf("clear = %v", cleared)
+	cleared, changed := definition.Apply(advanced, session.Event{Type: EventSelected, Data: json.RawMessage(`{"agentPreset":""}`)})
+	if !changed || cleared != nil {
+		t.Fatalf("clear = %v changed=%v", cleared, changed)
 	}
 	// DecodeState accepts exactly string and null.
-	if value, err := definition.DecodeState(json.RawMessage(`"ptc"`)); err != nil || value != "ptc" {
+	if value, err := definition.DecodeState(json.RawMessage(`"ptc"`)); err != nil || value == nil || *value != "ptc" {
 		t.Fatalf("decode string = %v %v", value, err)
 	}
 	if value, err := definition.DecodeState(json.RawMessage(`null`)); err != nil || value != nil {

@@ -27,10 +27,10 @@ func timedEvent(eventType string, seq int64, at int64) session.Event {
 	return session.Event{Type: eventType, Seq: seq, Time: at}
 }
 
-func foldAll(def projection.Definition, events []session.Event) any {
+func foldAll[S any](def projection.Unit[S], events []session.Event) S {
 	state := def.Init(session.SessionHeader{})
 	for _, event := range events {
-		state = def.Apply(state, event)
+		state, _ = def.Apply(state, event)
 	}
 	return state
 }
@@ -42,7 +42,7 @@ func TestIdentityProjectionLastWinsAndReset(t *testing.T) {
 		// The child's own descriptor overrides it, last-wins.
 		projectionDescriptorEvent(t, ModeContinuable, "Own", 5, 20),
 	}
-	state := foldAll(subagentIdentityProjection, events).(*identityState)
+	state := foldAll(subagentIdentityUnit, events)
 	if state.Identity == nil || *state.Identity.Label != "Own" || state.Identity.Seq != 5 {
 		t.Fatalf("identity = %+v, want own descriptor at seq 5", state.Identity)
 	}
@@ -54,21 +54,21 @@ func TestIdentityProjectionLastWinsAndReset(t *testing.T) {
 		Type: EventSubagentDescriptor, Seq: 6, Time: 30,
 		Data: json.RawMessage(`{"version":1,"mode":"continuable"}`),
 	})
-	state = foldAll(subagentIdentityProjection, events).(*identityState)
+	state = foldAll(subagentIdentityUnit, events)
 	if state.Identity != nil {
 		t.Fatalf("malformed descriptor must reset to nil, got %+v", state.Identity)
 	}
 	// One-shot without a label keeps the optional label unset.
-	state = foldAll(subagentIdentityProjection, []session.Event{
+	state = foldAll(subagentIdentityUnit, []session.Event{
 		projectionDescriptorEvent(t, ModeOneShot, "", 3, 10),
-	}).(*identityState)
+	})
 	if state.Identity == nil || state.Identity.Mode != ModeOneShot || state.Identity.Label != nil {
 		t.Fatalf("one-shot identity = %+v", state.Identity)
 	}
 	// Non-descriptor events never change the state.
-	before := foldAll(subagentIdentityProjection, events)
-	after := subagentIdentityProjection.Apply(before, timedEvent(session.EventTurnStart, 9, 40))
-	if before != after {
+	before := foldAll(subagentIdentityUnit, events)
+	after, changed := subagentIdentityUnit.Apply(before, timedEvent(session.EventTurnStart, 9, 40))
+	if changed || before != after {
 		t.Fatal("identity fold must be reference-stable on foreign events")
 	}
 }
@@ -79,7 +79,7 @@ func TestTimingProjectionFoldLadder(t *testing.T) {
 		timedEvent(session.EventTurnStart, 0, 50),
 		timedEvent(session.EventTurnEnd, 1, 60),
 	}
-	state := foldAll(subagentTimingProjection, events).(*timingState)
+	state := foldAll(subagentTimingUnit, events)
 	if state.PendingTurnStart != nil || state.SettledMs != 0 || state.DescriptorSeen {
 		t.Fatalf("closed pre-descriptor turn = %+v", state)
 	}
@@ -94,7 +94,7 @@ func TestTimingProjectionFoldLadder(t *testing.T) {
 		timedEvent(session.EventTurnStart, 6, 300),
 		timedEvent(session.EventTurnEnd, 7, 400),
 	)
-	state = foldAll(subagentTimingProjection, events).(*timingState)
+	state = foldAll(subagentTimingUnit, events)
 	// 150 from the promoted turn (100→250) plus 100 from the second
 	// (300→400).
 	if state.SettledMs != 250 || state.Active != nil {
@@ -106,16 +106,16 @@ func TestTimingProjectionFoldLadder(t *testing.T) {
 	// A second descriptor resets the accumulated state (final reset = the
 	// child's authoritative origin) and promotes an open turn.
 	events = append(events, projectionDescriptorEvent(t, ModeContinuable, "Reset", 8, 500))
-	state = foldAll(subagentTimingProjection, events).(*timingState)
+	state = foldAll(subagentTimingUnit, events)
 	if state.SettledMs != 0 || state.Active != nil || !state.DescriptorSeen {
 		t.Fatalf("after reset = %+v", state)
 	}
 	// A negative interval clamps to zero.
-	state = foldAll(subagentTimingProjection, []session.Event{
+	state = foldAll(subagentTimingUnit, []session.Event{
 		projectionDescriptorEvent(t, ModeContinuable, "Own", 0, 10),
 		timedEvent(session.EventTurnStart, 1, 100),
 		timedEvent(session.EventTurnEnd, 2, 90),
-	}).(*timingState)
+	})
 	if state.SettledMs != 0 || state.Active != nil {
 		t.Fatalf("clamped = %+v", state)
 	}
@@ -123,14 +123,14 @@ func TestTimingProjectionFoldLadder(t *testing.T) {
 
 func TestProjectionWireViewsAndDecode(t *testing.T) {
 	// Empty identity state serves the serializable nil sentinel.
-	if view := subagentIdentityProjection.Wire.View(&identityState{}); view != nil {
+	if view := subagentIdentityUnit.View(&identityState{}); view != nil {
 		t.Fatalf("empty identity view = %+v, want nil", view)
 	}
 	identity := &SubagentIdentityProjection{Mode: ModeContinuable, Label: strPtr2("L"), Seq: 4}
-	if view := subagentIdentityProjection.Wire.View(&identityState{Identity: identity}); view != identity {
+	if view := subagentIdentityUnit.View(&identityState{Identity: identity}); view != identity {
 		t.Fatal("identity view must pass the value through")
 	}
-	timingView := subagentTimingProjection.Wire.View(&timingState{SettledMs: 7, Active: &TimingInterval{Since: 1, Through: 2}}).(SubagentTimingProjection)
+	timingView := subagentTimingUnit.View(&timingState{SettledMs: 7, Active: &TimingInterval{Since: 1, Through: 2}}).(SubagentTimingProjection)
 	if timingView.SettledMs != 7 || timingView.Active == nil || timingView.Active.Through != 2 {
 		t.Fatalf("timing view = %+v", timingView)
 	}

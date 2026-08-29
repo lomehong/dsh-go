@@ -71,38 +71,31 @@ func foldKnobs(events []session.Event) KnobState {
 // composition defaults the service owns. Key absence means no permission
 // service is composed — clients hide the control.
 func (s *Service) ProjectionDefinition() projection.Definition {
-	return projection.Definition{
+	return projection.Unit[KnobState]{
 		Key:          "permissions",
 		StateVersion: 1,
-		Init: func(session.SessionHeader) any {
+		Init: func(session.SessionHeader) KnobState {
 			return EmptyKnobs()
 		},
-		Apply: func(state any, event session.Event) any {
-			current, ok := state.(KnobState)
-			if !ok {
-				return state
-			}
-			return ApplyKnobEvent(current, event)
+		Apply: func(current KnobState, event session.Event) (KnobState, bool) {
+			next := ApplyKnobEvent(current, event)
+			// KnobState is a comparable struct: interface equality is the
+			// same gate the erased definition relied on.
+			return next, any(next) != any(current)
 		},
-		Wire: &projection.WireView{
-			View: func(state any) any {
-				current, ok := state.(KnobState)
-				if !ok {
-					return s.SelectFor(EmptyKnobs())
-				}
-				return s.SelectFor(current)
-			},
+		View: func(current KnobState) any {
+			return s.SelectFor(current)
 		},
-		DecodeState: func(raw json.RawMessage) (any, error) {
+		DecodeState: func(raw json.RawMessage) (KnobState, error) {
 			// The persisted state schema is strict: unknown fields reject
 			// (the zod `.strict()` parallel).
 			decoder := json.NewDecoder(bytes.NewReader(raw))
 			decoder.DisallowUnknownFields()
 			var decoded KnobState
 			if err := decoder.Decode(&decoded); err != nil {
-				return nil, err
+				return KnobState{}, err
 			}
 			return decoded, nil
 		},
-	}
+	}.Definition()
 }

@@ -50,34 +50,38 @@ func decodeSelection(event session.Event) SelectionData {
 // AgentPresetProjectionKey is the projection key this unit owns.
 const AgentPresetProjectionKey = "agentPreset"
 
-// AgentPresetProjection is the current Session preset, initialized from its
-// header and advanced by selection events. The state is the preset id
-// string, or nil when the deployment composes none.
-var AgentPresetProjection = projection.Definition{
+// AgentPresetUnit is the typed unit; AgentPresetProjection its erased
+// runtime record for registry registration.
+var AgentPresetUnit = projection.Unit[*string]{
 	Key:          AgentPresetProjectionKey,
 	StateVersion: 1,
-	Init: func(header session.SessionHeader) any {
+	Init: func(header session.SessionHeader) *string {
 		if header.AgentPreset == "" {
 			return nil
 		}
-		return header.AgentPreset
+		selected := header.AgentPreset
+		return &selected
 	},
-	Apply: func(state any, event session.Event) any {
+	Apply: func(state *string, event session.Event) (*string, bool) {
 		if event.Type != EventSelected {
-			// Every uninteresting event returns the same reference (the
-			// change feed gates on reference identity).
-			return state
+			return state, false
 		}
 		selection := decodeSelection(event)
 		if selection.AgentPreset == "" {
+			return nil, true
+		}
+		selected := selection.AgentPreset
+		return &selected, true
+	},
+	// The client value stays the preset id string or null — the state
+	// pointer never leaks into the view.
+	View: func(state *string) any {
+		if state == nil {
 			return nil
 		}
-		return selection.AgentPreset
+		return *state
 	},
-	Wire: &projection.WireView{
-		View: func(state any) any { return state },
-	},
-	DecodeState: func(raw json.RawMessage) (any, error) {
+	DecodeState: func(raw json.RawMessage) (*string, error) {
 		var value any
 		if err := json.Unmarshal(raw, &value); err != nil {
 			return nil, err
@@ -86,9 +90,13 @@ var AgentPresetProjection = projection.Definition{
 		case nil:
 			return nil, nil
 		case string:
-			return typed, nil
+			return &typed, nil
 		default:
 			return nil, errors.New("agent-preset projection state must be a preset id or null")
 		}
 	},
 }
+
+// AgentPresetProjection is the current Session preset: the preset id, or
+// nil when the deployment composes none. Erased form for the registry.
+var AgentPresetProjection = AgentPresetUnit.Definition()

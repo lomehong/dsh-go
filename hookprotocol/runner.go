@@ -137,21 +137,33 @@ func RunHook(hook CommandHook, options RunHookOptions, now func() int64) RunHook
 	// process-group cancellation.
 	watchDone := make(chan struct{})
 	defer close(watchDone)
+	// spawned closes once the process exists; a cancel firing during a
+	// slow spawn (loaded machine) must wait for it instead of skipping
+	// the kill because Process is still nil.
+	spawned := make(chan struct{})
 	go func() {
 		select {
 		case <-runCtx.Done():
-			if cmd.Process != nil {
+			select {
+			case <-spawned:
 				if os.PathSeparator == '\\' {
 					kill := exec.Command("taskkill", "/PID", strconv.Itoa(cmd.Process.Pid), "/T", "/F")
 					_ = kill.Run()
 				} else {
 					_ = cmd.Process.Kill()
 				}
+			case <-watchDone:
 			}
 		case <-watchDone:
 		}
 	}()
-	runErr := cmd.Run()
+	runErr := func() error {
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		close(spawned)
+		return cmd.Wait()
+	}()
 
 	// The protocol's exit-code contract is numeric: a signal death or a
 	// timeout maps to nil (a non-blocking outcome — no clean exit code to

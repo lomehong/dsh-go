@@ -161,34 +161,34 @@ func resolveAgent(agents *agent.AgentRegistry, target scope.ScopeKey) *agent.Age
 // todosProjectionDefinition builds the todos unit: latest whole todo/write
 // list, cleared by the next turn/start (turn/end keeps the finished
 // checklist visible); nil before the first write or after a later turn
-// begins; every other event returns the same state reference.
+// begins; every other event reports no change.
 func todosProjectionDefinition() projection.Definition {
-	return projection.Definition{
+	return projection.Unit[[]TodoItem]{
 		Key:          ProjectionKey,
 		StateVersion: 2,
-		Init:         func(session.SessionHeader) any { return nil },
-		Apply: func(state any, event session.Event) any {
+		Init:         func(session.SessionHeader) []TodoItem { return nil },
+		Apply: func(state []TodoItem, event session.Event) ([]TodoItem, bool) {
 			if event.Type == EventTodoWrite {
 				var payload struct {
 					Todos []TodoItem `json:"todos"`
 				}
 				if err := json.Unmarshal(event.Data, &payload); err != nil {
-					return state
+					return state, false
 				}
-				return payload.Todos
+				return payload.Todos, true
 			}
 			if event.Type == session.EventTurnStart {
-				return nil
+				return nil, true
 			}
-			return state
+			return state, false
 		},
-		Wire: &projection.WireView{View: func(state any) any { return state }},
-		DecodeState: func(raw json.RawMessage) (any, error) {
+		View: func(state []TodoItem) any { return state },
+		DecodeState: func(raw json.RawMessage) ([]TodoItem, error) {
 			var todos []TodoItem
 			if err := json.Unmarshal(raw, &todos); err != nil {
 				return nil, err
 			}
 			return todos, nil
 		},
-	}
+	}.Definition()
 }

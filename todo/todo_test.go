@@ -240,10 +240,12 @@ func TestTodosProjectionFold(t *testing.T) {
 	if !ok || len(todos) != 1 || todos[0].Content != "second" {
 		t.Fatalf("state = %+v, want last-write-wins", state)
 	}
-	// A later turn/start clears the finished checklist.
+	// A later turn/start clears the finished checklist: the state is the
+	// zero list (typed-unit contract).
 	state = def.Apply(state, session.Event{Type: session.EventTurnStart, Data: []byte(`{"turn":2}`)})
-	if state != nil {
-		t.Fatalf("state after turn/start = %+v, want nil", state)
+	todos, ok = state.([]TodoItem)
+	if !ok || len(todos) != 0 {
+		t.Fatalf("state after turn/start = %+v, want the zero list", state)
 	}
 }
 
