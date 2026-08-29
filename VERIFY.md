@@ -607,3 +607,12 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 绝对路径纪律：非绝对路径报官方同款修正提示（Maybe you meant /path）。
 - catalog +1（累计 32）：dsh-tool-str-replace-editor，Inject tools/fs/agents；fs 服务由 fs-sandbox 轮提供，缺位即 inject 期 fail-loud——组合纪律而非缺口（集成测试不含此条目，fs 提供方落地后并入）。
 - 下一轮：dsh-fs-sandbox 组合（fs 服务提供方）+ tool-fs/tool-fs-search，或 ACP provider。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 12（② 沙箱三家移植+fs 服务落位），门禁 76 包 / 994 测试全绿（+3 包 +13 测）：
+- sandbox 包：可写根推导唯一家（官方 dsh-sandbox/roots）。workspace-write = 工作区根 + /tmp + os.TempDir()，CanonicalPath（EvalSymlinks 失败回退原拼写——缺失根匹配不到任何东西，保守正确）+ 去重；LexicallyUnder 目录边界前缀（/w2 不误配 /w）、Windows 大小写不敏感、Unix 敏感。
+- sandboxpolicy 包：部署默认 mode+回退工作区根唯一所有者（官方 dsh-sandbox-policy）。解析优先级 approved > session 最后 sandbox/mode 覆盖 > 部署默认；session cwd 即 workspace-write 边界，缺位落配置根；空 mode fail-safe read-only；未知 mode fail-loud。Go 适配如实记录：Resolve 取显式三参（session cwd/覆盖/批准 mode）——官方按 Session 对象解析，Go executor 保持无会话态；sandbox/mode 事件词汇与 EffectiveSandboxMode/SetSandboxMode 本就在 permissionpresets（早期轮落位），策略服务直接消费，不重复持有。
+- fssandbox 包：Sandboxed 承袭 *fslocal.Local 全量机制，仅两个写操作加围栏（官方 dsh-fs-sandbox 语义）：read-only 拒绝、danger-full-access 原样放行、workspace-write 当场再 canonical 化（捕捉解析后换掉的符号链接祖先；委托用新 target——无 check-here-write-there）+ 可写根包含检查（词法快路径 + os.SameFile 身份回退走祖先行走，认 8.3 别名/大小写）；拒绝 FS_SANDBOX_DENIED 带模式文案。TOCTOU 残留如实按官方威胁模型接受（containment not security boundary）。读操作全模式放行（测试断言）。
+- catalog +2（累计 34/86）：dsh-sandbox-policy（Provide sandboxPolicy；默认 read-only，workspace-write 须显式配置——fail-safe 默认）；dsh-fs-sandbox（Inject sandboxPolicy、Provide fs；装它而非裸 local 即全量换装，模型侧工具不动）。tool-str-replace-editor 条目按需挂 mutationPolicyResolver（agent.Session 头 cwd + knob 折叠 → service.Resolve），policy 缺位且 backend 不围栏时仍可工作。
+- 集成测：workspace-write 组合下根内 create 落盘、盘根 create 拒绝且编辑器 mapError 包沙箱拒绝标记（marker 文案上轮自拟项本轮即位）。测试教训两则如实记录：拒绝路径不能取 TempDir 邻居（平台临时区本就可写——语义正确，改盘根）；/tmp 授予在 Windows 惰性（canonical 化失败保持原拼写、匹配不到——与官方一致）。
+- 上一轮 README 计数笔误修正：round 11 后应为 32（非维持 31 的表述），本轮 +2 → 34/86，余 52。账实已对齐。
+- 下一轮：tool-fs/tool-fs-search（fs 地基齐备）或 ACP provider/storage-sqlite。

@@ -20,6 +20,8 @@ import (
 	"dshgo/cordis"
 	"dshgo/credentials"
 	"dshgo/fs"
+	"dshgo/fslocal"
+	"dshgo/fssandbox"
 	"dshgo/guard"
 	"dshgo/host/webserver"
 	"dshgo/interaction/permissionpresets"
@@ -29,6 +31,7 @@ import (
 	"dshgo/llm"
 	"dshgo/llm/deepseek"
 	"dshgo/planmode"
+	"dshgo/sandboxpolicy"
 	"dshgo/session"
 	"dshgo/session/persistence"
 	"dshgo/session/persistence/jsonl"
@@ -823,9 +826,11 @@ var batchThreeBuilders = map[string]pluginBuilder{
 	},
 
 	// The str_replace_editor tool over the mounted fs backend; the fs
-	// service itself arrives with the dsh-fs-sandbox composition, so a
-	// profile listing the editor without a filesystem backend fails loud
-	// at inject time (correct composition discipline, not a gap).
+	// service arrives with the dsh-fs-sandbox composition, so a profile
+	// listing the editor without a filesystem backend fails loud at inject
+	// time (correct composition discipline, not a gap). The sandbox policy
+	// service is optional at inject: required by the tool exactly when the
+	// mounted backend confines.
 	"@deepseek-ai/dsh-tool-str-replace-editor": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
 			Inject:  []string{ServiceTools, ServiceFS, ServiceAgents},
@@ -835,19 +840,100 @@ var batchThreeBuilders = map[string]pluginBuilder{
 				if err := decodeConfigJSON(config, &cfg); err != nil {
 					return err
 				}
+				depsEditor := strreplaceeditor.Deps{
+					FS:     ctx.Get(ServiceFS).(fs.FileSystem),
+					Ctx:    ctx,
+					Agents: ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+				}
+				if policy := ctx.Get(ServiceSandboxPolicy); policy != nil {
+					depsEditor.Policy = &mutationPolicyResolver{
+						service: policy.(*sandboxpolicy.Service),
+						agents:  depsEditor.Agents,
+					}
+				}
 				_, err := strreplaceeditor.Register(
 					ctx.Get(ServiceTools).(*tools.ToolRuntime),
-					strreplaceeditor.Deps{
-						FS:     ctx.Get(ServiceFS).(fs.FileSystem),
-						Ctx:    ctx,
-						Agents: ctx.Get(ServiceAgents).(*agent.AgentRegistry),
-					},
+					depsEditor,
 					cfg,
 				)
 				return err
 			},
 		}
 	},
+
+	// The sandbox policy home: deployment default mode and fallback
+	// workspace root. The fail-safe default is read-only; a deployment that
+	// wants a workspace-writable agent opts in explicitly via config.
+	"@deepseek-ai/dsh-sandbox-policy": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{},
+			Provide: []string{ServiceSandboxPolicy},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					Mode          string `json:"mode"`
+					WorkspaceRoot string `json:"workspaceRoot"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				service, err := sandboxpolicy.NewService(sandboxpolicy.Config{Mode: cfg.Mode, WorkspaceRoot: cfg.WorkspaceRoot}, "")
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceSandboxPolicy, service)
+				return nil
+			},
+		}
+	},
+
+	// The sandbox-enforcing filesystem backend: the fs service the
+	// model-facing tools consume. Loads INSTEAD of the bare local backend;
+	// the swap with a sandbox-policy service is the whole composition.
+	"@deepseek-ai/dsh-fs-sandbox": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSandboxPolicy},
+			Provide: []string{ServiceFS},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					Cwd string `json:"cwd"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				local, err := fslocal.New(fslocal.Config{Cwd: cfg.Cwd})
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceFS, fssandbox.New(local, ctx.Get(ServiceSandboxPolicy).(*sandboxpolicy.Service)))
+				return nil
+			},
+		}
+	},
+}
+
+// ServiceSandboxPolicy is the sandbox policy service's cordis name (official
+// ctx.sandboxPolicy).
+const ServiceSandboxPolicy = "sandboxPolicy"
+
+// mutationPolicyResolver adapts the sandbox policy service to the editor's
+// per-call policy face: the calling agent's immutable session cwd is the
+// workspace boundary and its last `sandbox/mode` knob is the override; an
+// agentless call falls back to the deployment defaults.
+type mutationPolicyResolver struct {
+	service *sandboxpolicy.Service
+	agents  *agent.AgentRegistry
+}
+
+func (m *mutationPolicyResolver) ResolveMutationPolicy(actor *agent.Agent) *fs.SandboxExecutionPolicy {
+	var cwd, override string
+	if actor != nil && actor.Session != nil {
+		cwd = actor.Session.Header().CWD
+		if mode, ok := permissionpresets.EffectiveSandboxMode(actor.Session.Events()); ok {
+			override = mode
+		}
+	}
+	policy := m.service.Resolve(cwd, override, "")
+	return &policy
 }
 
 // maintenanceOwner adapts one receiving agent into the engine's

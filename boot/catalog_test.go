@@ -1,13 +1,16 @@
 package boot
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"dshgo/cordis"
 	"dshgo/cordis/loader"
+	"dshgo/fs"
 	"dshgo/subagent"
+	"dshgo/tools"
 )
 
 func TestCatalogResolvesOfficialNames(t *testing.T) {
@@ -108,6 +111,9 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 	entries = append(entries,
 		loader.Entry{ID: "spawn", Name: "@deepseek-ai/dsh-subagent-spawn-in-process"},
 		loader.Entry{ID: "fork", Name: "@deepseek-ai/dsh-subagent-fork-in-process"},
+		loader.Entry{ID: "sandbox-policy", Name: "@deepseek-ai/dsh-sandbox-policy"},
+		loader.Entry{ID: "fs-sandbox", Name: "@deepseek-ai/dsh-fs-sandbox"},
+		loader.Entry{ID: "editor", Name: "@deepseek-ai/dsh-tool-str-replace-editor"},
 	)
 	app, err := Assemble(root, entries, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
 	if err != nil {
@@ -125,13 +131,88 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 	if fork.Capabilities().OutputSchema {
 		t.Fatal("fork must not advertise outputSchema before the structured round")
 	}
-	for _, service := range []string{ServiceSkills, ServiceJobs, ServicePlanMode, ServiceTokenMeter, ServiceCompaction} {
+	for _, service := range []string{ServiceSkills, ServiceJobs, ServicePlanMode, ServiceTokenMeter, ServiceCompaction, ServiceSandboxPolicy, ServiceFS} {
 		if root.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
 		}
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+func TestCatalogSandboxCompositionFencesEditor(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	entries := []loader.Entry{
+		{ID: "tools", Name: "@deepseek-ai/dsh-tools"},
+		{ID: "commands", Name: "@deepseek-ai/dsh-commands"},
+		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
+		{ID: "credentials", Name: "@deepseek-ai/dsh-credentials-local"},
+		{ID: "web", Name: "@deepseek-ai/dsh-web"},
+		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
+		{ID: "projections", Name: "@deepseek-ai/dsh-session-projection"},
+		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
+		{ID: "llm", Name: "@deepseek-ai/dsh-llm"},
+		{ID: "persistence", Name: "@deepseek-ai/dsh-session-persistence-jsonl"},
+		{ID: "user-questions", Name: "@deepseek-ai/dsh-user-questions"},
+		{ID: "user-approval", Name: "@deepseek-ai/dsh-user-approval"},
+		{ID: "permission-presets", Name: "@deepseek-ai/dsh-permission-presets"},
+		{ID: "system-prompt", Name: "@deepseek-ai/dsh-system-prompt"},
+		{ID: "agent-loop", Name: "@deepseek-ai/dsh-agent-loop"},
+		{ID: "sandbox-policy", Name: "@deepseek-ai/dsh-sandbox-policy", Config: map[string]any{"mode": "workspace-write"}},
+		{ID: "fs-sandbox", Name: "@deepseek-ai/dsh-fs-sandbox", Config: map[string]any{"cwd": workspace}},
+		{ID: "editor", Name: "@deepseek-ai/dsh-tool-str-replace-editor"},
+	}
+	app, err := Assemble(root, entries, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	defer func() {
+		if err := app.Shutdown(); err != nil {
+			t.Fatalf("shutdown: %v", err)
+		}
+	}()
+	for _, service := range []string{ServiceSandboxPolicy, ServiceFS} {
+		if root.Get(service) == nil {
+			t.Fatalf("service %q missing after Assemble", service)
+		}
+	}
+	runtime := root.Get(ServiceTools).(*tools.ToolRuntime)
+	definition, ok := runtime.Get("str_replace_editor", nil)
+	if !ok {
+		t.Fatal("editor must be registered over the sandboxed backend")
+	}
+	execute := func(args map[string]any) (any, error) {
+		return definition.Execute(args, &tools.ToolRunContext{})
+	}
+	// Inside the workspace root: create succeeds and the file lands.
+	inside := filepath.Join(workspace, "doc.txt")
+	if _, err := execute(map[string]any{"command": "create", "path": inside, "file_text": "seed"}); err != nil {
+		t.Fatalf("inside-root create: %v", err)
+	}
+	stored, err := os.ReadFile(inside)
+	if err != nil || string(stored) != "seed" {
+		t.Fatalf("stored: %q, %v", string(stored), err)
+	}
+	// Outside every writable root (the drive root): FS_SANDBOX_DENIED,
+	// wrapped by the editor's sandbox denial marker.
+	volume := filepath.VolumeName(workspace)
+	deniedPath := volume + string(os.PathSeparator) + "dsh-sandbox-denied-target.txt"
+	if volume == "" {
+		deniedPath = "/dsh-sandbox-denied-target.txt"
+	}
+	outside := deniedPath
+	_, err = execute(map[string]any{"command": "create", "path": outside, "file_text": "x"})
+	if codeErr, ok := err.(*fs.Error); !ok || codeErr.Code != fs.CodeSandboxDenied {
+		t.Fatalf("outside-root create must be FS_SANDBOX_DENIED: %v", err)
+	}
+	if !strings.Contains(err.Error(), "file access denied under workspace-write mode") {
+		t.Fatalf("denial text: %v", err)
+	}
+	if !strings.Contains(err.Error(), "The edit was denied by the sandbox") {
+		t.Fatalf("the editor must wrap the denial with its marker: %v", err)
 	}
 }
 
