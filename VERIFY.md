@@ -629,3 +629,10 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 执行体 canonical 值纪律教训：工具返回值必须纯 lossless-JSON 形状（[]any/map[string]any；自定义结构体切片与 *string 指针均被 registry 拒绝）——execute 体出口即规范化。
 - catalog +1（累计 35/86，余 51）：dsh-tool-fs（Inject tools/fs/agents/systemPrompt/sandboxPolicy/userApproval；挂 tool:read/tool:write/tool:edit 三段指引，order 1100/1200/1300）。
 - 下一轮：tool-fs-search（1486 行，fs 地基+本轮同构）或 ACP provider/storage-sqlite。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 14（② 依赖根：subprocess 执行缝），门禁 78 包 / 1013 测试全绿（+1 包 +10 测）：
+- subprocess 包 = dsh-subprocess 契约 + dsh-subprocess-local 本地实现的 Go 移植：完全指定 spawn（argv 无 shell、cwd/stdio/grace 显式无默认、缺一 fail loud）、Node 形 stdio 逐流处置（ignore/pipe/批量 data；pipe=裸流归调用者/inherit/collect）、有界收集输出（内存尾帽溢出丢头保尾 + 可选全流 spill：O_EXCL 随机名防预测防符号链接种植、超帽弃 spill 断告、整流字节坐标 offset 零消费读——独立读者互不吞噬、lossy 报截断指路 spill）、树域终止（POSIX setpgid 组信号 TERM→grace→KILL 阶梯带直接子代回退与 ESRCH/EPERM 判活纪律；Windows taskkill /T /F 立即强杀结果有意不查）、树退出观察者首确认缺席即永久不再发信号（防 pid 复用）、drain 边界（进程退出后继承管道由同一 grace 封顶，仅收集管道强关）、上下文取消即 terminate、环境基座 scrubbedParentEnv（DSH_* + KEY/PASSWORD/SECRET/TOKEN 凭证形名大小写不敏感剔除；显式 opt-in 可还原、nil 墓碑删普通项）。
+- Go 适配：平台文件分治（tree_posix/tree_windows）、linux/darwin 交叉编译净、Runtime 接口 + Local 实现（服务面）。
+- 官方 terminal 原语（pty 分配、前台组检视、win32 进程检查器 486+307 行）文档化缓期非静默缺口——piped 实现覆盖 batch/流式消费者（fs-search、bash seam 将至）。
+- catalog +1（累计 36/86，余 50）：dsh-subprocess（Provide subprocess）。
+- 本机无 rg 二进制：tool-fs-search 需 resolveRgPath 落 PATH 解析（部署有 rg 即用，缺失 fail loud——官方同语义），排在下一轮。

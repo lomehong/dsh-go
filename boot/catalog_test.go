@@ -115,6 +115,7 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		loader.Entry{ID: "fs-sandbox", Name: "@deepseek-ai/dsh-fs-sandbox"},
 		loader.Entry{ID: "editor", Name: "@deepseek-ai/dsh-tool-str-replace-editor"},
 		loader.Entry{ID: "tool-fs", Name: "@deepseek-ai/dsh-tool-fs"},
+		loader.Entry{ID: "subprocess", Name: "@deepseek-ai/dsh-subprocess"},
 	)
 	app, err := Assemble(root, entries, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
 	if err != nil {
@@ -132,7 +133,7 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 	if fork.Capabilities().OutputSchema {
 		t.Fatal("fork must not advertise outputSchema before the structured round")
 	}
-	for _, service := range []string{ServiceSkills, ServiceJobs, ServicePlanMode, ServiceTokenMeter, ServiceCompaction, ServiceSandboxPolicy, ServiceFS} {
+	for _, service := range []string{ServiceSkills, ServiceJobs, ServicePlanMode, ServiceTokenMeter, ServiceCompaction, ServiceSandboxPolicy, ServiceFS, ServiceSubprocess} {
 		if root.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
 		}

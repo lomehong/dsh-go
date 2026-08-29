@@ -43,6 +43,7 @@ import (
 	"dshgo/strreplaceeditor"
 	"dshgo/subagent"
 	"dshgo/subagentcontrol"
+	"dshgo/subprocess"
 	"dshgo/systemprompt"
 	"dshgo/todo"
 	"dshgo/tokenmeter"
@@ -75,7 +76,10 @@ const (
 	ServicePlanMode          = "planMode"
 	ServiceTokenMeter        = "tokenMeter"
 	ServiceCompaction        = "compaction"
-	ServiceFS                = "fs"
+	// ServiceSubprocess is the child-process execution seam (fs-search and
+	// the shell tools consume it).
+	ServiceSubprocess = "subprocess"
+	ServiceFS         = "fs"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -907,6 +911,24 @@ var batchThreeBuilders = map[string]pluginBuilder{
 					return err
 				}
 				ctx.Provide(ServiceFS, fssandbox.New(local, ctx.Get(ServiceSandboxPolicy).(*sandboxpolicy.Service)))
+				return nil
+			},
+		}
+	},
+
+	// The subprocess capability seam (`ctx.subprocess`): execution-world
+	// fully specified managed process trees with raw or collected stdio,
+	// bounded output with spill recovery, and tree-scoped termination.
+	// Command defaulting, shell semantics, deadlines, protocol framing, and
+	// presentation belong to consumers (fs-search, the bash executor seam).
+	// The official terminal-process primitive (pty allocation) is a
+	// documented deferral, not a silent gap.
+	"@deepseek-ai/dsh-subprocess": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{},
+			Provide: []string{ServiceSubprocess},
+			Apply: func(ctx *cordis.Context, config any) error {
+				ctx.Provide(ServiceSubprocess, subprocess.NewLocal())
 				return nil
 			},
 		}
