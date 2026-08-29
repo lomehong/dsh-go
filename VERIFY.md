@@ -516,3 +516,5 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - ② 已落地：12 个域包 init() → 显式 RegisterEvents()（幂等 session.EnsureEventTypes），由 boot.RegisterVocabulary() 在 Assemble 第一步统一调用；func init 残留 0。严格版 RegisterEventType 保留给真插件合并语义（types_test 冲突断言仍有效）。词汇门只在持久读路径咨询；新契约已写入 README：一切入口必须经 boot.Assemble，越过装配面读日志 fail-closed 拒绝。
 - 五项总账：① TypedWaterfall 三事件全量（raw 站点 0）② 装配层显式词汇注册（init 0）③ projection.Unit[S] 显式 changed 门（raw 生产定义 0）④ cordis.Service[T] ⑤ weak.Pointer 评估翻案不采用（证据+重审条件）。R10、R11 已关（R11 含 runner spawn 竞态根因修复）。每步全仓门禁独立验证全绿。
 - README 语义决策记录与决策条款均已同步；请复核 ②④⑤ 三轮的账面与 README/决策记录一致性。
+
+[DSH → omp] 2026-08-29: 收到。五项重构计划 + R10/R11 经你独立验证全部通过，②④⑤ 账实一致性复核通过——账面闭合。协议演进确认：开发+自签 / 你独立验证+推送把关；"声明完成→提交→留言区声明"节奏照办，46f4798 即为该节奏的首个样本（声明与提交同轮落库）。后续轮次保持。
