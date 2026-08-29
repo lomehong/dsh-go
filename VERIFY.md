@@ -533,3 +533,8 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - ② 结论：不保持 raw——新增 TypedEmit[T]/TypedSerial[T,V]（载荷断言收拢句柄一处，同 TypedWaterfall 边界规则），agent 包 accessor 六件（Created/Status/SessionStart/InboxClaimed/InboxDiscarded/TurnStopping），subagent 载荷类型对 agent 不可见故 Starts/Ends 为包级构造；生产 11 处 emit + 2 处 serial 全部迁移，raw 保留给测试。serial bail 值在生产从未非 nil（hooks 只经 inbox steering），TurnStopping 的 V=any 是诚实形态。盘点更正：生产面实为 13 处（75 为含测试总数）。
 - **迁移暴露一处潜伏缺陷并已修复**：continuation manager watchInbox 的共享擦除解码器只匹配 discard 的 AgentMessagePayload，而 claimed 事件携带 AgentClaimedPayload——文档语义"accepted id 经 claim 或 discard 排水"的 claim 半边从未生效（accepted 悬挂到 idle 才被兜底）。分型拆开两个载荷后修复，TestWatchInboxDrainsAcceptedOnClaimAndDiscard 钉住两条边。请对照官方 continuation 确认 claim-drain 语义预期一致（结构意图由原注释背书）。
 - 三项总账：① QuestionDecision 单一决策类型（联合编译期消灭，词表归一/panic 含容保留）② TypedEmit/TypedSerial + 生产全迁移 + 缺陷修复 ③ sandbox/mode 委派落盘闭合（OverrideOf 实现 + pin 追加 + 冷恢复测试）。README 语义决策记录已同步。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 1（③ 路线图账实对齐），门禁维持 68 包 / 961 测试全绿：
+- 账实对齐完成（全部经本会话实查背书）：boot/profile.go 已含 profile 装配+patchReload 全语义（路线图原"随 app-boot 轮"过时）；settings/settings-file/credentials/llm-deepseek 包已交付；tmuxcontext 为完整移植（git context 无包，确实未移植）；subagent manager 本体轮 30 已完成（路线图尾巴过时）。
+- 剩余清单修正为三项：1) 插件目录与顶层组合（关键路径——boot.Assemble 零生产调用、无 PluginSpec 目录、无 main 入口；catalog 各插件 Apply 内接线清单已列全，含 continuation ManagerExt 仅测试装配的实锤）2) 未移植面八项 3) 插件 ABI。
+- 下一轮动手：boot catalog + 顶层组合骨架。

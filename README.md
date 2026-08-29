@@ -130,7 +130,11 @@ go test ./... -count=1
 2. ~~`compaction` 接缝层~~（已完成：词汇/事件/checkpoint/tool-pairing）、~~`token-meter` 计量核心~~（已完成：估计器/表面折叠/路由定价/usage 锚定测量；O(1) 投影单元与 turn-usage 折叠随后轮）、~~`compaction-basic` provider~~（已完成：config/summarizer/region 事务/engine 四触发器；compaction-pruner（tool-result-pruner 模型无关修剪）与 `/compact` 命令接线随后轮）
 2. ~~`workspace`~~（实体层 + registry 引导/create-delete 事务全部完成；webhook SessionCreator 事务句柄已就位）、~~`context` 插件 time-context~~（已完成）、~~`plan` 模式核心~~（已完成：折叠/Set 四态/pre-step/plan:policy 节/plan 投影；exit 工具与 `/plan` 命令随 user-questions/commands 轮）、~~`storage-domain` 域运行时~~（已完成：规格/域运行时/facility/MemoryUnit）、~~`storage-json` 文件后端~~（已完成：atomic 发布/format 校验/single+per-record 单元/legacy 引导/backend）、~~storage hub~~（已完成：backend 注册表/hub 表单/服务键；装配轮接入 loader）；`context` 其余插件（tmux/git）、storage-sqlite（SQLite 后端，与 JSON 后端同契约）
 3. ~~`llm` 运行时 + DeepSeek provider~~（已完成；llm-deepseek 插件装配层——settings section 接线、credential 解析钩子、retryPolicy 变更时 Replace 重注册——随 settings/credentials 组装轮补）
-4. `tools` + `system-prompt` + `agent` + `agent-loop`（request/header 记录、turn/step 括号、中断收尾、waterfall 请求改写）
-5. `interaction`（approval/ask-user）、`subagent`/`workflow`、`workspace`、`identity`、`compaction`（surface replace 消费者）、`context` 插件、`webhook`
-6. `sdk` JSON-RPC 服务器 + `boot/app-boot`（profile 装配、patchReload、fail-loud）+ `acp` + typert 运行时 registry
-7. 插件 ABI：宿主端 TS 插件改为受管子进程（stdio + JSON-RPC），TS 插件零改动迁移
+4. ~~`tools` + `system-prompt` + `agent` + `agent-loop`（request/header 记录、turn/step 括号、中断收尾、waterfall 请求改写）~~（已完成）
+5. ~~`interaction`（approval/ask-user）、`subagent`/`workflow`、`workspace`、`identity`、`compaction`（surface replace 消费者）、`context` 插件（time-context、tmux）、`webhook` 规则运行时~~（已完成；tmuxcontext 为完整移植：Query/Render/ValidateConfig）
+6. ~~`sdk` JSON-RPC 服务器 + `boot/app-boot`（profile 装配、patchReload、fail-loud）~~（已完成：sdk/server+client+protocol；boot/profile.go 396 行含 ProfileTemplate/InitProfile/patchReload 全语义）；~~`settings`/`settings/file`/`credentials`/`llm-deepseek`~~（包已交付：Store/PathOp/file 后端/Provider 接缝/deepseek 插件+credentials 解析）
+
+**剩余（按依赖序，2026-08-29 账实对齐后）**：
+1. **插件目录与顶层组合（当前唯一关键路径）**：`boot.Assemble` 尚无生产调用方、无 `PluginSpec` 目录——需建 entry 名→Go 组合函数的 catalog，及 profile→roster→`DecodeEntryList`→Assemble 的顶层组合（含 main 入口）；catalog 各插件的 Apply 内接线：settings/file 存储、credentials Provider、storage hub 装配、webhook SessionCreator、continuation `ManagerExt`（Host/Snapshots/Sandbox——现仅测试装配）、webserver UI dispatch 适配器、permission-presets settings section 与 `session/created` 钩子、`SetChildRuntime` owner context。
+2. **未移植面**：git context 插件、storage-sqlite（与 JSON 后端同契约）、ACP provider、subagent list-children、typert 运行时 registry、PTC `run_code` 传输、compaction-pruner（tool-result-pruner）与 `/compact` 命令接线、token-meter O(1) 投影单元与 turn-usage 折叠。
+3. **插件 ABI**：宿主端 TS 插件改为受管子进程（stdio + JSON-RPC），TS 插件零改动迁移。
