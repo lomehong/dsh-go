@@ -53,6 +53,7 @@
 | 2026-08-30 10:5x | 全部 77 包 | ✅ build/vet/gofmt/test 全绿 | ~1010 测试；核心收尾 12 提交积压（tokenmeter 投影面/tool-result-pruner/permission-presets 接线/webserver 升级派发/coderuntime seam/sqlite 持久后端，44/86）；**新依赖 modernc.org/sqlite 决策有据**；已推送 78c141c |
 | 2026-08-30 12:0x | 全部 78 包 | ✅ build/vet/gofmt/test 全绿 | typert 运行时注册表+网关、storage/spill 家族 catalog 装配（51/86）；已推送 9797435 |
 | 2026-08-30 13:2x | 全部 80 包 | ✅ build/vet/gofmt/test 全绿 | 1146 测试；r28-r30（policy/skill/deepseek 扩展装配批 58/86 + toolsubagent 双 bundle 行 + model-selection 子面含死锁修复）；已推送 45b4b49 |
+| 2026-08-30 14:0x | 全部 81 包 | ✅ build/vet/gofmt/test 全绿 | 1159 测试；r31-r33（toolsubagentreport/session_projcache 域/read_image+attachment-local，63/86）；**R7 状态更新：桥仍未接线且条件已半满足**；已推送 69ffa61 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -122,6 +123,8 @@
 第 29 轮（3 提交）：typert 运行时注册表（五存储+官方校验+catalog 接线，45/86）+ typert 网关（载体无关宿主派发器 over 严格描述符，46/86）+ storage/spill 家族 catalog 装配（五入口：hub+json 后端+域挂载+spill store+policy，51/86——路由后端表在 apply 时经 lifecycle-key injects 解析、spill store 按官方 ctx.get 可选；装配测试往返域 put/get 与 spill save）。README 计数/缺口/决策记录同步。
 
 第 30 轮（r28-r30）：policy/skill/deepseek-extensions 装配批（timeout-policy、agent-instructions、skill-filesystem、skill-badge、checkpoint-policy flusher 适配、deepseek-llm-api-extensions registry + PluginDeps.Extensions 接缝、session-log-deepseek；subprocess 入口更名为官方 dsh-subprocess-local，受阻清单入账，58/86）；toolsubagent 批（双 bundle 行 spawn/continuable + fork/one-shot、in-process provider PrepareContinuable 面）；model-selection 子面（路由策略/合并/会话策略事件/preflight/list_subagent_models/settings section；**自查死锁修复——Defaults 锁内重入**，其测试验证）。它已开始自写 VERIFY 轮次条目（r28-r30 均有）——台账共笔化。
+
+第 31 轮（r31-r33）：toolsubagentreport（continuable 子代理 report 工具：setup registry 贡献面/子作用域 section+工具/ReportFrom 接线）；session-projection-cache 批（session_projcache 域身份 v4 per-record/记录校验/DomainStore 适配，sessionsFlushView 合成偏差记录）；read_image + attachment-local 批（路由能力门/拒绝映射/双块 render，presentCall 偏差记录）。**R7 状态更新（条件半满足，缺口转实）**：attachment-local 已入 catalog（store 可组合）但 `commands.SetImageAdmitter` 仍无生产调用方、attachment 域错误到 `commands.ImageAdmissionError` 的映射不存在——组合了 store 的部署里命令图像路径仍走"no attachment store is composed"逐字回退。建议：catalog 装配 commands 时接 admitter（包装 `attachment.AdmitEncodedImages` + 按码映射 `ImageAdmissionError`，admission 类温和结果/其余照抛）。
 第 10 轮（continuation manager 本体深审，44KB vs 官方 68.5KB）比对：StartContinuable 准入序列逐步一致（admission 门→maxDepth→id 三查→深度→options→descriptor 快照先于任何 await→委派策略捕获先于首 await→provider prepare→seed→meta→锁内**复检** id+admission（materialize 内 271/345 行，竞态覆盖=官方三查时序）→materialize→submit，验收前失败全回滚）；admitWaking（accepted 先记账后发送、失败回滚）；submitAdmitted（同步截止区）；Drain（root 森林定界、barrier、cancel 记录）；Interrupt 授权矩阵、ReportFrom 身份界、settlementSummary 五态——与其自迭代 29-39 轮钉住测试一致。llm SenderSessionID=官方 MessageSourceMap 三 relay 源扩展；factory Provide("agent")=官方 accessor('agent') 接缝。唯一分歧 R9。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
@@ -169,6 +172,7 @@
 [omp → DSH] 2026-08-30 10:5x: 12 提交验证通过并推送（78c141c）。sqlite 驱动决策（R24）复核接受——纯 Go 选型理由与降级项记录完备。44/86 照常。
 [omp → DSH] 2026-08-30 12:0x: 3 提交（typert×2+spill 家族装配）验证通过并推送（9797435）。51/86。
 [omp → DSH] 2026-08-30 13:2x: r28-r30 验证通过并推送（45b4b49，1146 测试绿，58/86）。Defaults 重入死锁修复接受（测试验证；这是你第三个自查并发修复——模式可靠）。你自写 VERIFY 条目共笔化，好。
+[omp → DSH] 2026-08-30 14:0x: r31-r33 验证通过并推送（69ffa61，1159 测试绿，63/86）。**R7 缺口转实**：attachment-local 已入 catalog 但 commands 的 ImageAdmitter 桥仍无生产接线——建议 catalog 装 commands 时接 admitter 并按码映射 ImageAdmissionError（详见审查发现 R7 行与上）。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
