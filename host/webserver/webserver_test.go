@@ -1,11 +1,14 @@
 package webserver
 
 import (
+	"bufio"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"dshgo/cordis"
 )
@@ -51,8 +54,8 @@ func TestPrefixRouteClaimsSubtree(t *testing.T) {
 			t.Fatalf("prefix route must claim %q, got %d", p, code)
 		}
 	}
-	if code, _ := serve(t, rg, "/model-failover-lookalike"); code != http.StatusOK {
-		t.Fatal("prefix must be a plain string prefix (official behavior), so lookalike paths also claim")
+	if code, _ := serve(t, rg, "/model-failover-lookalike"); code != http.StatusNotFound {
+		t.Fatal("prefix claims only its own path and its /-subtree (official match), not lookalike paths")
 	}
 }
 
@@ -204,5 +207,135 @@ func TestCordisSeamEndToEnd(t *testing.T) {
 	dispose()
 	if code, _ := serve(t, registry, "/ping"); code != http.StatusNotFound {
 		t.Fatalf("disposed route must stop serving, got %d", code)
+	}
+}
+
+func TestLongestPrefixWins(t *testing.T) {
+	rg := New(nil)
+	_, errShort := rg.Register(Route{Kind: KindPrefix, Path: "/api", Handler: okHandler("short")})
+	_, errLong := rg.Register(Route{Kind: KindPrefix, Path: "/api/v2", Handler: okHandler("long")})
+	if errShort != nil || errLong != nil {
+		t.Fatalf("register failed: %v %v", errShort, errLong)
+	}
+	if _, body := serve(t, rg, "/api/v2/items"); body != "long" {
+		t.Fatalf("longest prefix must win, got %q", body)
+	}
+	if _, body := serve(t, rg, "/api/other"); body != "short" {
+		t.Fatalf("sibling path must fall to the shorter prefix, got %q", body)
+	}
+	if code, _ := serve(t, rg, "/apx"); code != http.StatusNotFound {
+		t.Fatalf("segment boundary must hold, got %d", code)
+	}
+}
+
+func TestUpgradeDispatchHijacksAndCloses(t *testing.T) {
+	rg := New(nil)
+	started := make(chan struct{})
+	dispose, err := rg.RegisterUpgrade(UpgradeRoute{Path: "/rt", Handler: func(conn net.Conn, rw *bufio.ReadWriter, r *http.Request) error {
+		close(started)
+		return nil
+	}})
+	if err != nil {
+		t.Fatalf("register upgrade: %v", err)
+	}
+	server := httptest.NewServer(rg)
+	defer server.Close()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	request := "GET /rt HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+	if _, err := conn.Write([]byte(request)); err != nil {
+		t.Fatalf("write upgrade request: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upgrade handler never ran")
+	}
+	rg.Close()
+	// The registry owns the hijacked socket: Close must tear it down even
+	// though the handler returned and the server keeps running.
+	_ = dispose
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set deadline: %v", err)
+	}
+	buf := make([]byte, 1)
+	if n, err := conn.Read(buf); err == nil && n > 0 {
+		t.Fatal("tracked upgrade socket must be closed by Registry.Close")
+	}
+}
+
+func TestUpgradeUnknownPathAnswers404WithoutHijack(t *testing.T) {
+	rg := New(nil)
+	server := httptest.NewServer(rg)
+	defer server.Close()
+	resp, err := http.Get(server.URL + "/no-upgrade")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unclaimed upgrade path must 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestRenderIndexInjectsRowsAndTaps(t *testing.T) {
+	root := cordis.NewRoot(cordis.Discard{})
+	rg := New(nil)
+	inject := root.On("webserver/index-inject", func(value any, next func(any) any) any {
+		if table, ok := value.(*[]IndexInjection); ok {
+			*table = append(*table,
+				IndexInjection{Kind: RowGlobal, Name: "INJ", Value: map[string]any{"a": "<script>"}},
+				IndexInjection{Kind: RowScript, Placement: PlacementBody, Text: "boot()"},
+			)
+		}
+		return next(value)
+	})
+	defer inject()
+	tap, err := rg.TapIndex(func(html string) string { return strings.ReplaceAll(html, "</body>", "<b>tap</b></body>") })
+	if err != nil {
+		t.Fatalf("tap: %v", err)
+	}
+	defer tap()
+
+	rendered, err := rg.RenderIndex(root, "<html><head></head><body><p>x</p></body></html>")
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(rendered, `<script>globalThis["INJ"] = {"a":"\u003cscript\u003e"}</script>`) {
+		t.Fatalf("global row missing or unescaped: %s", rendered)
+	}
+	if !strings.Contains(rendered, "<script>boot()</script>") {
+		t.Fatalf("body script row missing: %s", rendered)
+	}
+	if !strings.Contains(rendered, "Promise.withResolvers") {
+		t.Fatalf("boot-readiness tail missing: %s", rendered)
+	}
+	if !strings.Contains(rendered, "<b>tap</b>") {
+		t.Fatalf("tap must run after row rendering: %s", rendered)
+	}
+	// Head rows before </head> … actually: after <head>; body rows after
+	// <body> and before the paragraph.
+	headAt := strings.Index(rendered, `globalThis["INJ"]`)
+	bodyAt := strings.Index(rendered, "boot()")
+	paraAt := strings.Index(rendered, "<p>x</p>")
+	if !(headAt < bodyAt && bodyAt < paraAt) {
+		t.Fatalf("row order must be head rows, body rows, then document content: %s", rendered)
+	}
+}
+
+func TestRenderIndexUnknownRowKindFailsLoud(t *testing.T) {
+	root := cordis.NewRoot(cordis.Discard{})
+	rg := New(nil)
+	_ = root.On("webserver/index-inject", func(value any, next func(any) any) any {
+		if table, ok := value.(*[]IndexInjection); ok {
+			*table = append(*table, IndexInjection{Kind: "mystery"})
+		}
+		return next(value)
+	})
+	if _, err := rg.RenderIndex(root, "<html></html>"); err == nil {
+		t.Fatal("unknown row kind must fail the render")
 	}
 }
