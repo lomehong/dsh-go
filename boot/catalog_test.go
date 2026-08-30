@@ -33,6 +33,7 @@ import (
 	"dshgo/tools"
 	"dshgo/toolsubagent"
 	"dshgo/typert"
+	"dshgo/web"
 	"dshgo/webhook"
 	"dshgo/workspace"
 )
@@ -47,7 +48,7 @@ func TestCatalogResolvesOfficialNames(t *testing.T) {
 		{ID: "commands", Name: "@deepseek-ai/dsh-commands"},
 		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
 		{ID: "credentials", Name: "@deepseek-ai/dsh-credentials-local"},
-		{ID: "web", Name: "@deepseek-ai/dsh-web"},
+		{ID: "web", Name: "@deepseek-ai/dsh-host-webserver"},
 	}
 	for _, entry := range entries {
 		spec, err := resolver(entry.Name)
@@ -79,7 +80,7 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		{ID: "commands", Name: "@deepseek-ai/dsh-commands"},
 		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
 		{ID: "credentials", Name: "@deepseek-ai/dsh-credentials-local"},
-		{ID: "web", Name: "@deepseek-ai/dsh-web"},
+		{ID: "web", Name: "@deepseek-ai/dsh-host-webserver"},
 		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
 		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
 		{ID: "projections", Name: "@deepseek-ai/dsh-session-projection"},
@@ -404,7 +405,7 @@ func TestCatalogSandboxCompositionFencesEditor(t *testing.T) {
 		{ID: "commands", Name: "@deepseek-ai/dsh-commands"},
 		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
 		{ID: "credentials", Name: "@deepseek-ai/dsh-credentials-local"},
-		{ID: "web", Name: "@deepseek-ai/dsh-web"},
+		{ID: "web", Name: "@deepseek-ai/dsh-host-webserver"},
 		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
 		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
 		{ID: "projections", Name: "@deepseek-ai/dsh-session-projection"},
@@ -842,6 +843,39 @@ func TestCatalogSessionTitleWorkspacePresetsAndWebhookCompose(t *testing.T) {
 		t.Fatalf("dispose rule: %v", err)
 	}
 
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+func TestCatalogWebSeamAndWebserverCompose(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "web", Name: "@deepseek-ai/dsh-web",
+			Config: map[string]any{"searchProvider": "deepseek-official", "fetchProvider": "http"}},
+		{ID: "webserver", Name: "@deepseek-ai/dsh-host-webserver"},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	if root.Get(ServiceWebServer) == nil {
+		t.Fatal("webServer service missing after Assemble")
+	}
+	runtime, ok := root.Get(ServiceWeb).(*web.Runtime)
+	if !ok {
+		t.Fatal("web seam service missing after Assemble")
+	}
+	// The base config pins providers that have no row yet: execution fails
+	// loud with the configured-missing code rather than auto-selecting.
+	if _, err := runtime.Search(context.Background(), web.WebSearchRequest{Query: "q"}); err == nil ||
+		err.Error() != `configured web provider "deepseek-official" is not registered` {
+		t.Fatalf("pinned search = %v", err)
+	}
+	if _, err := runtime.Fetch(context.Background(), web.WebFetchRequest{URL: "https://example.test"}); err == nil ||
+		err.Error() != `configured web provider "http" is not registered` {
+		t.Fatalf("pinned fetch = %v", err)
+	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)
 	}

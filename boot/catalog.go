@@ -85,16 +85,20 @@ import (
 	"dshgo/toolsubagent"
 	"dshgo/toolsubagentreport"
 	"dshgo/typert"
+	"dshgo/web"
 	"dshgo/webhook"
 	"dshgo/workspace"
 )
 
 // Service names plugins publish and consume through ctx inject lists.
 const (
-	ServiceTools      = "tools"
-	ServiceCommands   = "commands"
-	ServiceSettings   = "settings"
-	ServiceWebServer  = "webServer"
+	ServiceTools     = "tools"
+	ServiceCommands  = "commands"
+	ServiceSettings  = "settings"
+	ServiceWebServer = "webServer"
+	// ServiceWeb is the web access capability seam (official ctx.web):
+	// search/fetch provider registries and provider-selecting execution.
+	ServiceWeb        = "web"
 	ServiceCredential = "credentials"
 	ServiceSessions   = "sessions"
 	// ServiceSessionTitle is the live session title service (log-backed
@@ -320,12 +324,37 @@ var builders = map[string]pluginBuilder{
 		}
 	},
 
-	// The web server: route registry served over HTTP.
-	"@deepseek-ai/dsh-web": func(deps CatalogDeps) PluginSpec {
+	// The web server: route registry served over HTTP (official
+	// @deepseek-ai/dsh-host-webserver; the dsh-web specifier belongs to the
+	// web capability seam below).
+	"@deepseek-ai/dsh-host-webserver": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
 			Provide: []string{ServiceWebServer},
 			Apply: func(ctx *cordis.Context, config any) error {
 				return webserver.AsPlugin(deps.Logger).Apply(ctx)
+			},
+		}
+	},
+
+	// The web access capability seam (official dsh-web): search/fetch
+	// provider registries with execution-time provider selection. The base
+	// bundle pins the shipped providers; omitting either field auto-selects
+	// when exactly one usable provider is registered.
+	"@deepseek-ai/dsh-web": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceWeb},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := web.Config{}
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["searchProvider"].(string); ok {
+						cfg.SearchProvider = raw
+					}
+					if raw, ok := overridden["fetchProvider"].(string); ok {
+						cfg.FetchProvider = raw
+					}
+				}
+				ctx.Provide(ServiceWeb, web.NewRuntime(ctx, cfg))
+				return nil
 			},
 		}
 	},
