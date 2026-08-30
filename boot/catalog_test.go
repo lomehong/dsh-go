@@ -87,6 +87,10 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		{ID: "subagent", Name: "@deepseek-ai/dsh-subagent"},
 		{ID: "spawn", Name: "@deepseek-ai/dsh-subagent-spawn-in-process"},
 		{ID: "fork", Name: "@deepseek-ai/dsh-subagent-fork-in-process"},
+		{ID: "tool-subagent", Name: "@deepseek-ai/dsh-tool-subagent",
+			Config: map[string]any{"provider": "spawn", "toolName": "subagent", "backgroundMode": "continuable"}},
+		{ID: "tool-subagent-fork", Name: "@deepseek-ai/dsh-tool-subagent-fork",
+			Config: map[string]any{"provider": "fork", "toolName": "subagent_fork"}},
 	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
 	if err != nil {
 		t.Fatalf("assemble: %v", err)
@@ -101,6 +105,17 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		if ctx.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
 		}
+	}
+	// Both delegation rows mount with their configured identities and
+	// provider-routed wording.
+	registry := ctx.Get(ServiceTools).(*tools.ToolRuntime)
+	spawnTool, ok := registry.Get("subagent", nil)
+	if !ok || !strings.Contains(spawnTool.Description, "runs in the background by default") {
+		t.Fatalf("spawn delegation tool: %v", ok)
+	}
+	forkTool, ok := registry.Get("subagent_fork", nil)
+	if !ok || !strings.Contains(forkTool.Description, "inherits this conversation") {
+		t.Fatalf("fork delegation tool: %v", ok)
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)

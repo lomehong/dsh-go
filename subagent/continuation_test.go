@@ -329,3 +329,37 @@ func TestAuthorizeLineageAndAdmission(t *testing.T) {
 		t.Fatalf("manager drain = %v", err)
 	}
 }
+
+// TestInProcessProvidersPrepareContinuable pins the continuable faces the
+// delegation tool gates on: spawn contributes no seed, fork captures the
+// completed-turn prefix (empty for a fresh parent).
+func TestInProcessProvidersPrepareContinuable(t *testing.T) {
+	deps := InProcessProviderDeps{}
+	spawn, err := NewInProcessProvider("spawn", "spawn", deps)
+	if err != nil {
+		t.Fatalf("spawn provider: %v", err)
+	}
+	if _, ok := spawn.(ContinuableProvider); !ok {
+		t.Fatal("spawn provider lost the continuable face")
+	}
+	spec, err := spawn.(ContinuableProvider).PrepareContinuable(ContinuableCreateRequest{})
+	if err != nil || len(spec.Seed) != 0 {
+		t.Fatalf("spawn spec: (%v, %d events)", err, len(spec.Seed))
+	}
+	fork, err := NewInProcessProvider("fork", "fork", deps)
+	if err != nil {
+		t.Fatalf("fork provider: %v", err)
+	}
+	parent, _ := newManagedAgent(t, "fork-parent", "")
+	if _, ok := fork.(ContinuableProvider); !ok {
+		t.Fatal("fork provider lost the continuable face")
+	}
+	spec, err = fork.(ContinuableProvider).PrepareContinuable(ContinuableCreateRequest{Parent: parent})
+	if err != nil {
+		t.Fatalf("fork spec: %v", err)
+	}
+	// A fresh parent has no completed turns to capture.
+	if len(spec.Seed) != 0 {
+		t.Fatalf("fresh parent seed: %d events", len(spec.Seed))
+	}
+}

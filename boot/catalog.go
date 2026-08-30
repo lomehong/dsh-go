@@ -70,6 +70,7 @@ import (
 	"dshgo/tools"
 	"dshgo/toolsjobs"
 	"dshgo/toolskill"
+	"dshgo/toolsubagent"
 	"dshgo/typert"
 )
 
@@ -330,6 +331,9 @@ var builders = map[string]pluginBuilder{
 			},
 		}
 	},
+	// Delegation tools (official tool-subagent rows): spawn + fork.
+	"@deepseek-ai/dsh-tool-subagent":      buildDelegationTool("spawn", "subagent"),
+	"@deepseek-ai/dsh-tool-subagent-fork": buildDelegationTool("fork", "subagent_fork"),
 	// Request deadline enforcement for tools that declare a timeoutMs
 	// budget (the model-visible isError text mirrors the canonical shape).
 	"@deepseek-ai/dsh-tool-call-timeout-policy": func(deps CatalogDeps) PluginSpec {
@@ -1184,6 +1188,48 @@ func toolsCallerOf(agents *agent.AgentRegistry) toolsjobs.CallerOf {
 			}
 		}
 		return ""
+	}
+}
+
+// buildDelegationTool builds the model-facing delegation tool rows (official
+// dsh-tool-subagent: the `agent` spawn surface — one package, two bundle rows
+// with different providers). Provider must precede this entry in the
+// composition (static order replaces the official late-mount listeners).
+func buildDelegationTool(defaultProvider string, defaultToolName string) pluginBuilder {
+	return func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools, ServiceSubagentRuntime, ServiceSystemPrompt, ServiceAgents},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg toolsubagent.Config
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				if cfg.Provider == "" {
+					cfg.Provider = defaultProvider
+				}
+				if cfg.ToolName == "" {
+					cfg.ToolName = defaultToolName
+				}
+				agents := ctx.Get(ServiceAgents).(*agent.AgentRegistry)
+				prompt := (*systemprompt.SystemPrompt)(nil)
+				if candidate := ctx.Get(ServiceSystemPrompt); candidate != nil {
+					prompt = candidate.(*systemprompt.SystemPrompt)
+				}
+				jobsRegistry := (*jobs.LocalRegistry)(nil)
+				if candidate := ctx.Get(ServiceJobs); candidate != nil {
+					jobsRegistry = candidate.(*jobs.LocalRegistry)
+				}
+				_, err := toolsubagent.Register(toolsubagent.Deps{
+					Runtime:      ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					Prompt:       prompt,
+					Subagents:    ctx.Get(ServiceSubagentRuntime).(*subagent.SubagentRuntime),
+					Jobs:         jobsRegistry,
+					ResolveAgent: agentResolverOf(agents),
+				}, cfg)
+				return err
+			},
+		}
 	}
 }
 

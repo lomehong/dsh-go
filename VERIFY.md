@@ -710,3 +710,15 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 受阻盘点（README r28 续）：attachment-local（Store 实现未移植）、session-query-sqlite（SearchBackend sqlite 后端未移植）、sandbox-local（roots 服务组合随 fs-sandbox 轮）、timer/hmr（cordis 核心插件无 Go 对应物）、goal/ralph 族、web 抓取族、tool-subagent(-report)、tool-workflow、session-title、agent-default-model、llm-retry、llm-pi-ai、plugin-package-inventory-deepseek、session-telemetry-otel、typert-loader——无 Go 包随依赖轮。
 - 账实对齐：51→**58/86**、"其余 37 项"→30 项；skill/guard/checkpointpolicy/sessionlog 四行接线状态刷新。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1131 FAIL=0**（+1）。
+
+## r29 — toolsubagent 批（tool-subagent 双 bundle 行 + in-process provider continuable 面）
+
+- 新包 `toolsubagent`：单工具委派面（官方 packages/subagent/tool-subagent/src 33KB 移植）。Config{provider 必填、toolName 缺省 subagent、enableRunInBackground 缺省 true、backgroundMode one-shot|continuable、agentOptions/persona/toolFilter/maxDepth|provider-managed}+ResolveConfig（空 toolFilter 拒绝逐字、maxDepth 域检查、backgroundMode 枚举）。
+- 能力门 load 期 fail loud：depthLimit 缺失（maxDepthProviderManaged 逃生门逐字）、agentOptions 缺失、continuable 经 `subagent.ContinuableProvider` type-assertion（"`backgroundMode: continuable`" 逐字）。
+- execute 三路：前台 Start→settleForegroundRun（stopReasonError 五分支+未知兜底逐字、withDiagnosticAndPartialText 附 "\nDiagnostic: %s"/"\nPartial output before the run ended:\n%s"、dispose 恒执行且 dispose 失败独立聚合）→foreground{runId,output}；后台 one-shot `jobs.LocalRegistry.Start`（kind "subagent"、owner 适配 agent.ID/Scope、controller cancel、SettleRun→JobOutcome 桥 jobs.Outcome）→background{jobId}；continuable `StartContinuable`→continuable{subagentId}（缺省即后台+PromptSection OrderToolSubagent=2800）。
+- providerWording 按 InheritsParentContext 两版 description/promptDescription 逐字；enableRunInBackground=false 去 run_in_background 参数并逐字拒 forced background；jobs 缺席报官方 load 提示；agent-less 调用逐字拒绝。
+- catalog：`buildDelegationTool(provider, toolName)` 两行——`@deepseek-ai/dsh-tool-subagent`（spawn/subagent/continuable）+ `@deepseek-ai/dsh-tool-subagent-fork`（fork/subagent_fork/one-shot），对齐官方 cordis.patch.yml 行名与 config。
+- 语义决策（README 已记）：provider present-check 收直为 Register 期校验（官方 listener 晚挂载→Go catalog 静态序 provider 先行）；jobs 由 Inject 改机会式 Get（官方 ctx.get 同形，cordis 未注入服务会使插件休眠——组装测实测抓到）；**in-process spawn/fork provider 补 `PrepareContinuable`**（官方两 provider 均实现该面：spawn 空 spec、fork completedTurnPrefix 捕获一次入子转录——Go 侧此前缺面，continuable gate 将对官方 spawn 行误报）；model-selection 子面推迟（官方 modelSelectionSettings 缺省 false 同路径）。
+- 测试：toolsubagent 包 6 测（defaults/能力门/路由矩阵/stop-reason 文案/前台 settle 形状/注册与卸载+双 wording+absent provider）；subagent 包 TestInProcessProvidersPrepareContinuable（spawn 空 seed、fork fresh parent 空 seed）；boot 组装测扩双行断言（spawn continuable description、fork inherits wording）。
+- 账实对齐：58→**60/86**、"其余 30 项"→28 项；tool-subagent(-fork) 移出受阻清单。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1138 FAIL=0**（+7）。

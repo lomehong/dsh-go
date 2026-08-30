@@ -322,6 +322,24 @@ func (p *ForkInProcessProvider) Start(request ResolvedSubagentStartRequest) (Sub
 	return StartInProcessRun(p.deps, request, completedTurnPrefix(request.Parent))
 }
 
+// PrepareContinuable contributes the creation spec for a continuable child.
+// A spawned child starts fresh, so it contributes no seed; the continuation
+// manager owns every later operation on it.
+func (p *SpawnInProcessProvider) PrepareContinuable(request ContinuableCreateRequest) (ContinuableCreateSpec, error) {
+	return ContinuableCreateSpec{}, nil
+}
+
+// PrepareContinuable captures the fork prefix once, at creation: it becomes
+// part of the child's own durable transcript, so a later cold resume replays
+// that prefix instead of re-forking the parent's newer history.
+func (p *ForkInProcessProvider) PrepareContinuable(request ContinuableCreateRequest) (ContinuableCreateSpec, error) {
+	seed := completedTurnPrefix(request.Parent)
+	if len(seed) == 0 {
+		return ContinuableCreateSpec{}, nil
+	}
+	return ContinuableCreateSpec{Seed: seed}, nil
+}
+
 // NewInProcessProvider builds the spawn or fork provider per kind (the
 // default registry name selects the transport); unknown kinds fail loud.
 func NewInProcessProvider(name, kind string, deps InProcessProviderDeps) (SubagentProvider, error) {
