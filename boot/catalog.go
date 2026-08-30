@@ -41,6 +41,7 @@ import (
 	"dshgo/settings"
 	"dshgo/settings/file"
 	"dshgo/shell"
+	"dshgo/shelllocal"
 	"dshgo/skill"
 	"dshgo/strreplaceeditor"
 	"dshgo/subagent"
@@ -84,7 +85,10 @@ const (
 	// ServiceShellEnv is the managed DSH_* environment registry the shell
 	// tools inject into every model shell call.
 	ServiceShellEnv = "shellEnv"
-	ServiceFS       = "fs"
+	// ServiceShell is the shell execution capability (ctx.shell); exactly
+	// one executor provider composes per host (mounting both fails loud).
+	ServiceShell = "shell"
+	ServiceFS    = "fs"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -144,6 +148,44 @@ func decodeConfigJSON(config any, out any) error {
 		return err
 	}
 	return json.Unmarshal(raw, out)
+}
+
+// decodeShellLocalConfig decodes the shared bash-local/pwsh-local executor
+// config surface (pwsh adds pwshPath).
+func decodeShellLocalConfig(config any, pwsh bool) (shelllocal.Config, error) {
+	var cfg struct {
+		Cwd            string `json:"cwd"`
+		TimeoutMs      *int   `json:"timeoutMs"`
+		MaxTimeoutMs   *int   `json:"maxTimeoutMs"`
+		MaxOutputBytes *int   `json:"maxOutputBytes"`
+		MaxSpillBytes  *int   `json:"maxSpillBytes"`
+		GraceMs        *int   `json:"graceMs"`
+		PwshPath       string `json:"pwshPath"`
+	}
+	if err := decodeConfigJSON(config, &cfg); err != nil {
+		return shelllocal.Config{}, err
+	}
+	out := shelllocal.DefaultConfig()
+	out.Cwd = cfg.Cwd
+	if cfg.TimeoutMs != nil {
+		out.TimeoutMs = *cfg.TimeoutMs
+	}
+	if cfg.MaxTimeoutMs != nil {
+		out.MaxTimeoutMs = *cfg.MaxTimeoutMs
+	}
+	if cfg.MaxOutputBytes != nil {
+		out.MaxOutputBytes = *cfg.MaxOutputBytes
+	}
+	if cfg.MaxSpillBytes != nil {
+		out.MaxSpillBytes = *cfg.MaxSpillBytes
+	}
+	if cfg.GraceMs != nil {
+		out.GraceMs = *cfg.GraceMs
+	}
+	if pwsh {
+		out.PwshPath = cfg.PwshPath
+	}
+	return out, nil
 }
 
 var builders = map[string]pluginBuilder{
@@ -934,6 +976,58 @@ var batchThreeBuilders = map[string]pluginBuilder{
 			Provide: []string{ServiceSubprocess},
 			Apply: func(ctx *cordis.Context, config any) error {
 				ctx.Provide(ServiceSubprocess, subprocess.NewLocal())
+				return nil
+			},
+		}
+	},
+
+	// The local bash executor (dsh-bash-local): public commands run as
+	// `bash -c` in a managed process tree through the subprocess seam.
+	// Command defaulting, deadlines and cause classification, the
+	// model-friendly terminal environment (NO_COLOR/TERM/PAGER overrides
+	// under the caller's env, under the trusted DSH_* snapshot), and the
+	// model-facing stdout/stderr merge for background reads live here;
+	// execution policy belongs to the pre-execute gate or a confining
+	// executor. One provider of ctx.shell per host: the win32 layer swaps
+	// this row for the pwsh one, and mounting both fails loud.
+	"@deepseek-ai/dsh-bash-local": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSubprocess},
+			Provide: []string{ServiceShell},
+			Apply: func(ctx *cordis.Context, config any) error {
+				executorCfg, err := decodeShellLocalConfig(config, false)
+				if err != nil {
+					return err
+				}
+				executor, err := shelllocal.NewBash(ctx.Get(ServiceSubprocess).(subprocess.Runtime), executorCfg)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceShell, executor)
+				return nil
+			},
+		}
+	},
+
+	// The local PowerShell executor (dsh-pwsh-local): the pwsh twin of the
+	// bash row — UTF-8 preamble + -NoLogo -NoProfile -NonInteractive
+	// -Command, executable resolved once from an explicit pwshPath or the
+	// well-known Windows locations (PS7 install, PATH entries, then the
+	// 5.1 fallback).
+	"@deepseek-ai/dsh-pwsh-local": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSubprocess},
+			Provide: []string{ServiceShell},
+			Apply: func(ctx *cordis.Context, config any) error {
+				executorCfg, err := decodeShellLocalConfig(config, true)
+				if err != nil {
+					return err
+				}
+				executor, err := shelllocal.NewPwsh(ctx.Get(ServiceSubprocess).(subprocess.Runtime), executorCfg)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceShell, executor)
 				return nil
 			},
 		}

@@ -649,3 +649,10 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - shell-env 注册表：内建 DSH_HOME/DSH_SHELL/DSH_SESSION_ID 自持；贡献者声明键集全量 fail-loud（重名/重键/保留键/键形/空描述）；collect 按名序解析、未声明键 panic 炸场；list 不执行解析器；agent 解析经 scope 键注入（Go 管线携带 ScopeKey 而非 agent 对象）。
 - catalog +1（累计 38/86，余 48）：dsh-shell-env（Provide shellEnv；dshHome 配置）。诚实记录：DSH_SESSION_JSONL 贡献者随 Go session/persistence 组合落地；bash-local/pwsh-local 执行器与 tool-bash/tool-pwsh 工具面（官方 win32 互斥装配）随后续轮。
 - 教训：官方 parseExitStatus 的 body 是 slice(0, match.index)——保留 marker 前的空行换行，不是 trim 掉；struct 里的函数字段写接口方法语法会报"unexpected *"。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 17（② 本地 shell 执行器 bash-local + pwsh-local），门禁 81 包 / 1042 PASS / 0 FAIL / 3 SKIP（+1 包 +11 测，其中 6 个真 spawn 生命周期测本机 pwsh 全过）：
+- shelllocal 包 = dsh-bash-local + dsh-pwsh-local：ctx.shell 双提供者（官方语义一宿主一提供者、双装 fail-loud、win32 层换行）；公共命令 bash -c / PowerShell（UTF-8 preamble + -NoLogo -NoProfile -NonInteractive -Command）；pwsh 可执行解析=pwshPath 钉死→PS7 已知位置→PATH 条目（setx 整条引号剥离、lstat 看得见 Store 别名）→5.1 兜底→POSIX 交 PATH。
+- 语义面：Resolve 两段缺省+封顶（cwd=config→进程 cwd；stdoutMaxBytes 信任内进程消费者直传）；超时/中止 CAS 单首因分类（双臂竞态只报一个）；Run 仅基础设施失败报错；Start 即返无超时、信号终止（含自杀）结 killed、spawn 失败结 killed 且失败注记恰一次经读路径送达（与真 stderr 互斥）；ReadOutput 增量消费+stderr [stderr] 分节+节间单换行补齐；终端环境层序=NO_COLOR/TERM=dumb/PAGER 覆盖先行→调用方 env→DSH_* 快照封顶；bounded collect+spill 每 spawn 显式供给。
+- catalog +2（累计 40/86，余 46）：dsh-bash-local + dsh-pwsh-local（Provide shell；Inject subprocess）。
+- 部署适配（如实记录）：Windows PATH 的 bash 是 WSL stub（官方 tool-bash 亦 win32 禁用）——bash 真跑测仅 POSIX 生效；win32 以 pwsh 执行器跑同套真 spawn 生命周期（运行/超时击杀/中止分类/后台增量读/取消击杀）本机全过。settings section 热载（installSettingsSection）随 settings 组装轮。
+- 教训：后台句柄 status 零值必须显式 running（否则完成 goroutine 的分类分支永不命中）；pwsh -Command 内 exit N 即进程退出码，[Console]::Out/Error 直写绕过格式化管线。

@@ -115,6 +115,8 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		loader.Entry{ID: "fs-sandbox", Name: "@deepseek-ai/dsh-fs-sandbox"},
 		loader.Entry{ID: "editor", Name: "@deepseek-ai/dsh-tool-str-replace-editor"},
 		loader.Entry{ID: "shell-env", Name: "@deepseek-ai/dsh-shell-env"},
+		loader.Entry{ID: "bash", Name: "@deepseek-ai/dsh-bash-local"},
+		loader.Entry{ID: "pwsh", Name: "@deepseek-ai/dsh-pwsh-local"},
 		loader.Entry{ID: "tool-fs", Name: "@deepseek-ai/dsh-tool-fs"},
 		loader.Entry{ID: "tool-fs-search", Name: "@deepseek-ai/dsh-tool-fs-search"},
 		loader.Entry{ID: "subprocess", Name: "@deepseek-ai/dsh-subprocess"},
