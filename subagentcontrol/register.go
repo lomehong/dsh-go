@@ -188,9 +188,7 @@ func Register(
 	if subagents == nil {
 		return nil, fmt.Errorf("subagent-control: a subagent runtime is required")
 	}
-	services := listingServices(listing)
 	closed := true
-
 	sendMessage, err := tools.DefineTool(tools.DefineToolOptions{
 		Name: "send_message",
 		Description: "Send a message to a background subagent by its subagent id, continuing the same conversation. It " +
@@ -322,6 +320,39 @@ func Register(
 		return nil, err
 	}
 
+	listUndo, err := RegisterListAgents(runtime, subagents, agents, listing)
+	if err != nil {
+		interruptUndo()
+		sendUndo()
+		return nil, err
+	}
+	return func() {
+		listUndo()
+		interruptUndo()
+		sendUndo()
+	}, nil
+}
+
+// RegisterListAgents installs the globally named list_agents tool alone
+// (official list-agents.ts): a thin model-facing adapter over the
+// continuable projection of listChildren and, for the descendants scope,
+// listDescendants. It stays separately loadable from the root send_message
+// plugin so a deployment can register continuation delivery without
+// exposing discovery.
+func RegisterListAgents(
+	runtime *tools.ToolRuntime,
+	subagents *subagent.SubagentRuntime,
+	agents *agent.AgentRegistry,
+	listing ListingDeps,
+) (func(), error) {
+	if runtime == nil {
+		return nil, fmt.Errorf("subagent-control: a tool runtime is required")
+	}
+	if subagents == nil {
+		return nil, fmt.Errorf("subagent-control: a subagent runtime is required")
+	}
+	services := listingServices(listing)
+	closed := true
 	listAgents, err := tools.DefineTool(tools.DefineToolOptions{
 		Name: "list_agents",
 		Description: "List your continuable background subagents by durable id and label. Use it to recall which ones " +
@@ -413,21 +444,13 @@ func Register(
 		},
 	})
 	if err != nil {
-		interruptUndo()
-		sendUndo()
 		return nil, err
 	}
 	listUndo, err := runtime.Register(listAgents)
 	if err != nil {
-		interruptUndo()
-		sendUndo()
 		return nil, err
 	}
-	return func() {
-		listUndo()
-		interruptUndo()
-		sendUndo()
-	}, nil
+	return listUndo, nil
 }
 
 // compile-time interfaces

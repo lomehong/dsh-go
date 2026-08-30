@@ -782,3 +782,11 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 组装测：core 列扩 observation-policy+agent-default-model 行（ServiceAgentDefaultModel 在场断言）；policy/skill 批列扩 observation-policy+feedback 行（/feedback 注册断言）。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1170 FAIL=0**（+11）。
 - 账实对齐：63→**66/86**、"其余 25 项"→22 项。
+
+## r35 — list-agents 独立行 + timer/hmr 处置
+
+- `subagentcontrol` 重构：list_agents 定义与注册从根 `Register` 抽出为 `RegisterListAgents(runtime, subagents, agents, listing)`（官方 list-agents.ts 同构——续传投递与发现可分装载）；`Register` 行为不变（三工具聚合 undo）。+1 独立测：单行注册后仅 list_agents 在场，send_message/interrupt_agent 不随行。
+- catalog：`@deepseek-ai/dsh-tool-subagent-control/list-agents` 行（注入 tools/subagents/agents + listing 三缝——官方仅三注入、Go listing 是注入缝的偏差已记录）；core 组装测列挂行。
+- 处置（非移植）：`cordis-plugin-hmr`——官方 base yml `disabled: true`，Go 组装无动态重载消费者，同态不携；`cordis-plugin-timer`（5.1KB）——唯一消费者 patchReload live 监视官方即走 launcher watch-only 兜底且注明该行非必需，Go 组装无此消费者。两者自缺失清单转入处置记录，不硬凑。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1171 FAIL=0**（+1）。
+- 账实对齐：66→**67/86**，缺失清单 22→19 项。

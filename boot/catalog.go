@@ -2055,6 +2055,30 @@ var batchThreeBuilders = map[string]pluginBuilder{
 		}
 	},
 
+	// The separately loadable discovery tool (official
+	// tool-subagent-control/list-agents): list_agents alone, without the
+	// send_message/interrupt_agent delivery surface. Deviation recorded: the
+	// Go listing services are injected seams (official resolves them from
+	// ctx.subagents internals).
+	"@deepseek-ai/dsh-tool-subagent-control/list-agents": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools, ServiceSubagentRuntime, ServiceAgents, ServiceSessions, ServiceProjections, ServiceSessionPersist},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				_, err := subagentcontrol.RegisterListAgents(
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					ctx.Get(ServiceSubagentRuntime).(*subagent.SubagentRuntime),
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					subagentcontrol.ListingDeps{
+						Store:       ctx.Get(ServiceSessions).(*session.Store),
+						Projections: ctx.Get(ServiceProjections).(*projection.Registry),
+						Coordinator: ctx.Get(ServiceSessionPersist).(*persistence.Coordinator),
+					},
+				)
+				return err
+			},
+		}
+	},
 	// The human-facing /feedback producer (official
 	// dsh-command-feedback): one authoritative log-only event plus the
 	// acknowledgement. The telemetry disclosure is "not configured" until a
