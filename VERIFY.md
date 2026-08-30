@@ -642,3 +642,10 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - Go 部署适配（诚实记录）：rg 从 PATH 惰性解析（官方打包 @vscode/ripgrep；rgPath 可钉死），缺二进制首次调用 SEARCH_FAILED 而非组装失败（同官方 call-boundary 语义）；本机无 rg——spawn 全链集成测如实 skip，纯函数面 13 测全覆盖（argv 构造、NDJSON 解析含畸形流、轮转采样分组页、footer 文案、UTF-8 截断、错误分类词汇）；spill 恢复面 Go 尚无 spillStore，opportunistic 缺席走 could-not-save（与官方可选语义一致）；search 卡片随展示轮。
 - catalog +1（累计 37/86，余 49）：dsh-tool-fs-search（Inject tools/subprocess/systemPrompt；tool:glob 1400/tool:grep 1500 指引段）。
 - 教训：采样页语义是"按顶层分组的桶"（桶序随首现、桶内按轮追加）而非轮转交错序；Windows 下测试路径必须走 filepath.Join（"/" 分不出顶层段）。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 16（② shell 契约 + shell-env 地基），门禁 80 包 / 1031 PASS / 0 FAIL / 3 SKIP（+1 包 +5 测）：
+- shell 包 = dsh-shell + dsh-shell-env 移植：执行契约两段式（ShellExecRequest → ShellExecutor.Resolve → ShellExecSpec，workdir/timeout 实现默认+封顶）；Run 仅基础设施失败报错（非零退出/超时/中止皆为描述性 ShellRunResult；TimedOut 与 Aborted 互斥单首因）；Start 即返无超时、done 永不报错、spawn 失败=killed+stderr；ReadOutput 增量消费+lossy 指路 spill；后台进程生命周期归属 subprocess 服务 disposal（执行器级 reload 不杀）；受管环境合并序=凭证洗→env→DSH_* 封顶；ShellSandboxInfo 与退出状态独立上报。
+- ParseExitStatus：复演端出口药丸恢复——[exit code: N]/[killed by signal: X] 标记剥离（消吃防双渲染；timeout/sandbox 标记留正文；要求前导换行+串尾防误匹配；body 保留 marker 前换行=官方 slice(index) 语义）。
+- shell-env 注册表：内建 DSH_HOME/DSH_SHELL/DSH_SESSION_ID 自持；贡献者声明键集全量 fail-loud（重名/重键/保留键/键形/空描述）；collect 按名序解析、未声明键 panic 炸场；list 不执行解析器；agent 解析经 scope 键注入（Go 管线携带 ScopeKey 而非 agent 对象）。
+- catalog +1（累计 38/86，余 48）：dsh-shell-env（Provide shellEnv；dshHome 配置）。诚实记录：DSH_SESSION_JSONL 贡献者随 Go session/persistence 组合落地；bash-local/pwsh-local 执行器与 tool-bash/tool-pwsh 工具面（官方 win32 互斥装配）随后续轮。
+- 教训：官方 parseExitStatus 的 body 是 slice(0, match.index)——保留 marker 前的空行换行，不是 trim 掉；struct 里的函数字段写接口方法语法会报"unexpected *"。

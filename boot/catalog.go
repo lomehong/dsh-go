@@ -40,6 +40,7 @@ import (
 	"dshgo/session/projection"
 	"dshgo/settings"
 	"dshgo/settings/file"
+	"dshgo/shell"
 	"dshgo/skill"
 	"dshgo/strreplaceeditor"
 	"dshgo/subagent"
@@ -80,7 +81,10 @@ const (
 	// ServiceSubprocess is the child-process execution seam (fs-search and
 	// the shell tools consume it).
 	ServiceSubprocess = "subprocess"
-	ServiceFS         = "fs"
+	// ServiceShellEnv is the managed DSH_* environment registry the shell
+	// tools inject into every model shell call.
+	ServiceShellEnv = "shellEnv"
+	ServiceFS       = "fs"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -930,6 +934,30 @@ var batchThreeBuilders = map[string]pluginBuilder{
 			Provide: []string{ServiceSubprocess},
 			Apply: func(ctx *cordis.Context, config any) error {
 				ctx.Provide(ServiceSubprocess, subprocess.NewLocal())
+				return nil
+			},
+		}
+	},
+
+	// The managed shell environment registry (`ctx.shellEnv`): owns the
+	// trusted, per-execution DSH_* variables the model-facing shell tools
+	// inject. Built-in facts (DSH_HOME, DSH_SHELL, DSH_SESSION_ID) are
+	// registry-owned; plugins contribute more with declared, ownership-
+	// checked keys. The official load also registers the persistence
+	// contributor (DSH_SESSION_JSONL); the Go session/persistence JSONL
+	// path is not composed yet, so that contributor lands with it.
+	"@deepseek-ai/dsh-shell-env": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{},
+			Provide: []string{ServiceShellEnv},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					DshHome string `json:"dshHome"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				ctx.Provide(ServiceShellEnv, shell.NewShellEnvRegistry(cfg.DshHome, nil))
 				return nil
 			},
 		}
