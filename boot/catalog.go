@@ -22,6 +22,7 @@ import (
 	"dshgo/fs"
 	"dshgo/fslocal"
 	"dshgo/fssandbox"
+	"dshgo/fssearch"
 	"dshgo/guard"
 	"dshgo/host/webserver"
 	"dshgo/interaction/permissionpresets"
@@ -930,6 +931,70 @@ var batchThreeBuilders = map[string]pluginBuilder{
 			Apply: func(ctx *cordis.Context, config any) error {
 				ctx.Provide(ServiceSubprocess, subprocess.NewLocal())
 				return nil
+			},
+		}
+	},
+
+	// The filesystem discovery tool suite (`glob`, `grep`): foreground
+	// spawns of a ripgrep binary through the subprocess seam with fixed
+	// argv templates — no shell layer, no model-visible background task.
+	// The Go deployment resolves `rg` from PATH (the npm package ships
+	// @vscode/ripgrep; the binary question is a deployment fact) — a
+	// missing binary fails SEARCH_FAILED at the first call, not the
+	// composition. Search cards (presentationMeta) stay with the
+	// presentation round, as for every tool.
+	"@deepseek-ai/dsh-tool-fs-search": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools, ServiceSubprocess, ServiceSystemPrompt},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					GlobMaxResults           *int   `json:"globMaxResults"`
+					SampleOverCapGlobResults *bool  `json:"sampleOverCapGlobResults"`
+					GrepMaxMatches           *int   `json:"grepMaxMatches"`
+					GrepMaxLineBytes         *int   `json:"grepMaxLineBytes"`
+					RawOutputMaxBytes        *int   `json:"rawOutputMaxBytes"`
+					GraceMs                  *int   `json:"graceMs"`
+					TimeoutMs                *int   `json:"timeoutMs"`
+					RGPath                   string `json:"rgPath"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				caps := fssearch.DefaultCaps()
+				if cfg.GlobMaxResults != nil {
+					caps.GlobMaxResults = *cfg.GlobMaxResults
+				}
+				if cfg.SampleOverCapGlobResults != nil {
+					caps.SampleOverCapGlobResults = *cfg.SampleOverCapGlobResults
+				}
+				if cfg.GrepMaxMatches != nil {
+					caps.GrepMaxMatches = *cfg.GrepMaxMatches
+				}
+				if cfg.GrepMaxLineBytes != nil {
+					caps.GrepMaxLineBytes = *cfg.GrepMaxLineBytes
+				}
+				if cfg.RawOutputMaxBytes != nil {
+					caps.RawOutputMaxBytes = *cfg.RawOutputMaxBytes
+				}
+				if cfg.GraceMs != nil {
+					caps.GraceMs = *cfg.GraceMs
+				}
+				if cfg.TimeoutMs != nil {
+					caps.TimeoutMs = *cfg.TimeoutMs
+				}
+				caps.RGPath = cfg.RGPath
+				var prompt *systemprompt.SystemPrompt
+				if candidate := ctx.Get(ServiceSystemPrompt); candidate != nil {
+					prompt = candidate.(*systemprompt.SystemPrompt)
+				}
+				undo, err := fssearch.Register(ctx.Get(ServiceTools).(*tools.ToolRuntime), prompt, ctx, caps)
+				if err != nil {
+					return err
+				}
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(undo), nil
+				})
 			},
 		}
 	},

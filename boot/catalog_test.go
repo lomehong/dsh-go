@@ -115,6 +115,7 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		loader.Entry{ID: "fs-sandbox", Name: "@deepseek-ai/dsh-fs-sandbox"},
 		loader.Entry{ID: "editor", Name: "@deepseek-ai/dsh-tool-str-replace-editor"},
 		loader.Entry{ID: "tool-fs", Name: "@deepseek-ai/dsh-tool-fs"},
+		loader.Entry{ID: "tool-fs-search", Name: "@deepseek-ai/dsh-tool-fs-search"},
 		loader.Entry{ID: "subprocess", Name: "@deepseek-ai/dsh-subprocess"},
 	)
 	app, err := Assemble(root, entries, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
@@ -139,7 +140,7 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		}
 	}
 	toolRuntime := root.Get(ServiceTools).(*tools.ToolRuntime)
-	for _, name := range []string{"read", "write", "edit"} {
+	for _, name := range []string{"read", "write", "edit", "glob", "grep"} {
 		if _, ok := toolRuntime.Get(name, nil); !ok {
 			t.Fatalf("tool %q missing after Assemble", name)
 		}

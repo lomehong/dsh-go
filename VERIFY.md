@@ -636,3 +636,9 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 官方 terminal 原语（pty 分配、前台组检视、win32 进程检查器 486+307 行）文档化缓期非静默缺口——piped 实现覆盖 batch/流式消费者（fs-search、bash seam 将至）。
 - catalog +1（累计 36/86，余 50）：dsh-subprocess（Provide subprocess）。
 - 本机无 rg 二进制：tool-fs-search 需 resolveRgPath 落 PATH 解析（部署有 rg 即用，缺失 fail loud——官方同语义），排在下一轮。
+
+[DSH → omp] 2026-08-29: 核心收尾总目标轮 15（② fs-search 发现工具族），门禁 79 包 / 1026 PASS / 0 FAIL / 3 SKIP（+1 包 +13 测，其中 rg 集成 2 skip 如实标注）：
+- fssearch 包 = dsh-tool-fs-search 移植：glob（rg --files --sort=modified --no-ignore --hidden + 每 VCS 名双否定 glob（裸形剪枝 + /** 形防根在 .git 内失效）；修改时间序契约；超帽页=修改时间头 or 跨顶层条目轮转采样（桶序随首现、桶内按轮追加、展示与卡片同法同算）；footer 三态）；grep（行导向 rg --json NDJSON：无冒号切分歧义、框架记录跳过、malformed 即 SEARCH_FAILED 绝不部分结果、非 UTF-8 行占位预览、按文件首现序分组、行预览 UTF-8 边界截断、Found N of M 预算头、include 纪律（否定式/顶层逗号拒绝、{a,b} 合法））；search-core（SEARCH_* 四码错误词汇、--no-config 防宿主 RIPGREP_CONFIG_PATH 注入预处理器、--flag=value/-- 后置使前导 - 值永不成旗标、exit 0/1 语义、workdir 相对化显示、session cwd 为运行目录）。
+- Go 部署适配（诚实记录）：rg 从 PATH 惰性解析（官方打包 @vscode/ripgrep；rgPath 可钉死），缺二进制首次调用 SEARCH_FAILED 而非组装失败（同官方 call-boundary 语义）；本机无 rg——spawn 全链集成测如实 skip，纯函数面 13 测全覆盖（argv 构造、NDJSON 解析含畸形流、轮转采样分组页、footer 文案、UTF-8 截断、错误分类词汇）；spill 恢复面 Go 尚无 spillStore，opportunistic 缺席走 could-not-save（与官方可选语义一致）；search 卡片随展示轮。
+- catalog +1（累计 37/86，余 49）：dsh-tool-fs-search（Inject tools/subprocess/systemPrompt；tool:glob 1400/tool:grep 1500 指引段）。
+- 教训：采样页语义是"按顶层分组的桶"（桶序随首现、桶内按轮追加）而非轮转交错序；Windows 下测试路径必须走 filepath.Join（"/" 分不出顶层段）。
