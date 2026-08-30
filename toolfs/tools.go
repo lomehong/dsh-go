@@ -78,7 +78,19 @@ func Register(runtime *tools.ToolRuntime, deps RegisterDeps, caps Caps) (func(),
 		undoWrite()
 		return nil, err
 	}
-	return func() { undoRead(); undoWrite(); undoEdit() }, nil
+	undos := func() { undoRead(); undoWrite(); undoEdit() }
+	// read_image registers only while a durable attachment store is
+	// mounted (the source's own gate); execution re-checks the store.
+	if deps.Attachments != nil {
+		undoImage, err := registerReadImage(runtime, controller, deps, deps.Attachments)
+		if err != nil {
+			undos()
+			return nil, err
+		}
+		previous := undos
+		undos = func() { previous(); undoImage() }
+	}
+	return undos, nil
 }
 
 // chunksFromStream adapts fs.StreamText's iterator.

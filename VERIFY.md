@@ -759,3 +759,12 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 测试：+3（域 store 往返/坏档缺席/域校验边界 7 例）；core 组装测扩 storage→storage-json→storage-domain→projection-cache 行 + ServiceProjectionCache 在场断言 + 未知会话 CachedSnapshot 未命中断言。中途修一处断言落错测试（model-selection 测试与 core 尾块同形被 Replace 全替换误伤——回退并把断言落到 core 测试自身锚点）。
 - 账实对齐：61→**62/86**、"其余 27 项"→26 项。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1154 FAIL=0**（+3）。
+
+## r33 — read_image + attachment-local 批
+
+- `toolfs/readimage.go`：官方 tool-fs read-image.ts 移植——`read_image` 仅当 attachment store 挂载才注册（RegisterDeps.Attachments 门，执行期再查 store 防直接调用）；扩展名→媒体类型映射（magic bytes 权威在存储侧）；一切门先于任何文件 IO（空路径/扩展/部署接受度/路由能力/目标解析/字节帽）；路由能力门最严：request header config→agent options 解析路由，`llm.ResolveModelInfo` 要求 InputModalities 显式含 image，未知即拒逐字；`ReadBytes` 字节帽=min(MaxImageBytes, MaxMessageImageBytes)（每消息聚合界并排每图界）；保存拒绝映射逐字五支，维度拒绝可恢复（超大图不得进持久历史）；render=信封+image 双块（信封含 downscaled 倍率建议逐字）。
+- catalog `@deepseek-ai/dsh-attachment-local` 行（base 62→**63/86**）：`<home>/attachments/v1` 内容寻址存储，限额解码 unset 走 store 默认；tool-fs 行机会式接 Attachments+Llm（官方 ctx.inject 可选注入同形）。
+- 偏差如实记录（README）：官方 presentCall（generic call view 卡片）Go tools 无对应展示面，未移植——纯展示关注点，模型面语义不受影响。
+- 测试：toolfs +5（store 缺席不注册/往返+信封双块+store 收到正确 save/拒绝先于 IO+文本模型拒/route 未解析措辞/拒绝映射 7 例）；组装测挂 attachment-local 行+attachments 服务在场+read_image 注册+store 根 `<home>/attachments/v1` 断言。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1159 FAIL=0**（+5）。
+- 账实对齐："其余 26 项"→25 项。

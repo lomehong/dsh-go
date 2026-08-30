@@ -8,6 +8,7 @@ package boot
 
 import (
 	"context"
+	"dshgo/attachment/local"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,6 +87,7 @@ const (
 	ServiceSessions          = "sessions"
 	ServiceProjections       = "projections"
 	ServiceProjectionCache   = "sessionProjectionCache"
+	ServiceAttachments       = "attachments"
 	ServiceAgents            = "agents"
 	ServiceTypert            = "typert"
 	ServiceTypertGateway     = "typertGateway"
@@ -2048,6 +2050,37 @@ var batchThreeBuilders = map[string]pluginBuilder{
 		}
 	},
 
+	// Private content-addressed DSH_HOME attachment storage (official
+	// dsh-attachment-local): the durable image store read_image commits
+	// into, rooted at <home>/attachments/v1. Limits decode from config;
+	// unset fields keep the store's defaults.
+	"@deepseek-ai/dsh-attachment-local": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{},
+			Provide: []string{ServiceAttachments},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := local.Config{DSHHome: deps.Home}
+				if overridden, ok := config.(map[string]any); ok {
+					intOf := func(key string) int {
+						if raw, ok := overridden[key].(float64); ok && raw >= 1 {
+							return int(raw)
+						}
+						return 0
+					}
+					cfg.MaxImageBytes = intOf("maxImageBytes")
+					cfg.MaxImagesPerMessage = intOf("maxImagesPerMessage")
+					cfg.MaxMessageImageBytes = intOf("maxMessageImageBytes")
+					cfg.MaxImagePixels = intOf("maxImagePixels")
+					cfg.MaxImageDimension = intOf("maxImageDimension")
+					cfg.NormalizedImageMaxPixels = intOf("normalizedImageMaxPixels")
+					cfg.NormalizedImageMaxDimension = intOf("normalizedImageMaxDimension")
+					cfg.NormalizedImageMaxBytes = intOf("normalizedImageMaxBytes")
+				}
+				ctx.Provide(ServiceAttachments, local.New(cfg))
+				return nil
+			},
+		}
+	},
 	// The read/write/edit filesystem tool suite over the mounted fs
 	// backend: schemas, read windows, observation events, and (under a
 	// confining backend) the shared sandbox-escalation fields resolved
@@ -2097,6 +2130,12 @@ var batchThreeBuilders = map[string]pluginBuilder{
 				}
 				if approval := ctx.Get(ServiceUserApproval); approval != nil {
 					depsTools.ApproverSource = approvalEscalationAdapter{service: approval.(*userapproval.Service)}
+				}
+				if store := ctx.Get(ServiceAttachments); store != nil {
+					depsTools.Attachments = store.(toolfs.AttachmentStoreFace)
+				}
+				if llmRuntime := ctx.Get(ServiceLlm); llmRuntime != nil {
+					depsTools.Llm = llmRuntime.(*llm.Runtime)
 				}
 				if prompt := ctx.Get(ServiceSystemPrompt); prompt != nil {
 					system := prompt.(*systemprompt.SystemPrompt)

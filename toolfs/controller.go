@@ -28,6 +28,12 @@ type RegisterDeps struct {
 	// PermissionFolds derives the calling agent's sandbox-mode override (the
 	// permissionpresets knob fold); nil skips the override tier.
 	PermissionFolds func(caller *agent.Agent) string
+	// Attachments is the durable attachment store; read_image registers
+	// only while one is mounted (the source's own gate).
+	Attachments AttachmentStoreFace
+	// Llm resolves the calling route's declared input modalities; nil
+	// refuses reads with the route-unresolved wording.
+	Llm LlmRouteSource
 }
 
 // PolicyService is the sandbox policy face the controller resolves standing

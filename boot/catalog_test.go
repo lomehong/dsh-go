@@ -279,6 +279,7 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		loader.Entry{ID: "fs-sandbox", Name: "@deepseek-ai/dsh-fs-sandbox"},
 		loader.Entry{ID: "editor", Name: "@deepseek-ai/dsh-tool-str-replace-editor"},
 		loader.Entry{ID: "shell-env", Name: "@deepseek-ai/dsh-shell-env"},
+		loader.Entry{ID: "attachment-local", Name: "@deepseek-ai/dsh-attachment-local"},
 		loader.Entry{ID: "tool-fs", Name: "@deepseek-ai/dsh-tool-fs"},
 		loader.Entry{ID: "tool-fs-search", Name: "@deepseek-ai/dsh-tool-fs-search"},
 		loader.Entry{ID: "subprocess", Name: "@deepseek-ai/dsh-subprocess-local"},
@@ -302,6 +303,19 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 	spawn, ok := runtime.GetProvider("spawn")
 	if !ok || spawn.Name() != "spawn" {
 		t.Fatalf("spawn provider missing (got %v, %v)", spawn, ok)
+	}
+	// The attachment store mounts and read_image registers beside the read
+	// family (the source gate: only while a store is mounted).
+	if root.Get(ServiceAttachments) == nil {
+		t.Fatal("attachments service missing")
+	}
+	toolsRuntime := root.Get(ServiceTools).(*tools.ToolRuntime)
+	if _, ok := toolsRuntime.Get("read_image", nil); !ok {
+		t.Fatal("read_image not registered with the store mounted")
+	}
+	store, _ := root.Get(ServiceAttachments).(interface{ Root() string })
+	if !strings.HasSuffix(filepath.ToSlash(store.Root()), "attachments/v1") {
+		t.Fatalf("store root: %q", store.Root())
 	}
 	fork, ok := runtime.GetProvider("fork")
 	if !ok || !fork.InheritsParentContext() {
