@@ -772,3 +772,13 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 测试：toolfs +5（store 缺席不注册/往返+信封双块+store 收到正确 save/拒绝先于 IO+文本模型拒/route 未解析措辞/拒绝映射 7 例）；组装测挂 attachment-local 行+attachments 服务在场+read_image 注册+store 根 `<home>/attachments/v1` 断言。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1159 FAIL=0**（+5）。
 - 账实对齐："其余 26 项"→25 项。
+
+## r34 — fs-observation-policy + command-feedback + agent-default-model 批（三小包三行）
+
+- `fsobservationpolicy`（8KB 官方）：事件型观察策略，不注册服务——owner→targetKey 观察表；write-intent 未见→createIfAbsent/在场→replaceIfVersion@观察版本；edit-intent 未见→FS_NOT_OBSERVED（`edit requires reading %q first` 逐字）、确认缺席→FS_NOT_FOUND、在场→版本 CAS 基；fs/observed 同步非抛记录；owner=执行上下文调用 scope（无 agent 直接调用自由读但不可满足先读后写）；dispose 丢状态后瀑布回落=裸 provider 行为（测试断言非 *WriteIntent 决策）。+4 测（含 owner 隔离）。
+- `commandfeedback`（5.5KB）：`/feedback` 产者——feedback/record 权威事件（recordInput=false 不重复记 payload）、空文本 usage 错误零事件、确认文案含 session id+匿名用户 id+telemetry 披露句（Go 无 telemetry 组合→not configured 臂，官方可选读取同形）。+3 测。
+- `agentdefaultmodel`（5.4KB）：默认模型选择 owner——组合条目+settings 段 live 用户层（未挂载条目独立可用）；CurrentSelection 投影 agent.ModelSelection；SaveSelection 走段 Replace；Defaults 锁内固定初值规避 r30 死锁形态。+4 测。
+- catalog：`@deepseek-ai/dsh-fs-observation-policy`（零注入零提供）、`@deepseek-ai/dsh-command-feedback`（注入 commands）、`@deepseek-ai/dsh-agent-default-model`（注入 settings、提供 agentDefaultModel，provider/model 必填 fail-loud）；vocabulary 注册 feedback/record。
+- 组装测：core 列扩 observation-policy+agent-default-model 行（ServiceAgentDefaultModel 在场断言）；policy/skill 批列扩 observation-policy+feedback 行（/feedback 注册断言）。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1170 FAIL=0**（+11）。
+- 账实对齐：63→**66/86**、"其余 25 项"→22 项。

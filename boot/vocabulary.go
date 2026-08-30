@@ -8,6 +8,7 @@ package boot
 
 import (
 	"dshgo/agent"
+	"dshgo/commandfeedback"
 	"dshgo/commands"
 	"dshgo/compaction"
 	"dshgo/hookprotocol"
@@ -26,6 +27,7 @@ import (
 // a log carrying a type outside this set still fails closed.
 func RegisterVocabulary() {
 	agent.RegisterEvents()
+	commandfeedback.RegisterEvents()
 	commands.RegisterEvents()
 	compaction.RegisterEvents()
 	hookprotocol.RegisterEvents()

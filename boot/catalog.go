@@ -8,16 +8,19 @@ package boot
 
 import (
 	"context"
+	"dshgo/agentdefaultmodel"
 	"dshgo/attachment/local"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"dshgo/agent"
 	"dshgo/agentinstructions"
 	"dshgo/agentloop"
 	"dshgo/checkpointpolicy"
+	"dshgo/commandfeedback"
 	"dshgo/commands"
 	"dshgo/compaction"
 	"dshgo/compactionbasic"
@@ -25,6 +28,7 @@ import (
 	"dshgo/credentials"
 	"dshgo/fs"
 	"dshgo/fslocal"
+	"dshgo/fsobservationpolicy"
 	"dshgo/fssandbox"
 	"dshgo/fssearch"
 	"dshgo/gateway"
@@ -88,6 +92,7 @@ const (
 	ServiceProjections       = "projections"
 	ServiceProjectionCache   = "sessionProjectionCache"
 	ServiceAttachments       = "attachments"
+	ServiceAgentDefaultModel = "agentDefaultModel"
 	ServiceAgents            = "agents"
 	ServiceTypert            = "typert"
 	ServiceTypertGateway     = "typertGateway"
@@ -2050,6 +2055,71 @@ var batchThreeBuilders = map[string]pluginBuilder{
 		}
 	},
 
+	// The human-facing /feedback producer (official
+	// dsh-command-feedback): one authoritative log-only event plus the
+	// acknowledgement. The telemetry disclosure is "not configured" until a
+	// session-telemetry backend is composed (the official optional read).
+	"@deepseek-ai/dsh-command-feedback": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceCommands},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				runtime := ctx.Get(ServiceCommands).(*commands.CommandRuntime)
+				_, err := commandfeedback.Register(runtime, commandfeedback.Options{
+					Getenv: os.Getenv,
+				})
+				return err
+			},
+		}
+	},
+
+	// The default model selection owner (official dsh-agent-default-model):
+	// settings-backed live user layer over the composition entry; usable
+	// without a settings provider.
+	"@deepseek-ai/dsh-agent-default-model": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSettings},
+			Provide: []string{ServiceAgentDefaultModel},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					Provider string `json:"provider"`
+					Model    string `json:"model"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				store := ctx.Get(ServiceSettings)
+				if store == nil {
+					return fmt.Errorf("agent-default-model: the settings store is required")
+				}
+				service, _, err := agentdefaultmodel.RegisterSection(store.(*settings.Store), agentdefaultmodel.Settings{
+					Provider: cfg.Provider,
+					Model:    cfg.Model,
+				})
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceAgentDefaultModel, service)
+				return nil
+			},
+		}
+	},
+	// Event-only filesystem observation policy (official
+	// dsh-fs-observation-policy): the fs/write-intent and fs/edit-intent
+	// single-slot decisions derive from recorded fs/observed state; without
+	// it tools keep the bare provider's unconditional mutation behavior.
+	"@deepseek-ai/dsh-fs-observation-policy": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				detach := fsobservationpolicy.Apply(ctx)
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(detach), nil
+				})
+			},
+		}
+	},
 	// Private content-addressed DSH_HOME attachment storage (official
 	// dsh-attachment-local): the durable image store read_image commits
 	// into, rooted at <home>/attachments/v1. Limits decode from config;

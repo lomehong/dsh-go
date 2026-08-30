@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"dshgo/commands"
 	"dshgo/cordis"
 	"dshgo/cordis/loader"
 	"dshgo/fs"
@@ -95,6 +96,9 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 			Config: map[string]any{"provider": "fork", "toolName": "subagent_fork"}},
 		{ID: "tool-subagent-report", Name: "@deepseek-ai/dsh-tool-subagent-report",
 			Config: map[string]any{"reportDelivery": "next-step"}},
+		{ID: "fs-observation-policy", Name: "@deepseek-ai/dsh-fs-observation-policy"},
+		{ID: "agent-default-model", Name: "@deepseek-ai/dsh-agent-default-model",
+			Config: map[string]any{"provider": "deepseek", "model": "deepseek-chat"}},
 		{ID: "storage", Name: "@deepseek-ai/dsh-storage"},
 		{ID: "storage-json", Name: "@deepseek-ai/dsh-storage-json",
 			Config: map[string]any{"root": filepath.Join(home, "storages")}},
@@ -112,6 +116,7 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		ServiceSessions, ServiceProjections, ServiceAgents, ServiceLlm, ServiceSessionPersist,
 		ServiceUserQuestions, ServiceUserApproval, ServicePermissionPresets,
 		ServiceSystemPrompt, ServiceAgentLoop, ServiceSubagentRuntime, ServiceProjectionCache,
+		ServiceAgentDefaultModel,
 	} {
 		if ctx.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
@@ -279,6 +284,8 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		loader.Entry{ID: "fs-sandbox", Name: "@deepseek-ai/dsh-fs-sandbox"},
 		loader.Entry{ID: "editor", Name: "@deepseek-ai/dsh-tool-str-replace-editor"},
 		loader.Entry{ID: "shell-env", Name: "@deepseek-ai/dsh-shell-env"},
+		loader.Entry{ID: "fs-observation-policy", Name: "@deepseek-ai/dsh-fs-observation-policy"},
+		loader.Entry{ID: "command-feedback", Name: "@deepseek-ai/dsh-command-feedback"},
 		loader.Entry{ID: "attachment-local", Name: "@deepseek-ai/dsh-attachment-local"},
 		loader.Entry{ID: "tool-fs", Name: "@deepseek-ai/dsh-tool-fs"},
 		loader.Entry{ID: "tool-fs-search", Name: "@deepseek-ai/dsh-tool-fs-search"},
@@ -312,6 +319,9 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 	toolsRuntime := root.Get(ServiceTools).(*tools.ToolRuntime)
 	if _, ok := toolsRuntime.Get("read_image", nil); !ok {
 		t.Fatal("read_image not registered with the store mounted")
+	}
+	if _, ok := root.Get(ServiceCommands).(*commands.CommandRuntime).Find(nil, "feedback"); !ok {
+		t.Fatal("/feedback command not registered")
 	}
 	store, _ := root.Get(ServiceAttachments).(interface{ Root() string })
 	if !strings.HasSuffix(filepath.ToSlash(store.Root()), "attachments/v1") {
@@ -592,6 +602,9 @@ func TestCatalogStorageHubDomainAndSpillRoundTrip(t *testing.T) {
 	root := cordis.NewRoot(cordis.Discard{})
 	app, err := Assemble(root, []loader.Entry{
 		{ID: "tools", Name: "@deepseek-ai/dsh-tools"},
+		{ID: "fs-observation-policy", Name: "@deepseek-ai/dsh-fs-observation-policy"},
+		{ID: "agent-default-model", Name: "@deepseek-ai/dsh-agent-default-model",
+			Config: map[string]any{"provider": "deepseek", "model": "deepseek-chat"}},
 		{ID: "storage", Name: "@deepseek-ai/dsh-storage"},
 		{ID: "storage-json", Name: "@deepseek-ai/dsh-storage-json",
 			Config: map[string]any{"root": filepath.Join(home, "storages")}},
