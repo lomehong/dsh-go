@@ -823,3 +823,12 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 权威待办 16 行按族落 README（title 2 / web 3 / sandbox 3 / goal 5 / 存储+遥测 2 / llm-pi-ai 1）。
 - 门禁：gofmt clean、vet clean、全量测试维持 **PASS=1182 FAIL=0**（本轮无代码变更，-v 复跑确认）。
 - 账实对齐：簿记修正为 **wired 64/86**；处置累计 6 行；待办 16 行。
+
+## r40 — session-title 服务基座（title 族首页）
+
+- `sessiontitle` 服务半体（官方 index.ts 31.3KB 的服务面）：provider 单槽注册（first-prompt/all-prompts 校验、closer 幂等、替换置 closing）、`Rename`（normalize 后空拒绝 ErrInvalid、store.Get 活性校验、钉扎 supersede in-flight）、`Refresh`（无 provider 落 fallback；有 provider 重试）、自动调度（Store.OnEvent 消费 user/message→eligible 检查+钉扎检查+pending 起草；request/header→路由触发 startPending；first-prompt 跳过 fork 子会话（Header().ParentSession）与第二消息）、fallback 物化（wg 协程离提交路径，防 store feed 重入）、revision supersede + per-session cancel 全程防竞态、Dispose 幂等（cancel→排空 wg→释放 OnEvent/OnDisposed 槽）。确定性半体不重写——sessionquery 的 normalize/fallback/collect/fold 即官方 normalize.ts+fold 面的既有移植。
+- 偏差如实记录：OnEvent 单槽由服务独占；官方 llm/stream 双触发路收敛为 request/header 单触发；provider 结果校验收敛为 normalize+非空（不逐 seq 复核）。
+- catalog：`@deepseek-ai/dsh-session-title` 行（注入 sessions、提供 sessionTitle、官方 profile 默认 5/40/80 可覆写、dispose 走 cordis.Disposer）；core+policy 两组装测列挂行 + sessionTitle 在场断言。
+- 测试 +6：config 校验四形态、首条消息 fallback（词/字节上限、来源与 seq）、rename 钉扎+空拒绝+非活会话、provider 全量调度+路由 provenance+closer 幂等、first-prompt 跳过子会话与第二消息、provider 出错回落 fallback+告警+dispose 幂等。
+- 门禁：gofmt clean、vet clean、全量测试 **PASS=1189 FAIL=0**（+6）。
+- 账实对齐：64→**65/86**，待办 16→15 行（title 族余 session-title-first-prompt-llm）。

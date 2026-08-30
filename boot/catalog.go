@@ -51,6 +51,7 @@ import (
 	"dshgo/session/projection"
 	"dshgo/session/projectioncache"
 	"dshgo/sessionlog"
+	"dshgo/sessiontitle"
 	"dshgo/settings"
 	"dshgo/settings/file"
 	"dshgo/shell"
@@ -85,12 +86,15 @@ import (
 
 // Service names plugins publish and consume through ctx inject lists.
 const (
-	ServiceTools             = "tools"
-	ServiceCommands          = "commands"
-	ServiceSettings          = "settings"
-	ServiceWebServer         = "webServer"
-	ServiceCredential        = "credentials"
-	ServiceSessions          = "sessions"
+	ServiceTools      = "tools"
+	ServiceCommands   = "commands"
+	ServiceSettings   = "settings"
+	ServiceWebServer  = "webServer"
+	ServiceCredential = "credentials"
+	ServiceSessions   = "sessions"
+	// ServiceSessionTitle is the live session title service (log-backed
+	// fold surface lives in sessionquery).
+	ServiceSessionTitle      = "sessionTitle"
 	ServiceProjections       = "projections"
 	ServiceProjectionCache   = "sessionProjectionCache"
 	ServiceAttachments       = "attachments"
@@ -702,6 +706,45 @@ var builders = map[string]pluginBuilder{
 						}
 					}), nil
 				})
+			},
+		}
+	},
+	// Log-backed session titles: provider registration, deterministic
+	// fallback, automatic scheduling over the store's post-commit feed, and
+	// explicit renames. The service owns the store's single-slot event sink
+	// for its lifetime (single-tap architecture note in sessiontitle). The
+	// official base profile's word/byte caps are the catalog defaults;
+	// explicit config overrides them.
+	"@deepseek-ai/dsh-session-title": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSessions},
+			Provide: []string{ServiceSessionTitle},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := sessiontitle.Config{FallbackMaxWords: 5, FallbackMaxBytes: 40, MaxTitleBytes: 80}
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["fallbackMaxWords"].(float64); ok && raw > 0 {
+						cfg.FallbackMaxWords = int(raw)
+					}
+					if raw, ok := overridden["fallbackMaxBytes"].(float64); ok && raw > 0 {
+						cfg.FallbackMaxBytes = int(raw)
+					}
+					if raw, ok := overridden["maxTitleBytes"].(float64); ok && raw > 0 {
+						cfg.MaxTitleBytes = int(raw)
+					}
+				}
+				store, ok := ctx.Get(ServiceSessions).(*session.Store)
+				if !ok || store == nil {
+					return errors.New("session-title: the sessions store is required")
+				}
+				service, err := sessiontitle.NewService(store, cfg, deps.Logger)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceSessionTitle, service)
+				ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(service.Dispose), nil
+				})
+				return nil
 			},
 		}
 	},

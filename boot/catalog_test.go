@@ -108,6 +108,7 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 			Config: map[string]any{"backend": "json"}},
 		{ID: "storage-sqlite", Name: "@deepseek-ai/dsh-storage-sqlite",
 			Config: map[string]any{"path": filepath.Join(home, "storages", "test-sqlite.db")}},
+		{ID: "session-title", Name: "@deepseek-ai/dsh-session-title"},
 		{ID: "session-projection-cache", Name: "@deepseek-ai/dsh-session-projection-cache",
 			Config: map[string]any{"writeEveryEvents": float64(200), "writeIntervalMs": float64(5000)}},
 	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
@@ -120,11 +121,14 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		ServiceSessions, ServiceProjections, ServiceAgents, ServiceLlm, ServiceSessionPersist,
 		ServiceUserQuestions, ServiceUserApproval, ServicePermissionPresets,
 		ServiceSystemPrompt, ServiceAgentLoop, ServiceSubagentRuntime, ServiceProjectionCache,
-		ServiceAgentDefaultModel,
+		ServiceAgentDefaultModel, ServiceSessionTitle,
 	} {
 		if ctx.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
 		}
+	}
+	if ctx.Get(ServiceSessionTitle) == nil {
+		t.Fatal("session title service missing after assembly")
 	}
 	// Both delegation rows mount with their configured identities and
 	// provider-routed wording.
@@ -618,6 +622,7 @@ func TestCatalogStorageHubDomainAndSpillRoundTrip(t *testing.T) {
 			Config: map[string]any{"backend": "json"}},
 		{ID: "storage-sqlite", Name: "@deepseek-ai/dsh-storage-sqlite",
 			Config: map[string]any{"path": filepath.Join(home, "storages", "test-sqlite.db")}},
+		{ID: "session-title", Name: "@deepseek-ai/dsh-session-title"},
 		{ID: "spill-local", Name: "@deepseek-ai/dsh-spill-local",
 			Config: map[string]any{"root": filepath.Join(home, "spill"), "cleanupPeriodDays": float64(0)}},
 		{ID: "spill-policy", Name: "@deepseek-ai/dsh-spill-policy",
