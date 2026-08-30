@@ -40,6 +40,7 @@ import (
 	"dshgo/jobs"
 	"dshgo/llm"
 	"dshgo/llm/deepseek"
+	"dshgo/llmretry"
 	"dshgo/planmode"
 	"dshgo/sandbox"
 	"dshgo/sandboxpolicy"
@@ -2055,6 +2056,32 @@ var batchThreeBuilders = map[string]pluginBuilder{
 		}
 	},
 
+	// The provider-routed request-retry policy (official dsh-llm-retry):
+	// normal or unbounded recovery on the agent/request-error waterfall.
+	// This executor has no config; providers own retryPolicy.
+	"@deepseek-ai/dsh-llm-retry": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceAgents},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var decoded map[string]any
+				if config != nil {
+					if err := decodeConfigJSON(config, &decoded); err != nil {
+						return err
+					}
+				}
+				if err := llmretry.ValidateConfig(decoded); err != nil {
+					return err
+				}
+				_, err := llmretry.Register(
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					deps.Logger,
+					llmretry.Internals{},
+				)
+				return err
+			},
+		}
+	},
 	// The separately loadable discovery tool (official
 	// tool-subagent-control/list-agents): list_agents alone, without the
 	// send_message/interrupt_agent delivery surface. Deviation recorded: the

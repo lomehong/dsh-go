@@ -14,6 +14,7 @@ import (
 	"dshgo/hookprotocol"
 	"dshgo/interaction/permissionpresets"
 	"dshgo/interaction/userapproval"
+	"dshgo/llmretry"
 	"dshgo/planmode"
 	"dshgo/preset"
 	"dshgo/schedule"
@@ -29,6 +30,7 @@ func RegisterVocabulary() {
 	agent.RegisterEvents()
 	commandfeedback.RegisterEvents()
 	commands.RegisterEvents()
+	llmretry.RegisterEvents()
 	compaction.RegisterEvents()
 	hookprotocol.RegisterEvents()
 	sessionquery.RegisterEvents()

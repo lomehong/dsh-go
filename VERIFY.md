@@ -790,3 +790,11 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 处置（非移植）：`cordis-plugin-hmr`——官方 base yml `disabled: true`，Go 组装无动态重载消费者，同态不携；`cordis-plugin-timer`（5.1KB）——唯一消费者 patchReload live 监视官方即走 launcher watch-only 兜底且注明该行非必需，Go 组装无此消费者。两者自缺失清单转入处置记录，不硬凑。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1171 FAIL=0**（+1）。
 - 账实对齐：66→**67/86**，缺失清单 22→19 项。
+
+## r36 — llm-retry 请求恢复策略
+
+- `llmretry`（19KB 官方）：agent/request-error 瀑布上的 provider 路由重试执行器。normal：不可重试码/耗尽/超帽 provider delay 即委托下游；指数退避+对称抖动（指数封顶 1024、delay 封顶 maxDelayMs）；always：无界重试、下游 retry 决策直接透传、超帽 provider delay 忽略走本地退避。`llm/retry` durable-before-wait（先落日志再可取消等待），`llm/retry-started` 等待实际开始；重试链以 turn/step/provider/policyKey（排序后 JSON）在会话事件倒序找回 retryId；fuse 信号=请求 signal∨插件 lifetime；disposer 先标记 disposed→cancel→排水 WaitGroup→摘监听（旧派发回调被 disposed 闸拦截，官方 stale-callback 语义同形）。+5 测：durable-before-wait 与链 id 一致、耗尽委托、无策略/不可重试直通、always 延迟语义（jitter 采样计数作证）、dispose 取消在途等待且无 started 记录。
+- catalog：`@deepseek-ai/dsh-llm-retry` 行（注入 agents、executor 配置 fail-closed 校验）；vocabulary 注册 llm/retry+llm/retry-started；core 组装测列挂行。
+- 偏差记录：TS 恢复链 next() 可抛错，settleDownstream 包裹后对 always 记警告继续；Go 瀑布 next 不可抛错，always 透传直接返回（无警告面）。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1176 FAIL=0**（+5）。
+- 账实对齐：67→**68/86**，缺失清单 19→18 项。
