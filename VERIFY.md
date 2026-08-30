@@ -841,3 +841,25 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 测试 +6（sessiontitlellm）：config 解析、first-prompt 选择器、全链路生成（断言路由/provenance/Purpose/System/帧化文本）、字节预算先拒+回落 fallback、max-tokens finish 拒+回落、无路由 fail-loud 不派发；既有 +6 竞态加固。
 - 门禁：gofmt clean、vet clean、全量测试 **PASS=1195 FAIL=0**（+6）。
 - 账实对齐：65→**66/86**，待办 15→14 行；**title 族清零**。
+
+## r45 — sessionquerysqlite 并入（本地线重放）：FTS5 派生读模型 store 半体 + 竞态修复
+
+- `sessionquerysqlite` 包：SQLite FTS5 派生读模型（modernc.org/sqlite 纯 Go 驱动已在 go.mod），懒打开（官方 base 挂载 path ":memory:"、openAt "never"——首次消费方使用才开库，组装期零 I/O）；catalog `dsh-session-query-sqlite` 行（Provide sessionQuerySqlite、Dispose 链关闭）+ 组装测。同轮 toolsjobs 完成投递测试竞态修复：recorderDriver 加 mu 锁，Followups/Injects 锁内快照访问器替代裸字段读（-count=2 压测过）。
+- 门禁：全仓 gofmt clean、vet clean、go test -v 全绿（数字见 r48 终值行）。
+
+## r46 — toolweb 并入：模型面 web_search/web_fetch 工具
+
+- `toolweb` 包：`web_search`（queries 1-4 非空去重、单查询直通/多查询并发合并、URL 去重轮转 rank、答案折叠、来源 `- [label](url) — snippet (date)` 渲染、截断指路）与 `web_fetch`（URL 必填、三级截断挤压保尾、逐字官方 guidance、body oneOf html|text）+ 免依赖词法 HTML→markdown（表格/删除线/嵌套为记录退化）；prompt section order 2000/2100；canonical value 全 []any/map[string]any（lossless JSON 纪律）。
+- 适配：缝 API 采远程 `web` 包（WebSearchRequest/WebFetchResult 前缀型、Register*Provider 返 cordis.Disposer、错误=*llm.Error 经 web.NewWebError、NewRuntime(ctx,Config)）；shadowing 参数 web→seam 改名；WebFetchBodyKind 具名类型经 string() 转换保 lossless JSON。
+- catalog `dsh-tool-web` 行（Inject tools/web/systemPrompt；boolAt/intAt；search|fetch 布尔开断 base 默认双开）；组装测：默认双工具在场、search:false 单面禁用（延迟注入语义——三服务齐备才生效）。
+
+## r47 — websearchdeepseek 并入：DeepSeek 原生检索 provider（web 族全清）
+
+- `websearchdeepseek` 包：Anthropic 兼容 Messages + `web_search_20250305` 服务端工具（provider id `deepseek-official`，reuses DEEPSEEK_API_KEY、baseURL 链 config→DEEPSEEK_SEARCH_BASE_URL→默认 https://api.deepseek.com/anthropic/v1）；凭证链三段（服务 credential 接缝可选→env 回落、per-search thunk 解析不缓存）；redirect 3xx 拒跟（WEB_PROVIDER_ERROR）、非 2xx httpError best-effort 三形、32MB LimitReader；wire Content []json.RawMessage+blockType 探针（无损纪律）；web_search_result 项无内联 snippet——citation 映射 url→cited_text 首现胜；错误码三值（WEB_PROVIDER_ERROR/ABORTED/WEB_PROVIDER_CREDENTIAL_MISSING）。
+- catalog `dsh-web-search-deepseek` 行（Inject web；credentials 可选 ctx.Get）；组装测：stub /messages 端到端（wire 形状+来源映射+dispose 后 WEB_PROVIDER_UNAVAILABLE fail loud）。
+
+## r48 — 整理合并 + ③ 账实对齐收尾定谳
+
+- **双线合并事实**：远程与本地为同一目标的并行推进。远程 r42-44（preset.Mounts/webhook/sessiontitle、`web` 缝、`webfetchhttp`+x/text）与本地 r42-46（sessionquerysqlite、webs/websfetchhttp、toolweb、websearchdeepseek、账本）重叠于 web 族。整理决策：以远程为基底重放本地独有件；本地 webs/websfetchhttp 与远程 web/webfetchhttp 功能重复且远程版更全（x/text charset 解码），**弃置本地重复实现采远程超集**；toolweb/websearchdeepseek 适配远程缝 API 重放；sessionquerysqlite+竞态修复为远程所无，原样并入。本地并行轮的 round 编号（r42-r46）弃用，顺延远程序号为 r45-r48。
+- **③ 账实对齐定谳（程序化审计复核：wired 70/86、missing 16 不变）**：llm-pi-ai 深盘转处置（外部 pi-ai SDK 多 provider 适配器，Go 部署 llm 面由 llm-deepseek 承载，部署面扩展非核心缺口）；处置 6→7 行、受阻/后续 9 行（sandbox 族 3 行阻于 OS 原生执法基底——landlock addon/Seatbelt/Windows ACL 限制令牌，Go 离线无 cgo 无法验证；goal 族 5 行纯 Go 可移植 epic 按依赖序独立轮；session-telemetry-otel 1 行阻于 OTel SDK 离线依赖）；权威清单与依赖序地图改写为收尾态。
+- **门禁终值**：全仓 gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -v -p 4` **PASS=1280 FAIL=0**（全仓 -count=1 -v 实测）。
