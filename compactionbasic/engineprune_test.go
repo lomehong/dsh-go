@@ -17,6 +17,15 @@ type staticModelInfo struct {
 	window int64
 }
 
+// testPruner adapts the concrete pruner's result-bearing method onto the
+// engine's error-only face.
+type testPruner struct{ pruner *toolresultpruner.Pruner }
+
+func (p testPruner) PruneSession(sess *session.Session) error {
+	_, err := p.pruner.PruneSession(sess)
+	return err
+}
+
 func (m staticModelInfo) ResolveModelInfo(provider string, model string) (llm.LlmResolvedModelInfo, error) {
 	return llm.LlmResolvedModelInfo{
 		LlmModelInfo: llm.LlmModelInfo{Provider: provider, ID: model, Name: model},
@@ -34,7 +43,7 @@ func TestCompactIfNeededPrunesBeforePressureVerdict(t *testing.T) {
 	engine, err := NewEngine(BasicConfig{}, EngineConfig{
 		Meter:     tokenmeter.NewMeter(nil),
 		ModelInfo: staticModelInfo{window: 500},
-		Pruner:    pruner,
+		Pruner:    testPruner{pruner},
 	})
 	if err != nil {
 		t.Fatalf("engine: %v", err)

@@ -70,22 +70,28 @@ type Domain struct {
 type Global struct{ domain *Domain }
 
 // Get reads the current value, synchronously from the authoritative
-// in-memory state. Before the first Set this is the spec's initial.
+// in-memory state. Before the first Set this is the spec's initial. The
+// returned bytes are a defensive copy: reads never race a concurrent Set
+// and callers cannot mutate the stored snapshot in place.
 func (g Global) Get() json.RawMessage {
 	g.domain.assertReadable()
-	if !g.domain.hasGlobal {
+	g.domain.mu.Lock()
+	defer g.domain.mu.Unlock()
+	if !g.domain.hasGlobal || g.domain.global == nil {
 		return nil
 	}
-	return g.domain.global
+	return append(json.RawMessage(nil), g.domain.global...)
 }
 
 // InitialOrValue returns the initial value when never written.
 func (g Global) InitialOrValue() json.RawMessage {
 	g.domain.assertReadable()
+	g.domain.mu.Lock()
+	defer g.domain.mu.Unlock()
 	if g.domain.global == nil {
-		return g.domain.spec.InitialGlobalJSON
+		return append(json.RawMessage(nil), g.domain.spec.InitialGlobalJSON...)
 	}
-	return g.domain.global
+	return append(json.RawMessage(nil), g.domain.global...)
 }
 
 // Set replaces the value durably. The first Set is what materializes the

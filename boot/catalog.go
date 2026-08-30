@@ -311,8 +311,6 @@ var builders = map[string]pluginBuilder{
 		}
 	},
 
-	// The session store: in-memory session aggregation; persistence stays a
-	// plugin concern (the jsonl backend lands as its own entry).
 	// The Typert runtime registry: generated-schema and package reflection,
 	// local/Remote invocation definitions, Host object lookups, and
 	// Host/Client Context adapters. Consumers register lookups in their own
@@ -783,6 +781,8 @@ var builders = map[string]pluginBuilder{
 			},
 		}
 	},
+	// The session store: in-memory session aggregation; persistence stays a
+	// plugin concern (the jsonl backend lands as its own entry).
 	"@deepseek-ai/dsh-session": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
 			Provide: []string{ServiceSessions},
@@ -824,7 +824,10 @@ var builders = map[string]pluginBuilder{
 			Provide: []string{ServiceProjections},
 			Apply: func(ctx *cordis.Context, config any) error {
 				registry := projection.NewRegistry()
-				registry.Attach(ctx)
+				detach := registry.Attach(ctx)
+				if err := ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(detach), nil }); err != nil {
+					return err
+				}
 				ctx.Provide(ServiceProjections, registry)
 				return nil
 			},
@@ -932,8 +935,13 @@ var builders = map[string]pluginBuilder{
 				if candidate := ctx.Get(ServiceDeepseekExt); candidate != nil {
 					pluginDeps.Extensions = candidate.(*deepseek.ExtensionRegistry)
 				}
-				_, err := deepseek.Apply(pluginDeps, cfg)
-				return err
+				plugin, err := deepseek.Apply(pluginDeps, cfg)
+				if err != nil {
+					return err
+				}
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(plugin.Dispose), nil
+				})
 			},
 		}
 	},
@@ -1300,17 +1308,11 @@ func inProcessProviderSpec(defaultName string) pluginBuilder {
 }
 
 // toolsCallerOf resolves the calling agent's session id for one execution:
-// agent identity is the scope key, resolved against the live registry (the
-// established resolveByScope pattern).
+// agent identity is the scope key, resolved against the live registry.
 func toolsCallerOf(agents *agent.AgentRegistry) toolsjobs.CallerOf {
 	return func(exec *tools.ToolExecution) string {
-		if exec.Agent == nil {
-			return ""
-		}
-		for _, candidate := range agents.List() {
-			if candidate.Scope == exec.Agent {
-				return string(candidate.Session.ID())
-			}
+		if caller := agents.ByScope(exec.Agent); caller != nil {
+			return string(caller.Session.ID())
 		}
 		return ""
 	}
@@ -1387,19 +1389,9 @@ type flusherFunc func(sessionID string) error
 func (f flusherFunc) FlushSession(sessionID string) error { return f(sessionID) }
 
 // agentResolverOf adapts the live agent registry onto the by-scope
-// resolver seam (the established resolveByScope pattern).
+// resolver seam.
 func agentResolverOf(agents *agent.AgentRegistry) func(tools.ScopeKey) *agent.Agent {
-	return func(sc tools.ScopeKey) *agent.Agent {
-		if sc == nil {
-			return nil
-		}
-		for _, candidate := range agents.List() {
-			if candidate.Scope == sc {
-				return candidate
-			}
-		}
-		return nil
-	}
+	return agents.ByScope
 }
 
 // buildShellTool builds the model-facing shell tool plugin spec (shared by
@@ -1430,8 +1422,10 @@ func buildShellTool() pluginBuilder {
 				}
 				cfg := shelltool.DefaultConfig()
 				cfg.BackgroundEnabled = decodeConfigBool(config, "enableRunInBackground", true)
-				_, err := shelltool.Register(toolDeps, cfg)
-				return err
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					undo, err := shelltool.Register(toolDeps, cfg)
+					return cordis.Disposer(undo), err
+				})
 			},
 		}
 	}
@@ -1686,7 +1680,11 @@ var batchThreeBuilders = map[string]pluginBuilder{
 					tokenmeter.ContextPressureUnit(),
 					tokenmeter.ContextBreakdownUnit(),
 				} {
-					if _, err := registry.Register(unit); err != nil {
+					undo, err := registry.Register(unit)
+					if err != nil {
+						return err
+					}
+					if err := ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(undo), nil }); err != nil {
 						return err
 					}
 				}
@@ -1721,7 +1719,7 @@ var batchThreeBuilders = map[string]pluginBuilder{
 					Flusher:   ctx.Get(ServiceSessionPersist).(*persistence.Coordinator),
 				}
 				if pruner := ctx.Get(ServiceToolResultPruner); pruner != nil {
-					engineConfig.Pruner = pruner.(*toolresultpruner.Pruner)
+					engineConfig.Pruner = prunerAdapter{pruner.(*toolresultpruner.Pruner)}
 				}
 				engine, err := compactionbasic.NewEngine(cfg, engineConfig)
 				if err != nil {
@@ -2283,11 +2281,23 @@ var batchThreeBuilders = map[string]pluginBuilder{
 						return err
 					}
 				}
-				_, err := toolfs.Register(ctx.Get(ServiceTools).(*tools.ToolRuntime), depsTools, caps)
-				return err
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					undo, err := toolfs.Register(ctx.Get(ServiceTools).(*tools.ToolRuntime), depsTools, caps)
+					return cordis.Disposer(undo), err
+				})
 			},
 		}
 	},
+}
+
+// prunerAdapter reduces the concrete tool-result pruner's result-bearing
+// method onto the compaction engine's error-only face: the engine never
+// consumes the prune result itself.
+type prunerAdapter struct{ pruner *toolresultpruner.Pruner }
+
+func (a prunerAdapter) PruneSession(sess *session.Session) error {
+	_, err := a.pruner.PruneSession(sess)
+	return err
 }
 
 // approvalEscalationAdapter adapts the composed approval service to the

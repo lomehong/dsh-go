@@ -764,15 +764,25 @@ func (m *SubagentContinuationManager) sendWaking(parent *agent.Agent, messageID 
 }
 
 // sendReport sends one report, translating only the parent's own rejection.
-func (m *SubagentContinuationManager) sendReport(parent *agent.Agent, message llm.Message, delivery SubagentReportDelivery) error {
+// A driver-less parent or a delivery panic cannot lose the report silently:
+// the failure is logged and surfaced to the caller.
+func (m *SubagentContinuationManager) sendReport(parent *agent.Agent, message llm.Message, delivery SubagentReportDelivery) (err error) {
 	defer func() {
-		if recover() != nil {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("report delivery panicked: %v", rec)
+		}
+		if err != nil && m.deps.Logger != nil {
+			m.deps.Logger.Warn(fmt.Sprintf("subagent %q report was not delivered to its parent: %v", parent.ID, err))
 		}
 	}()
+	driver := parent.Driver()
+	if driver == nil {
+		return fmt.Errorf("parent %q has no live driver", parent.ID)
+	}
 	if delivery == DeliveryNextStep {
-		parent.Driver().Steer(message)
+		driver.Steer(message)
 	} else {
-		parent.Driver().Inject(message)
+		driver.Inject(message)
 	}
 	return nil
 }

@@ -119,15 +119,14 @@ func (r *Registry) Register(contribution Contribution) (Disposer, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := r.local.validate(contribution.Invocations); err != nil {
+	owner := &ownerToken{}
+	if err := r.local.install(owner, contribution.Invocations); err != nil {
 		return nil, err
 	}
-	owner := &ownerToken{}
 	r.packages.set(packageKey, packageRecord)
 	for _, record := range schemaRecords {
 		r.schemas.set(record.Key, record)
 	}
-	r.local.commit(owner, contribution.Invocations)
 	withdraw := Disposer(func() {
 		// Owner-guarded: a later registration of the same identity must
 		// never be withdrawn by this disposer (double-withdraw is legal).

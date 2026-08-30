@@ -5,6 +5,7 @@
 package toolsjobs
 
 import (
+	"fmt"
 	"sync"
 
 	"dshgo/agent"
@@ -123,7 +124,9 @@ func (d *CompletionDeliverer) deliver(snapshot jobs.Snapshot, owner jobs.Owner, 
 		driver.Inject(message)
 		return
 	}
-	_ = live.Inbox.Append(agent.InboxNextStep, message)
+	if err := live.Inbox.Append(agent.InboxNextStep, message); err != nil {
+		live.Ctx.Logger().Warn(fmt.Sprintf("tool-jobs: completion notice for agent %q was not delivered: %v", live.ID, err))
+	}
 }
 
 // SpentWakes reports the wake budget one agent has spent — test seam.

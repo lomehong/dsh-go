@@ -5,6 +5,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"dshgo/llm"
 	"dshgo/session"
@@ -58,12 +59,20 @@ type InboxNotifications interface {
 }
 
 // Inbox is a replay-once projection that incrementally consumes later inbox
-// splices.
+// splices. The mutex serializes every read-validate-commit-apply cycle: Go
+// hook handlers deliver pending input from other goroutines while the driver
+// claims it, so each splice commits atomically against the lists current at
+// its slot. Live notifications dispatch after the unlock.
 type Inbox struct {
+	mu            sync.Mutex
 	session       *session.Session
 	notifications InboxNotifications
 	nextTurn      []llm.Message
 	nextStep      []llm.Message
+	// pendingNotifications queues the live dispatches committed while the
+	// lock is held; the caller drains strictly after releasing it. Guarded
+	// by mu.
+	pendingNotifications []func()
 }
 
 // NewInbox builds the projection and replays the session's owned log (past
@@ -91,25 +100,41 @@ func NewInbox(s *session.Session, notifications InboxNotifications) (*Inbox, err
 	return inbox, nil
 }
 
-// NextTurn returns the prompts awaiting individual turns. The returned slice
-// aliases the live list; callers must not mutate it.
-func (i *Inbox) NextTurn() []llm.Message { return i.nextTurn }
+// NextTurn returns a snapshot of the prompts awaiting individual turns.
+func (i *Inbox) NextTurn() []llm.Message {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return append([]llm.Message(nil), i.nextTurn...)
+}
 
-// NextStep returns the input awaiting the next step boundary.
-func (i *Inbox) NextStep() []llm.Message { return i.nextStep }
+// NextStep returns a snapshot of the input awaiting the next step boundary.
+func (i *Inbox) NextStep() []llm.Message {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return append([]llm.Message(nil), i.nextStep...)
+}
 
 // HasPending reports whether either pending-message list contains work.
 func (i *Inbox) HasPending() bool {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	return len(i.nextTurn) > 0 || len(i.nextStep) > 0
 }
 
 // Clear durably cancels all pending input, clearing next-step before
 // next-turn.
 func (i *Inbox) Clear() error {
-	if _, err := i.Splice(InboxNextStep, 0, int64(len(i.nextStep)), nil); err != nil {
+	i.mu.Lock()
+	if _, err := i.mutateLocked(InboxNextStep, 0, int64(len(i.nextStep)), nil, true); err != nil {
+		i.mu.Unlock()
 		return err
 	}
-	_, err := i.Splice(InboxNextTurn, 0, int64(len(i.nextTurn)), nil)
+	_, err := i.mutateLocked(InboxNextTurn, 0, int64(len(i.nextTurn)), nil, true)
+	pending := i.drainNotificationsLocked()
+	i.mu.Unlock()
+	for _, notify := range pending {
+		notify()
+	}
 	return err
 }
 
@@ -118,16 +143,20 @@ func (i *Inbox) Clear() error {
 // Target InboxNextTurn also consumes one queued turn. Internal: the agent
 // loop's step-boundary operation, not a plugin extension point.
 func (i *Inbox) Claim(target InboxTarget, turn int64) ([]llm.Message, error) {
-	claimed, err := i.mutate(InboxNextStep, 0, int64(len(i.nextStep)), nil, false)
+	i.mu.Lock()
+	claimed, err := i.mutateLocked(InboxNextStep, 0, int64(len(i.nextStep)), nil, false)
+	if err == nil && target == InboxNextTurn {
+		var queued []llm.Message
+		queued, err = i.mutateLocked(InboxNextTurn, 0, 1, nil, false)
+		claimed = append(claimed, queued...)
+	}
+	pending := i.drainNotificationsLocked()
+	i.mu.Unlock()
+	for _, notify := range pending {
+		notify()
+	}
 	if err != nil {
 		return nil, err
-	}
-	if target == InboxNextTurn {
-		queued, err := i.mutate(InboxNextTurn, 0, 1, nil, false)
-		if err != nil {
-			return nil, err
-		}
-		claimed = append(claimed, queued...)
 	}
 	for _, message := range claimed {
 		i.notifications.Claimed(message, turn)
@@ -138,7 +167,13 @@ func (i *Inbox) Claim(target InboxTarget, turn int64) ([]llm.Message, error) {
 // Append appends one message to a pending list and durably records the
 // insertion.
 func (i *Inbox) Append(target InboxTarget, message llm.Message) error {
-	_, err := i.Splice(target, int64(len(i.list(target))), 0, []llm.Message{message})
+	i.mu.Lock()
+	_, err := i.mutateLocked(target, int64(len(i.list(target))), 0, []llm.Message{message}, true)
+	pending := i.drainNotificationsLocked()
+	i.mu.Unlock()
+	for _, notify := range pending {
+		notify()
+	}
 	return err
 }
 
@@ -184,7 +219,22 @@ func (i *Inbox) Remove(messageID llm.MessageID) (bool, error) {
 // and can reconstruct the removed messages from the normalized coordinates.
 // Returns the messages removed by the splice.
 func (i *Inbox) Splice(target InboxTarget, start int64, deleteCount int64, inserted []llm.Message) ([]llm.Message, error) {
-	return i.mutate(target, start, deleteCount, inserted, true)
+	i.mu.Lock()
+	removed, err := i.mutateLocked(target, start, deleteCount, inserted, true)
+	pending := i.drainNotificationsLocked()
+	i.mu.Unlock()
+	for _, notify := range pending {
+		notify()
+	}
+	return removed, err
+}
+
+// drainNotificationsLocked hands the queued live dispatches to the caller;
+// it dispatches them strictly after releasing the lock. Caller holds i.mu.
+func (i *Inbox) drainNotificationsLocked() []func() {
+	pending := i.pendingNotifications
+	i.pendingNotifications = nil
+	return pending
 }
 
 func (i *Inbox) list(target InboxTarget) []llm.Message {
@@ -203,8 +253,11 @@ func (i *Inbox) setList(target InboxTarget, list []llm.Message) {
 }
 
 // locate finds one pending identity across both owned lists, next-turn
-// first.
+// first. Coordinates are valid only at the instant of the call; callers
+// follow up with a serialized splice.
 func (i *Inbox) locate(messageID llm.MessageID) (InboxTarget, int, bool) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
 	for _, target := range []InboxTarget{InboxNextTurn, InboxNextStep} {
 		for index, message := range i.list(target) {
 			if message.ID == messageID {
@@ -215,8 +268,10 @@ func (i *Inbox) locate(messageID llm.MessageID) (InboxTarget, int, bool) {
 	return "", 0, false
 }
 
-// mutate commits one normalized mutation and publishes its live notifications.
-func (i *Inbox) mutate(target InboxTarget, start int64, deleteCount int64, inserted []llm.Message, discardRemoved bool) ([]llm.Message, error) {
+// mutateLocked commits one normalized mutation; live notifications dispatch
+// after the caller releases the lock, so a notification observer may freely
+// read or append the inbox. Caller holds i.mu.
+func (i *Inbox) mutateLocked(target InboxTarget, start int64, deleteCount int64, inserted []llm.Message, discardRemoved bool) ([]llm.Message, error) {
 	inbox := i.list(target)
 	actualStart := start
 	if actualStart < 0 {
@@ -266,14 +321,17 @@ func (i *Inbox) mutate(target InboxTarget, start int64, deleteCount int64, inser
 	updated = append(updated, stored.Inserted...)
 	updated = append(updated, inbox[actualStart+actualDeleteCount:]...)
 	i.setList(target, updated)
-	if discardRemoved {
-		for _, message := range removedMessages {
-			i.notifications.Discarded(message)
+	notify := func() {
+		if discardRemoved {
+			for _, message := range removedMessages {
+				i.notifications.Discarded(message)
+			}
+		}
+		for _, message := range stored.Inserted {
+			i.notifications.Inserted(message)
 		}
 	}
-	for _, message := range stored.Inserted {
-		i.notifications.Inserted(message)
-	}
+	i.pendingNotifications = append(i.pendingNotifications, notify)
 	return removedMessages, nil
 }
 

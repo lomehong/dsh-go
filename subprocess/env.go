@@ -28,7 +28,7 @@ func ScrubbedParentEnv() map[string]string {
 			continue
 		}
 		upper := strings.ToUpper(key)
-		if strings.HasPrefix(upper, DshEnvPrefix) || sensitiveEnvPattern.MatchString(key) {
+		if strings.HasPrefix(upper, DshEnvPrefix) || sensitiveEnvPattern.MatchString(upper) {
 			continue
 		}
 		env[key] = value

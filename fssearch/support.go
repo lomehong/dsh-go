@@ -1,7 +1,6 @@
 package fssearch
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,8 +9,6 @@ import (
 
 // errArgs is a plain tool-argument error (ordinary argument validation).
 func errArgs(message string) error { return errors.New(message) }
-
-func contextBackground() context.Context { return context.Background() }
 
 func processCwd() string {
 	cwd, err := os.Getwd()

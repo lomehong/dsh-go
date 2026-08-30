@@ -225,7 +225,10 @@ type LocalRegistry struct {
 	listenersClosed bool
 	// owners with live cleanup registration, keyed by owner id.
 	owners map[string]Owner
-	now    func() time.Time
+	// starting reserves an admission slot per owner while its Run executes
+	// outside the lock, so concurrent starts cannot exceed the quota.
+	starting map[string]int
+	now      func() time.Time
 }
 
 // Logger receives contained-listener diagnostics.
@@ -252,6 +255,7 @@ func NewLocalRegistry(config Config, logger Logger) (*LocalRegistry, error) {
 		counters:                  map[string]int{},
 		layers:                    map[scope.ScopeKey]*jobLayer{},
 		owners:                    map[string]Owner{},
+		starting:                  map[string]int{},
 		now:                       func() time.Time { return time.Now() },
 	}, nil
 }
@@ -291,21 +295,33 @@ func (r *LocalRegistry) Start(spec StartSpec) (string, error) {
 			active++
 		}
 	}
-	if active >= r.maxConcurrentJobsPerOwner {
+	ownerKey := ""
+	if spec.Owner != nil {
+		ownerKey = spec.Owner.OwnerID()
+	}
+	if active+r.starting[ownerKey] >= r.maxConcurrentJobsPerOwner {
 		r.mu.Unlock()
 		return "", fmt.Errorf(
 			"background job limit reached for this owner (limit: %d); use job_kill to stop an unneeded job, wait for it to finish, then retry",
 			r.maxConcurrentJobsPerOwner,
 		)
 	}
+	// Reserve the slot for the unlocked Run: a concurrent start observes
+	// the reservation instead of racing past the same admission count.
+	r.starting[ownerKey]++
 	r.mu.Unlock()
 
 	hooks, err := spec.Run()
 	if err != nil {
+		r.releaseStarting(ownerKey)
 		return "", err
 	}
 
 	r.mu.Lock()
+	r.starting[ownerKey]--
+	if r.starting[ownerKey] <= 0 {
+		delete(r.starting, ownerKey)
+	}
 	count := r.counters[spec.Kind] + 1
 	r.counters[spec.Kind] = count
 	id := fmt.Sprintf("%s-%d", spec.Kind, count)
@@ -329,6 +345,16 @@ func (r *LocalRegistry) Start(spec StartSpec) (string, error) {
 	// set has genuinely changed.
 	r.notifyChanged(job.owner)
 	return id, nil
+}
+
+// releaseStarting drops one admission reservation after a failed Run.
+func (r *LocalRegistry) releaseStarting(ownerKey string) {
+	r.mu.Lock()
+	r.starting[ownerKey]--
+	if r.starting[ownerKey] <= 0 {
+		delete(r.starting, ownerKey)
+	}
+	r.mu.Unlock()
 }
 
 // sameOwner compares exact owner identity by session id.

@@ -276,12 +276,7 @@ func Register(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, logger co
 
 	// resolveAgent maps a tool execution's scope back to the live agent.
 	resolveAgent := func(scope tools.ScopeKey) *agent.Agent {
-		for _, candidate := range agents.List() {
-			if candidate.Scope == scope {
-				return candidate
-			}
-		}
-		return nil
+		return agents.ByScope(scope)
 	}
 
 	preStepDetach := agents.Events().PreStep().On(nil, func(stepPayload agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {

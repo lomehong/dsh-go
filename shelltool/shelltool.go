@@ -139,15 +139,17 @@ func Register(deps Deps, cfg Config) (func(), error) {
 		rollback()
 		return nil, err
 	}
-	if _, err := deps.Runtime.Register(definition); err != nil {
+	undoTool, err := deps.Runtime.Register(definition)
+	if err != nil {
 		rollback()
 		return nil, err
 	}
-	var undo func() = func() {}
-	if sectionUndo != nil {
-		undo = sectionUndo
-	}
-	return undo, nil
+	return func() {
+		undoTool()
+		if sectionUndo != nil {
+			sectionUndo()
+		}
+	}, nil
 }
 
 func parameterSpec(cfg Config) map[string]tools.PropSpec {
@@ -368,23 +370,28 @@ func (o agentOwner) OwnerID() string            { return o.id }
 func (o agentOwner) OwnerScope() scope.ScopeKey { return o.sc }
 
 // startBackground spawns the detached process and maps its lifecycle onto
-// the generic job hooks.
+// the generic job hooks. The job owns a private cancellation context: the
+// spec's signal carries the stop to the executor (and its process tree),
+// and the Cancel hook fires it.
 func (d Deps) startBackground(request shell.ShellExecRequest) (jobs.Hooks, error) {
+	stop, cancel := context.WithCancel(context.Background())
+	request.Signal = stop
 	spec := d.Shell.Resolve(request)
 	proc, err := d.Shell.Start(spec)
 	if err != nil {
+		cancel()
 		return jobs.Hooks{}, err
 	}
 	result := make(chan jobs.Result, 1)
 	go func() {
+		defer cancel()
 		<-proc.Done()
 		status, detail := processOutcome(proc)
 		result <- jobs.Result{Outcome: jobs.Outcome{Status: status, Detail: detail}}
 	}()
 	return jobs.Hooks{
 		Cancel: func(string) error {
-			// Background processes have no dedicated kill verb: the
-			// spec's cancellation signal carries the stop.
+			cancel()
 			return nil
 		},
 		Done:       result,

@@ -13,10 +13,12 @@
 package fssearch
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"dshgo/cordis"
 	"dshgo/subprocess"
@@ -217,9 +219,10 @@ func retainGlobPaths(paths []string, maxResults int) (kept []string, seen int, t
 
 // runRipgrep runs the ripgrep binary with a plain argv vector and returns
 // its complete raw stdout. The working directory is the calling agent's
-// session cwd when available, else the process cwd. The context is
-// forwarded so cooperative tool timeouts and caller cancellation terminate
-// the process tree.
+// session cwd when available, else the process cwd. The caller's tool-call
+// signal is chained with the cooperative timeout budget (caps.TimeoutMs) and
+// forwarded to the spawn, so caller cancellation and budget expiry both
+// terminate the process tree.
 //
 // The spawn is unconfined (a plain subprocess call), so `--no-config` is
 // prepended: a host RIPGREP_CONFIG_PATH can otherwise inject `--pre` and
@@ -229,9 +232,15 @@ func retainGlobPaths(paths []string, maxResults int) (kept []string, seen int, t
 //
 // Exit semantics are tool-owned: exit 0 is success with results, exit 1 is
 // success with zero results, anything else throws a SearchError
-// (context cancellation → SEARCH_ABORTED, invalid pattern →
+// (cancelled/timed-out context → SEARCH_ABORTED, invalid pattern →
 // SEARCH_INVALID_PATTERN, the rest → SEARCH_FAILED / OVERFLOW).
-func runRipgrep(ctx *cordis.Context, caps SearchCaps, toolName string, argv []string) (RipgrepRun, error) {
+func runRipgrep(ctx *cordis.Context, signal context.Context, caps SearchCaps, toolName string, argv []string) (RipgrepRun, error) {
+	parent := signal
+	if parent == nil {
+		parent = context.Background()
+	}
+	runCtx, cancel := context.WithTimeout(parent, time.Duration(caps.TimeoutMs)*time.Millisecond)
+	defer cancel()
 	rgPath, err := resolveRgPath(caps.RGPath)
 	if err != nil {
 		return RipgrepRun{}, err
@@ -249,13 +258,19 @@ func runRipgrep(ctx *cordis.Context, caps SearchCaps, toolName string, argv []st
 		Stdio:   subprocess.Stdio{Stdin: subprocess.StdinIgnore{}, Stdout: subprocess.OutputCollect{MaxBytes: caps.RawOutputMaxBytes}, Stderr: subprocess.OutputCollect{MaxBytes: caps.StderrMaxBytes}},
 		GraceMs: caps.GraceMs,
 	}
-	handle, spawnErr := sub.Spawn(contextBackground(), spec)
+	handle, spawnErr := sub.Spawn(runCtx, spec)
 	if spawnErr != nil {
+		if runCtx.Err() != nil {
+			return RipgrepRun{}, searchErrf(CodeSearchAborted, "%s search command was aborted", toolName)
+		}
 		return RipgrepRun{}, searchErrf(CodeSearchFailed, "%s could not start its search command (ripgrep launch failed)", toolName)
 	}
 	outcome, outcomeErr := handle.Outcome()
 	if outcomeErr != nil {
 		return RipgrepRun{}, searchErrf(CodeSearchFailed, "%s could not start its search command (ripgrep launch failed)", toolName)
+	}
+	if runCtx.Err() != nil {
+		return RipgrepRun{}, searchErrf(CodeSearchAborted, "%s search command was aborted", toolName)
 	}
 	stdoutReader := handle.CollectedStdout()
 	stderrReader := handle.CollectedStderr()

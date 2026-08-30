@@ -324,7 +324,7 @@ func isFile(path string) bool {
 func ScanRoot(root PresetRoot, harnessBase string) ([]AgentPreset, error) {
 	dir, err := filepath.Abs(homepaths.ExpandHomePath(root.Path))
 	if err != nil {
-		return nil, fmt.Errorf("agent-presets: cannot read preset root %s: %v", dir, err)
+		return nil, fmt.Errorf("agent-presets: cannot read preset root %s: %w", dir, err)
 	}
 	children, err := os.ReadDir(dir)
 	if err != nil {
@@ -340,7 +340,7 @@ func ScanRoot(root PresetRoot, harnessBase string) ([]AgentPreset, error) {
 				return nil, nil
 			}
 		}
-		return nil, fmt.Errorf("agent-presets: cannot read preset root %s: %v", dir, err)
+		return nil, fmt.Errorf("agent-presets: cannot read preset root %s: %w", dir, err)
 	}
 	found := []AgentPreset{}
 	for _, child := range children {

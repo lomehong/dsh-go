@@ -32,7 +32,13 @@ func CanonicalPath(path string) string {
 // mode's meaning as a canonical, deduplicated allow-list. read-only allows
 // nothing; workspace-write allows the policy's workspace root, the host /tmp,
 // and the per-user platform temp dir (the real temp area for mkstemp-family
-// tools; omitting it would deny what the mode promises).
+// tools; omitting it would deny what the mode promises). Every returned root
+// is absolute: a grant that does not canonicalize to an absolute path is
+// dead — LexicallyUnder never matches it — so it is dropped rather than
+// listed. On Windows the host /tmp grant canonicalizes to the drive-relative
+// `\tmp` whenever a `<drive>:\tmp` happens to exist (and never carries a
+// drive letter otherwise), so it drops out there and the per-user temp dir
+// alone carries the grant's intent.
 func WritableRoots(policy fs.SandboxExecutionPolicy) []string {
 	if policy.Mode != "workspace-write" {
 		return nil
@@ -45,6 +51,9 @@ func WritableRoots(policy fs.SandboxExecutionPolicy) []string {
 			continue
 		}
 		canonical := CanonicalPath(candidate)
+		if !filepath.IsAbs(canonical) {
+			continue
+		}
 		if seen[canonical] {
 			continue
 		}

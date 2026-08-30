@@ -341,15 +341,14 @@ func agentScope(p agent.PreStepPayload) tools.ScopeKey {
 
 // sessionCWD resolves the live agent's session cwd by its tools scope key.
 func sessionCWD(agents *agent.AgentRegistry, target tools.ScopeKey) string {
-	if agents == nil || target == nil {
+	if agents == nil {
 		return ""
 	}
-	for _, candidate := range agents.List() {
-		if candidate.Scope == target && candidate.Session != nil {
-			return candidate.Session.Header().CWD
-		}
+	candidate := agents.ByScope(target)
+	if candidate == nil || candidate.Session == nil {
+		return ""
 	}
-	return ""
+	return candidate.Session.Header().CWD
 }
 
 // skillView bundles one pre-step's skill-registry view.

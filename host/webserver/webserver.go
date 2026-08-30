@@ -61,7 +61,6 @@ type Registry struct {
 	// indexTaps are raw-HTML transforms applied in registration order after
 	// the structured injection rows.
 	indexTaps []indexedTransform
-	ctx       *cordis.Context
 }
 
 type indexedTransform struct {

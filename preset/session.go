@@ -15,6 +15,7 @@ package preset
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	session "dshgo/session"
 	"dshgo/session/projection"
@@ -40,10 +41,14 @@ type SelectionData struct {
 	AgentPreset string `json:"agentPreset"`
 }
 
-// decodeSelection decodes the event payload.
+// decodeSelection decodes the event payload. A corrupt persisted payload
+// fails loud with seq attribution (the inbox replay convention): a malformed
+// selection must not read as an explicit clear.
 func decodeSelection(event session.Event) SelectionData {
 	var data SelectionData
-	_ = json.Unmarshal(event.Data, &data)
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		panic(fmt.Errorf("preset: invalid persisted agent-preset/selected payload at seq %d: %w", event.Seq, err))
+	}
 	return data
 }
 

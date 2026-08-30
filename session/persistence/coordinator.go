@@ -63,9 +63,13 @@ type sessionState struct {
 }
 
 // liveSessionState is one live session's initialization and bounded
-// write-behind controller.
+// write-behind controller. A placeholder state additionally carries the
+// resolved controller in initLive, published strictly before initDone is
+// closed, so every waiter reads the same result without re-reading the map
+// (a retirement may remove the entry concurrently).
 type liveSessionState struct {
 	initDone chan struct{}
+	initLive *liveSessionState
 	initErr  error
 	writes   *SessionWriteBehind
 }
@@ -893,24 +897,46 @@ func (c *Coordinator) waitForRetirement(id session.SessionID) error {
 
 // AttachLive returns the one lifecycle controller for a live session,
 // creating it if needed (official initFor, driven by session/created, the
-// per-event path, and HMR re-seed).
+// per-event path, and HMR re-seed). The placeholder installs under the map
+// lock, so racing attaches share one initialization: exactly one caller
+// runs the prepared-bind / seed path, every other caller returns the same
+// controller once its initialization settles.
 func (c *Coordinator) AttachLive(sess *session.Session) *liveSessionState {
 	c.mu.Lock()
-	existing := c.live[sess]
-	if existing != nil {
+	if existing := c.live[sess]; existing != nil {
 		c.mu.Unlock()
+		// A placeholder carries no write-behind controller: await the
+		// initialization and take its published result.
+		if existing.writes == nil {
+			<-existing.initDone
+			return existing.initLive
+		}
 		return existing
 	}
+	placeholder := &liveSessionState{initDone: make(chan struct{})}
+	c.live[sess] = placeholder
 	c.mu.Unlock()
 
-	// A completed prepare() whose exact Session is being published binds
-	// here instead of re-reading storage (official reservationFor path).
+	go func() {
+		live := c.initLiveState(sess)
+		c.mu.Lock()
+		c.live[sess] = live
+		c.mu.Unlock()
+		placeholder.initLive = live
+		close(placeholder.initDone)
+	}()
+	<-placeholder.initDone
+	return placeholder.initLive
+}
+
+// initLiveState runs the one-shot live-state initialization: a completed
+// prepare() whose exact Session is being published binds here instead of
+// re-reading storage (official reservationFor path); otherwise the session
+// seeds from its own stable snapshot (backends only serialize it).
+func (c *Coordinator) initLiveState(sess *session.Session) *liveSessionState {
 	if res, err := c.preps.reservationFor(sess); err == nil && res != nil {
 		live, attachErr := c.attachPrepared(sess, res)
 		if attachErr == nil {
-			c.mu.Lock()
-			c.live[sess] = live
-			c.mu.Unlock()
 			return live
 		}
 		if c.logger != nil {
@@ -918,13 +944,9 @@ func (c *Coordinator) AttachLive(sess *session.Session) *liveSessionState {
 		}
 	}
 
-	// Session owns this stable snapshot; backends only serialize it.
 	seed := sess.Events()
 	live := &liveSessionState{initDone: make(chan struct{})}
 	live.writes = c.createWriteBehind(sess, live)
-	c.mu.Lock()
-	c.live[sess] = live
-	c.mu.Unlock()
 	go func() {
 		live.initErr = c.serialize(sess.ID(), func() error { return c.onCreated(sess, seed) })
 		close(live.initDone)

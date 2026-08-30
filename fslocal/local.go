@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -303,7 +304,7 @@ func (l *Local) ReadBytes(ctx context.Context, target fs.Target, maxBytes int64)
 		return nil, fs.NewError(fs.CodeTooLarge, fmt.Sprintf("cannot read %q: file exceeds the %d byte cap", target.DisplayPath, maxBytes), nil)
 	}
 	raw := make([]byte, info.Size())
-	if _, err := file.Read(raw); err != nil && info.Size() > 0 {
+	if _, err := io.ReadFull(file, raw); err != nil && info.Size() > 0 {
 		return nil, fs.NewError(fs.CodeIOError, fmt.Sprintf("cannot read %q", target.DisplayPath), err)
 	}
 	return raw, nil
