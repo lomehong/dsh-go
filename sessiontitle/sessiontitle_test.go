@@ -217,7 +217,13 @@ func TestProviderSchedulesAndAccepts(t *testing.T) {
 	sess := createSession(t, store, "a", "")
 	appendUserMessage(t, sess, "u1", "first question")
 	appendRequestHeader(t, sess, "deepseek", "deepseek-chat")
-	waitForTitle(t, func() *sessionquery.SessionTitleSnapshot { return service.Get(sess) })
+	// The fallback may land first; wait for the provider revision to win.
+	waitForTitle(t, func() *sessionquery.SessionTitleSnapshot {
+		if snapshot := service.Get(sess); snapshot != nil && snapshot.Source.Kind == sessionquery.TitleSourceProvider {
+			return snapshot
+		}
+		return nil
+	})
 	snapshot := service.Get(sess)
 	if snapshot.Title != "titled: first question" {
 		t.Fatalf("provider title = %q", snapshot.Title)
@@ -282,6 +288,10 @@ func TestProviderErrorContainedAndDisposeStopsWork(t *testing.T) {
 	snapshot := waitForTitle(t, func() *sessionquery.SessionTitleSnapshot { return service.Get(sess) })
 	if snapshot.Source.Kind != sessionquery.TitleSourceFallback {
 		t.Fatalf("expected fallback after provider error, got %+v", snapshot.Source)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(logger.snapshot()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
 	}
 	if len(logger.snapshot()) == 0 {
 		t.Fatal("provider error was not logged")

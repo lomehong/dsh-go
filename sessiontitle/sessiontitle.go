@@ -69,6 +69,27 @@ type ProviderResult struct {
 	Model       *sessionquery.SessionTitleModelProvenance
 }
 
+// ProviderFunc adapts function values to the Provider interface.
+type ProviderFunc struct {
+	// IDFunc returns the stable provider identifier.
+	IDFunc func() string
+	// AutomaticFunc returns one of the Automatic* mode names.
+	AutomaticFunc func() string
+	// GenerateFunc performs one candidate generation.
+	GenerateFunc func(request ProviderRequest) (ProviderResult, error)
+}
+
+// ID returns the stable provider identifier.
+func (f ProviderFunc) ID() string { return f.IDFunc() }
+
+// Automatic returns the declared automatic mode.
+func (f ProviderFunc) Automatic() string { return f.AutomaticFunc() }
+
+// Generate produces one candidate.
+func (f ProviderFunc) Generate(request ProviderRequest) (ProviderResult, error) {
+	return f.GenerateFunc(request)
+}
+
 // Config mirrors the official service config. All values are required
 // positive integers and validated fail-loud at construction.
 type Config struct {
@@ -87,7 +108,10 @@ type registration struct {
 }
 
 type pendingWork struct {
-	provider   Provider
+	// reg is the registration identity the work was scheduled under;
+	// comparing pointers (not interface values) keeps ProviderFunc
+	// implementations comparable.
+	reg        *registration
 	revision   uint64
 	throughSeq int64
 }
@@ -96,6 +120,12 @@ type workState struct {
 	revision uint64
 	pending  *pendingWork
 	cancel   context.CancelFunc
+	// pipe serializes one session's title pipeline: the fallback
+	// materialization and the provider generation append under the same
+	// lock, so a stale fallback can never land after a provider title
+	// (the official port memoizes the fallback promise and awaits it
+	// before generation, which yields the same ordering guarantee).
+	pipe sync.Mutex
 }
 
 // Service is the live title service. It takes the store's post-commit event
@@ -201,11 +231,14 @@ func (s *Service) RegisterProvider(provider Provider) (func(), error) {
 	if s.registration != nil {
 		s.registration.closing = true
 	}
-	s.registration = &registration{provider: provider}
+	mine := &registration{provider: provider}
+	s.registration = mine
 	return func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if s.registration != nil && s.registration.provider == provider {
+		// Identity is the registration slot pointer, never the provider
+		// interface value: ProviderFunc values are uncomparable.
+		if s.registration == mine {
 			s.registration.closing = true
 			s.registration = nil
 		}
@@ -232,7 +265,13 @@ func (s *Service) Rename(sess *session.Session, title string) (*sessionquery.Ses
 		return nil, ErrInvalid
 	}
 	state := s.stateFor(sess.ID())
+	// Supersede first: the in-flight generation aborts and releases the
+	// session's pipeline lock, so the pinned user title lands after any
+	// straggler and no provider append can interleave past the revision
+	// guard.
 	s.supersede(state)
+	state.pipe.Lock()
+	defer state.pipe.Unlock()
 	if _, err := sess.Append("session/title", sessionquery.SessionTitleEventData{
 		Title:       normalized,
 		MessageSeqs: []int64{},
@@ -262,11 +301,13 @@ func (s *Service) Refresh(sess *session.Session, signal context.Context) (*sessi
 	}
 	s.mu.Lock()
 	reg := s.registration
+	state := s.stateForLocked(sess.ID())
+	revision := state.revision
 	s.mu.Unlock()
 	if reg == nil || reg.closing {
 		return s.Get(sess), nil
 	}
-	return s.runProvider(sess, reg, nil, signal)
+	return s.runProvider(sess, state, revision, reg, nil, signal)
 }
 
 func (s *Service) assertServiceActive() error {
@@ -351,7 +392,7 @@ func (s *Service) onUserMessage(sess *session.Session, event session.Event) {
 		if shouldSchedule {
 			state := s.stateForLocked(sess.ID())
 			state.revision++
-			state.pending = &pendingWork{provider: reg.provider, revision: state.revision, throughSeq: event.Seq}
+			state.pending = &pendingWork{reg: reg, revision: state.revision, throughSeq: event.Seq}
 		}
 	}
 	s.mu.Unlock()
@@ -405,7 +446,7 @@ func (s *Service) startPending(sess *session.Session, state *workState, pending 
 		defer s.wg.Done()
 		s.mu.Lock()
 		reg := s.registration
-		current := reg != nil && reg.provider == pending.provider && !reg.closing &&
+		current := reg != nil && reg == pending.reg && !reg.closing &&
 			s.work[sess.ID()] == state && state.revision == pending.revision
 		s.mu.Unlock()
 		if !current {
@@ -415,7 +456,7 @@ func (s *Service) startPending(sess *session.Session, state *workState, pending 
 		s.mu.Lock()
 		state.cancel = cancel
 		s.mu.Unlock()
-		if _, err := s.runProvider(sess, reg, route, ctx); err != nil {
+		if _, err := s.runProvider(sess, state, pending.revision, reg, route, ctx); err != nil {
 			if ctx.Err() == nil && s.assertServiceActive() == nil {
 				s.logger.Warn(fmt.Sprintf("session %q: automatic title generation failed: %v", sess.ID(), err))
 			}
@@ -429,15 +470,19 @@ func (s *Service) startPending(sess *session.Session, state *workState, pending 
 	}()
 }
 
-// runProvider executes and accepts one current provider generation.
-func (s *Service) runProvider(sess *session.Session, reg *registration, route *sessionquery.SessionTitleModelProvenance, ctx context.Context) (*sessionquery.SessionTitleSnapshot, error) {
-	if err := s.assertCurrent(sess, reg); err != nil {
+// runProvider executes and accepts one current provider generation. The
+// session's pipeline lock is held across fallback, generation, and append so
+// ordering is total (see workState.pipe).
+func (s *Service) runProvider(sess *session.Session, state *workState, revision uint64, reg *registration, route *sessionquery.SessionTitleModelProvenance, ctx context.Context) (*sessionquery.SessionTitleSnapshot, error) {
+	state.pipe.Lock()
+	defer state.pipe.Unlock()
+	if err := s.assertCurrent(sess, reg, revision); err != nil {
 		return nil, err
 	}
-	if err := s.ensureFallback(sess); err != nil {
+	if err := s.ensureFallbackLocked(sess, state); err != nil {
 		return nil, err
 	}
-	if err := s.assertCurrent(sess, reg); err != nil {
+	if err := s.assertCurrent(sess, reg, revision); err != nil {
 		return nil, err
 	}
 	messages := sessionquery.CollectSessionTitleMessages(sess.Events(), nil)
@@ -450,7 +495,7 @@ func (s *Service) runProvider(sess *session.Session, reg *registration, route *s
 	if err != nil {
 		return nil, err
 	}
-	if err := s.assertCurrent(sess, reg); err != nil {
+	if err := s.assertCurrent(sess, reg, revision); err != nil {
 		return nil, err
 	}
 	title := sessionquery.NormalizeSessionTitle(result.Title, s.config.MaxTitleBytes)
@@ -475,18 +520,27 @@ func (s *Service) runProvider(sess *session.Session, reg *registration, route *s
 	return s.Get(sess), nil
 }
 
-func (s *Service) assertCurrent(sess *session.Session, reg *registration) error {
+func (s *Service) assertCurrent(sess *session.Session, reg *registration, revision uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed || s.registration != reg || reg.closing {
+	state := s.work[sess.ID()]
+	if s.closed || s.registration != reg || reg.closing || state == nil || state.revision != revision {
 		return errors.New("sessiontitle: generation superseded")
 	}
 	return nil
 }
 
 // ensureFallback materializes the built-in fallback title when the session
-// has no accepted title yet.
+// has no accepted title yet. Callers holding state.pipe must use
+// ensureFallbackLocked; the standalone form serializes itself.
 func (s *Service) ensureFallback(sess *session.Session) error {
+	state := s.stateFor(sess.ID())
+	state.pipe.Lock()
+	defer state.pipe.Unlock()
+	return s.ensureFallbackLocked(sess, state)
+}
+
+func (s *Service) ensureFallbackLocked(sess *session.Session, state *workState) error {
 	if err := s.assertServiceActive(); err != nil {
 		return err
 	}

@@ -832,3 +832,12 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 测试 +6：config 校验四形态、首条消息 fallback（词/字节上限、来源与 seq）、rename 钉扎+空拒绝+非活会话、provider 全量调度+路由 provenance+closer 幂等、first-prompt 跳过子会话与第二消息、provider 出错回落 fallback+告警+dispose 幂等。
 - 门禁：gofmt clean、vet clean、全量测试 **PASS=1189 FAIL=0**（+6）。
 - 账实对齐：64→**65/86**，待办 16→15 行（title 族余 session-title-first-prompt-llm）。
+
+## r41 — session-title-llm 共享策略 + first-prompt provider（title 族收尾）
+
+- `sessiontitlellm`（官方 session-title-llm 12.8KB 共享半体 + first-prompt 1.7KB 选择器）：Config fail-loud 解析（五数值字段正、provider/model 成对）；路由解析=显式成对或回落 request/header 捕获路由（无路由 fail-loud 不调度）；JSON 帧化消息防注入 + maxInputBytes 预算（先于派发拒绝）；系统指令（语言跟随、CJK/非 CJK 目标）；GenerateOptions{Purpose: session-title, SessionID, MaxTokens} 经 Runtime.Stream + BlockAssembler 流式装配；deadline（context.WithTimeout→SESSION_TITLE_TIMEOUT）；finish 映射（stop/±error/aborted/max-tokens/tool-calls）；tool-call 块拒绝；normalize→空拒绝；返回路由 provenance。session/title-llm-request 唯一日志事件（EnsureEventTypes，结构同形省 messages 全文——偏差记录）。
+- **服务层竞态修复（sessiontitle，r40 引入）**：计数=6 复跑暴露两条真实竞态——(1) fallback 协程与 provider 生成并行，晚到 fallback 覆盖 provider 标题（官方靠 promise 记忆化+await 串行防）；(2) rename 后 in-flight provider append 可越过钉扎（官方 assertCurrent 含 revision 校验）。修复：workState.pipe 每会话管线锁串行化 fallback/generation/append（provider 持锁跨 Generate，晚到 fallback 在锁内看到已有标题即跳过）；assertCurrent 增加 revision 校验；rename 先 supersede（cancel+rev++）再取 pipe 锁后 append；pendingWork 以 registration 指针为身份（ProviderFunc 不可比较）。-count=6 全绿验证。
+- catalog：`@deepseek-ai/dsh-session-title-first-prompt-llm` 行（注入 sessionTitle+llm；官方 profile 默认 5/10/4096/64/60000 可覆写；provider/model 成对才钉路由）；core+policy 组装测列挂行。
+- 测试 +6（sessiontitlellm）：config 解析、first-prompt 选择器、全链路生成（断言路由/provenance/Purpose/System/帧化文本）、字节预算先拒+回落 fallback、max-tokens finish 拒+回落、无路由 fail-loud 不派发；既有 +6 竞态加固。
+- 门禁：gofmt clean、vet clean、全量测试 **PASS=1195 FAIL=0**（+6）。
+- 账实对齐：65→**66/86**，待办 15→14 行；**title 族清零**。

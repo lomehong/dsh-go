@@ -52,6 +52,7 @@ import (
 	"dshgo/session/projectioncache"
 	"dshgo/sessionlog"
 	"dshgo/sessiontitle"
+	"dshgo/sessiontitlellm"
 	"dshgo/settings"
 	"dshgo/settings/file"
 	"dshgo/shell"
@@ -743,6 +744,65 @@ var builders = map[string]pluginBuilder{
 				ctx.Provide(ServiceSessionTitle, service)
 				ctx.Effect(func() (cordis.Disposer, error) {
 					return cordis.Disposer(service.Dispose), nil
+				})
+				return nil
+			},
+		}
+	},
+	// First-human-message model-backed title provider over the shared
+	// session-title-llm policy (framing, byte budget, timeout, finish
+	// mapping). The official base profile's caps are the defaults;
+	// provider/model stay unpinned so the route resolves from the logged
+	// request/header unless both are configured together.
+	"@deepseek-ai/dsh-session-title-first-prompt-llm": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceSessionTitle, ServiceLlm},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := sessiontitlellm.Config{
+					TargetWords:         5,
+					TargetCJKCharacters: 10,
+					MaxInputBytes:       4096,
+					MaxOutputTokens:     64,
+					TimeoutMs:           60000,
+				}
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["targetWords"].(float64); ok && raw > 0 {
+						cfg.TargetWords = int(raw)
+					}
+					if raw, ok := overridden["targetCjkCharacters"].(float64); ok && raw > 0 {
+						cfg.TargetCJKCharacters = int(raw)
+					}
+					if raw, ok := overridden["maxInputBytes"].(float64); ok && raw > 0 {
+						cfg.MaxInputBytes = int(raw)
+					}
+					if raw, ok := overridden["maxOutputTokens"].(float64); ok && raw > 0 {
+						cfg.MaxOutputTokens = int64(raw)
+					}
+					if raw, ok := overridden["timeoutMs"].(float64); ok && raw > 0 {
+						cfg.TimeoutMs = int64(raw)
+					}
+					provider, hasProvider := overridden["provider"].(string)
+					model, hasModel := overridden["model"].(string)
+					if hasProvider && hasModel {
+						cfg.Provider, cfg.Model = provider, model
+					}
+				}
+				service, ok := ctx.Get(ServiceSessionTitle).(*sessiontitle.Service)
+				if !ok || service == nil {
+					return errors.New("session-title-first-prompt-llm: the session title service is required")
+				}
+				runtime, ok := ctx.Get(ServiceLlm).(*llm.Runtime)
+				if !ok || runtime == nil {
+					return errors.New("session-title-first-prompt-llm: the llm runtime is required")
+				}
+				closer, err := sessiontitlellm.Register(service, runtime, cfg,
+					"session-title-first-prompt-llm", sessiontitle.AutomaticFirstPrompt,
+					sessiontitlellm.SelectFirstPrompt)
+				if err != nil {
+					return err
+				}
+				ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(closer), nil
 				})
 				return nil
 			},
