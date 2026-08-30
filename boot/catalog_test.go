@@ -17,6 +17,7 @@ import (
 	"dshgo/llm/deepseek"
 	"dshgo/session"
 	"dshgo/session/persistence"
+	"dshgo/session/projectioncache"
 	"dshgo/settings"
 	"dshgo/shell"
 	"dshgo/spill"
@@ -94,6 +95,13 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 			Config: map[string]any{"provider": "fork", "toolName": "subagent_fork"}},
 		{ID: "tool-subagent-report", Name: "@deepseek-ai/dsh-tool-subagent-report",
 			Config: map[string]any{"reportDelivery": "next-step"}},
+		{ID: "storage", Name: "@deepseek-ai/dsh-storage"},
+		{ID: "storage-json", Name: "@deepseek-ai/dsh-storage-json",
+			Config: map[string]any{"root": filepath.Join(home, "storages")}},
+		{ID: "storage-domain", Name: "@deepseek-ai/dsh-storage-domain",
+			Config: map[string]any{"backend": "json"}},
+		{ID: "session-projection-cache", Name: "@deepseek-ai/dsh-session-projection-cache",
+			Config: map[string]any{"writeEveryEvents": float64(200), "writeIntervalMs": float64(5000)}},
 	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
 	if err != nil {
 		t.Fatalf("assemble: %v", err)
@@ -103,7 +111,7 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		ServiceTools, ServiceCommands, ServiceSettings, ServiceCredential, ServiceWebServer,
 		ServiceSessions, ServiceProjections, ServiceAgents, ServiceLlm, ServiceSessionPersist,
 		ServiceUserQuestions, ServiceUserApproval, ServicePermissionPresets,
-		ServiceSystemPrompt, ServiceAgentLoop, ServiceSubagentRuntime,
+		ServiceSystemPrompt, ServiceAgentLoop, ServiceSubagentRuntime, ServiceProjectionCache,
 	} {
 		if ctx.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
@@ -119,6 +127,15 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 	forkTool, ok := registry.Get("subagent_fork", nil)
 	if !ok || !strings.Contains(forkTool.Description, "inherits this conversation") {
 		t.Fatalf("fork delegation tool: %v", ok)
+	}
+	// The projection cache mounts over the storage domain and survives a
+	// full shutdown (the domain-close effect drains already-queued writes).
+	cache, ok := ctx.Get(ServiceProjectionCache).(*projectioncache.Service)
+	if !ok {
+		t.Fatal("sessionProjectionCache service missing")
+	}
+	if _, hit := cache.CachedSnapshot(session.SessionHeader{ID: "never-created", CreatedAt: 1}); hit {
+		t.Fatal("unknown session read as cached")
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)

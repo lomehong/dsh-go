@@ -43,6 +43,7 @@ import (
 	"dshgo/session/persistence/jsonl"
 	"dshgo/session/persistence/sqlite"
 	"dshgo/session/projection"
+	"dshgo/session/projectioncache"
 	"dshgo/sessionlog"
 	"dshgo/settings"
 	"dshgo/settings/file"
@@ -84,6 +85,7 @@ const (
 	ServiceCredential        = "credentials"
 	ServiceSessions          = "sessions"
 	ServiceProjections       = "projections"
+	ServiceProjectionCache   = "sessionProjectionCache"
 	ServiceAgents            = "agents"
 	ServiceTypert            = "typert"
 	ServiceTypertGateway     = "typertGateway"
@@ -1605,6 +1607,61 @@ var batchThreeBuilders = map[string]pluginBuilder{
 		}
 	},
 
+	// Persisted projection cache (official dsh-session-projection-cache):
+	// durable per-session checkpoint records on the session_projcache
+	// storage domain (per-record layout), throttled write-behind, and the
+	// cached listing read. Go composition: the sessions flush lives on the
+	// persistence coordinator, so the Sessions view adapts store+coordinator
+	// (the official sessions service carries both).
+	"@deepseek-ai/dsh-session-projection-cache": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceStorageDomain, ServiceProjections, ServiceSessions, ServiceSessionPersist},
+			Provide: []string{ServiceProjectionCache},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := projectioncache.Config{WriteEveryEvents: 200, WriteIntervalMs: 5000}
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["writeEveryEvents"].(float64); ok && raw >= 1 {
+						cfg.WriteEveryEvents = int(raw)
+					}
+					if raw, ok := overridden["writeIntervalMs"].(float64); ok && raw >= 1 {
+						cfg.WriteIntervalMs = int64(raw)
+					}
+				}
+				spec, err := projectioncache.DomainSpec()
+				if err != nil {
+					return err
+				}
+				facility := ctx.Get(ServiceStorageDomain).(*storagedomain.Facility)
+				domain, err := facility.Open(spec)
+				if err != nil {
+					return err
+				}
+				store, err := projectioncache.NewDomainStore(domain)
+				if err != nil {
+					_ = domain.Close()
+					return err
+				}
+				sessions := ctx.Get(ServiceSessions).(*session.Store)
+				coordinator := ctx.Get(ServiceSessionPersist).(*persistence.Coordinator)
+				service, err := projectioncache.New(store,
+					ctx.Get(ServiceProjections).(*projection.Registry),
+					sessionsFlushView{store: sessions, coordinator: coordinator},
+					deps.Logger, cfg)
+				if err != nil {
+					_ = domain.Close()
+					return err
+				}
+				detach := service.Attach(ctx)
+				ctx.Provide(ServiceProjectionCache, service)
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(func() {
+						detach()
+						_ = service.Close()
+					}), nil
+				})
+			},
+		}
+	},
 	// The singleton replay-aware token meter plus its three O(1)
 	// projection units (usage accumulation, context occupancy, context
 	// composition). Image route pricing is an optional llm seam; the
@@ -2075,6 +2132,23 @@ var batchThreeBuilders = map[string]pluginBuilder{
 
 // approvalEscalationAdapter adapts the composed approval service to the
 // sandbox escalation channel face.
+// sessionsFlushView is the projection-cache Sessions view: live lookups on
+// the session store, write-behind drains on the persistence coordinator
+// (the official sessions service carries both faces).
+type sessionsFlushView struct {
+	store       *session.Store
+	coordinator *persistence.Coordinator
+}
+
+func (v sessionsFlushView) Get(id session.SessionID) (*session.Session, bool) {
+	sess := v.store.Get(id)
+	return sess, sess != nil
+}
+
+func (v sessionsFlushView) Flush(sess *session.Session) error {
+	return v.coordinator.FlushSession(sess)
+}
+
 type approvalEscalationAdapter struct {
 	service *userapproval.Service
 }

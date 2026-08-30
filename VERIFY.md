@@ -749,3 +749,13 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 测试：toolsubagentreport +5（枚举校验/deps 校验/子作用域装+泄漏到全局=否+陌生人执行拒+卸载撤销/nil child panic/经真 SetupRegistry.Apply 的贡献接线）。
 - 账实对齐：60→**61/86**、"其余 28 项"→27 项；tool-subagent-report 移出待办；tool-subagent-control 行核实已在位（旧账清）。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1151 FAIL=0**（+5）。
+
+## r32 — session-projection-cache 批（持久投影缓存 + storage-domain 域身份）
+
+- `session/projectioncache/domain.go`：官方 spec.ts 逐字段移植——域 `session_projcache` v4、`per-record` 布局（版本 bump 按会话计：陈旧会话文档弃读，非全介质拒绝）、`sessions` 表；`ValidateRecord` 为 checkpointRecord zod 的运行半（identity.createdAt 非负整、cwd 可选串、rows ver≥0/seq≥-1 整数、val 任意 JSON）。
+- `DomainStore`：域表→缓存 Store 适配——Get 坏档读作缺席（缓存语义：代价是更长重放，不是错值）、Put 全值替换（MarshalRecord）、Close=域关。
+- catalog 行 `@deepseek-ai/dsh-session-projection-cache`：注入 storageDomain/projections/sessions/sessionPersistence；默认 writeEveryEvents=200/writeIntervalMs=5000（官方 yml 装配值）可覆盖；effect 卸载序 detach→service.Close（域关后迟到 flush 按契约拒绝）。
+- **Go 合成偏差（README 已记）**：官方 sessions 服务自带 flush 面，Go 拆在 persistence coordinator——`sessionsFlushView` 双面适配（Get=store、Flush=coordinator.FlushSession）；Open/New 失败路径显式 `domain.Close()` 兜底。
+- 测试：+3（域 store 往返/坏档缺席/域校验边界 7 例）；core 组装测扩 storage→storage-json→storage-domain→projection-cache 行 + ServiceProjectionCache 在场断言 + 未知会话 CachedSnapshot 未命中断言。中途修一处断言落错测试（model-selection 测试与 core 尾块同形被 Replace 全替换误伤——回退并把断言落到 core 测试自身锚点）。
+- 账实对齐：61→**62/86**、"其余 27 项"→26 项。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1154 FAIL=0**（+3）。
