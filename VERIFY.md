@@ -814,3 +814,30 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - goal① 清单逐项实证（README 批行）：continuation manager 生产装配、app-boot、settings/credentials、storage hub、llm-deepseek、webserver、permission-presets section+created 钩子全部在位；唯 webhook SessionCreator 仍待 preset-mount。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -v -p 4` **PASS=1182 FAIL=0**（+6）。
 - 账实对齐：68→**69/86**，缺失清单 18→17 项。
+
+## r39 — 账目审计修正 + 四行处置（loader/worker 架构面）
+
+- 程序化审计重建权威账目：yml 86 行逐条（id→name 配对）vs catalog 实名——**wired 64/86、missing 22**。此前簿记"69/86、17 项"系逐轮累计误差（r33 基线即已偏低），r39 起以程序化比对为准，README 全量更正。
+- 四行新处置（逐一读官方源取证，不硬凑）：`dsh-typert-loader`（21.5KB）——loader 动态挂载时读 package.json `./typert` 导出自动注册 manifest；Go 无动态加载，registry 行已在组装期静态注册，能力等价。`dsh-plugin-package-inventory-deepseek`（10.3KB）——注入 `loader` 服务盘点 npm 插件包身份供 DeepSeek 请求；Go 无 loader/npm 插件面，N-A。`dsh-workflow-worker-thread`（95.6KB）——Node worker 线程执行模型 JS 编排脚本；Go workflow 引擎直执行编译态 `Script`（engine.go 架构注释即此义），worker 面不存在。`dsh-tool-workflow`（24.7KB）——模型面 JS 脚本工具，执行依赖 JS 运行时；与 PTC run_code 同因受阻，Go 引擎保留为库面（Go 侧编排可用）。
+- 盘点副产：llm-pi-ai 实为 173.9KB/15 文件的 pi-ai SDK 多路适配器（泛化"继承已装 provider 的端点/协议/目录"机制 TS-SDK 特有）——Go 等价物为逐 provider 直写适配器，是否需要取决于部署要接的 provider 清单，列待深盘不硬凑。
+- 权威待办 16 行按族落 README（title 2 / web 3 / sandbox 3 / goal 5 / 存储+遥测 2 / llm-pi-ai 1）。
+- 门禁：gofmt clean、vet clean、全量测试维持 **PASS=1182 FAIL=0**（本轮无代码变更，-v 复跑确认）。
+- 账实对齐：簿记修正为 **wired 64/86**；处置累计 6 行；待办 16 行。
+
+## r40 — session-title 服务基座（title 族首页）
+
+- `sessiontitle` 服务半体（官方 index.ts 31.3KB 的服务面）：provider 单槽注册（first-prompt/all-prompts 校验、closer 幂等、替换置 closing）、`Rename`（normalize 后空拒绝 ErrInvalid、store.Get 活性校验、钉扎 supersede in-flight）、`Refresh`（无 provider 落 fallback；有 provider 重试）、自动调度（Store.OnEvent 消费 user/message→eligible 检查+钉扎检查+pending 起草；request/header→路由触发 startPending；first-prompt 跳过 fork 子会话（Header().ParentSession）与第二消息）、fallback 物化（wg 协程离提交路径，防 store feed 重入）、revision supersede + per-session cancel 全程防竞态、Dispose 幂等（cancel→排空 wg→释放 OnEvent/OnDisposed 槽）。确定性半体不重写——sessionquery 的 normalize/fallback/collect/fold 即官方 normalize.ts+fold 面的既有移植。
+- 偏差如实记录：OnEvent 单槽由服务独占；官方 llm/stream 双触发路收敛为 request/header 单触发；provider 结果校验收敛为 normalize+非空（不逐 seq 复核）。
+- catalog：`@deepseek-ai/dsh-session-title` 行（注入 sessions、提供 sessionTitle、官方 profile 默认 5/40/80 可覆写、dispose 走 cordis.Disposer）；core+policy 两组装测列挂行 + sessionTitle 在场断言。
+- 测试 +6：config 校验四形态、首条消息 fallback（词/字节上限、来源与 seq）、rename 钉扎+空拒绝+非活会话、provider 全量调度+路由 provenance+closer 幂等、first-prompt 跳过子会话与第二消息、provider 出错回落 fallback+告警+dispose 幂等。
+- 门禁：gofmt clean、vet clean、全量测试 **PASS=1189 FAIL=0**（+6）。
+- 账实对齐：64→**65/86**，待办 16→15 行（title 族余 session-title-first-prompt-llm）。
+
+## r41 — session-title-llm 共享策略 + first-prompt provider（title 族收尾）
+
+- `sessiontitlellm`（官方 session-title-llm 12.8KB 共享半体 + first-prompt 1.7KB 选择器）：Config fail-loud 解析（五数值字段正、provider/model 成对）；路由解析=显式成对或回落 request/header 捕获路由（无路由 fail-loud 不调度）；JSON 帧化消息防注入 + maxInputBytes 预算（先于派发拒绝）；系统指令（语言跟随、CJK/非 CJK 目标）；GenerateOptions{Purpose: session-title, SessionID, MaxTokens} 经 Runtime.Stream + BlockAssembler 流式装配；deadline（context.WithTimeout→SESSION_TITLE_TIMEOUT）；finish 映射（stop/±error/aborted/max-tokens/tool-calls）；tool-call 块拒绝；normalize→空拒绝；返回路由 provenance。session/title-llm-request 唯一日志事件（EnsureEventTypes，结构同形省 messages 全文——偏差记录）。
+- **服务层竞态修复（sessiontitle，r40 引入）**：计数=6 复跑暴露两条真实竞态——(1) fallback 协程与 provider 生成并行，晚到 fallback 覆盖 provider 标题（官方靠 promise 记忆化+await 串行防）；(2) rename 后 in-flight provider append 可越过钉扎（官方 assertCurrent 含 revision 校验）。修复：workState.pipe 每会话管线锁串行化 fallback/generation/append（provider 持锁跨 Generate，晚到 fallback 在锁内看到已有标题即跳过）；assertCurrent 增加 revision 校验；rename 先 supersede（cancel+rev++）再取 pipe 锁后 append；pendingWork 以 registration 指针为身份（ProviderFunc 不可比较）。-count=6 全绿验证。
+- catalog：`@deepseek-ai/dsh-session-title-first-prompt-llm` 行（注入 sessionTitle+llm；官方 profile 默认 5/10/4096/64/60000 可覆写；provider/model 成对才钉路由）；core+policy 组装测列挂行。
+- 测试 +6（sessiontitlellm）：config 解析、first-prompt 选择器、全链路生成（断言路由/provenance/Purpose/System/帧化文本）、字节预算先拒+回落 fallback、max-tokens finish 拒+回落、无路由 fail-loud 不派发；既有 +6 竞态加固。
+- 门禁：gofmt clean、vet clean、全量测试 **PASS=1195 FAIL=0**（+6）。
+- 账实对齐：65→**66/86**，待办 15→14 行；**title 族清零**。

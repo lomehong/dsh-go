@@ -188,7 +188,7 @@ func newSessionFixture(t *testing.T) *sessionFixture {
 		t.Fatalf("new mounts: %v", err)
 	}
 	store := session.NewStore(nil)
-	titles, err := sessiontitle.NewService(store, sessiontitle.Config{FallbackMaxWords: 5, FallbackMaxBytes: 40, MaxTitleBytes: 80})
+	titles, err := sessiontitle.NewService(store, sessiontitle.Config{FallbackMaxWords: 5, FallbackMaxBytes: 40, MaxTitleBytes: 80}, cordis.Discard{})
 	if err != nil {
 		t.Fatalf("new title service: %v", err)
 	}
