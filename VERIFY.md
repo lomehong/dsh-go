@@ -806,3 +806,11 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - sqlite 驱动不受阻：modernc.org/sqlite v1.34.5 已是直接依赖且 persistence-sqlite 已用——session-query-sqlite 是纯体量 epic。
 - 结论：剩余 18 项全部成族，每族有明确首页；后续每轮攻一族首页。无受阻硬凑项；本轮为盘点与地图落地。
 - 门禁：gofmt clean、vet clean、全量测试维持 **PASS=1176 FAIL=0**（无代码变更，本轮复跑确认）。
+
+## r38 — storage-sqlite 后端 + goal① 清单核实
+
+- `storagesqlite`（官方 25KB 包）：storagedomain.Backend 的 SQLite 实现——schema（user_version=1 戳/拒、units/unit_globals 元数据表、mkdir 0700+O_EXCL 0600 建库序、journal 四模式白名单）+ unit（u_<unit>_<table> 记录表 upsert/delete/selectAll、unit_globals 全局槽、坏 JSON 读作 malformed-medium、closed 守卫）+ backend Open（名称双段校验→units 版本戳/拒→建表→KvUnit；双开拒；Close=先排空单元再关库，幂等）。单元自身 Close 经 onClose 回调释放后端 open 槽（官方同形，可重开）。Layout 字段 SQLite 形不分支（单表+全局统形），偏差如实记录。+6 测：双表+全局往返/upsert 替换/删除、units 版本戳拒外版、双开+关后开+幂等关、坏 JSON 介质直改后拒（真文件介质）、文件介质跨重开持久、非法名/非法 journal fail-loud。
+- catalog：`@deepseek-ai/dsh-storage-sqlite` 行（注入 storage、提供 storage.backend.sqlite、path 必填）；core+policy 两个组装测列均挂行（真文件路径过全组装）。
+- goal① 清单逐项实证（README 批行）：continuation manager 生产装配、app-boot、settings/credentials、storage hub、llm-deepseek、webserver、permission-presets section+created 钩子全部在位；唯 webhook SessionCreator 仍待 preset-mount。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -v -p 4` **PASS=1182 FAIL=0**（+6）。
+- 账实对齐：68→**69/86**，缺失清单 18→17 项。

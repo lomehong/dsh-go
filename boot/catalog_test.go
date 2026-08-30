@@ -106,6 +106,8 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 			Config: map[string]any{"root": filepath.Join(home, "storages")}},
 		{ID: "storage-domain", Name: "@deepseek-ai/dsh-storage-domain",
 			Config: map[string]any{"backend": "json"}},
+		{ID: "storage-sqlite", Name: "@deepseek-ai/dsh-storage-sqlite",
+			Config: map[string]any{"path": filepath.Join(home, "storages", "test-sqlite.db")}},
 		{ID: "session-projection-cache", Name: "@deepseek-ai/dsh-session-projection-cache",
 			Config: map[string]any{"writeEveryEvents": float64(200), "writeIntervalMs": float64(5000)}},
 	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
@@ -614,6 +616,8 @@ func TestCatalogStorageHubDomainAndSpillRoundTrip(t *testing.T) {
 			Config: map[string]any{"root": filepath.Join(home, "storages")}},
 		{ID: "storage-domain", Name: "@deepseek-ai/dsh-storage-domain",
 			Config: map[string]any{"backend": "json"}},
+		{ID: "storage-sqlite", Name: "@deepseek-ai/dsh-storage-sqlite",
+			Config: map[string]any{"path": filepath.Join(home, "storages", "test-sqlite.db")}},
 		{ID: "spill-local", Name: "@deepseek-ai/dsh-spill-local",
 			Config: map[string]any{"root": filepath.Join(home, "spill"), "cleanupPeriodDays": float64(0)}},
 		{ID: "spill-policy", Name: "@deepseek-ai/dsh-spill-policy",

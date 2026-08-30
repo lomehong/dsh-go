@@ -65,6 +65,7 @@ import (
 	"dshgo/storage"
 	"dshgo/storagedomain"
 	"dshgo/storagejson"
+	"dshgo/storagesqlite"
 	"dshgo/strreplaceeditor"
 	"dshgo/subagent"
 	"dshgo/subagentcontrol"
@@ -663,6 +664,49 @@ var builders = map[string]pluginBuilder{
 		}
 	},
 
+	// SQLite storage backend: one database file hosts every routed unit,
+	// document-per-row over the pure-Go modernc driver. Config: `path`
+	// (required; `:memory:` for tests) and `journalMode` (default wal).
+	"@deepseek-ai/dsh-storage-sqlite": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceStorage},
+			Provide: []string{storage.StorageBackendServiceKey("sqlite")},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					Path        string `json:"path"`
+					JournalMode string `json:"journalMode"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				if cfg.Path == "" {
+					return fmt.Errorf("storage-sqlite: config path is required")
+				}
+				hub := ctx.Get(ServiceStorage).(*storage.Hub)
+				backend, err := storagesqlite.New(storagesqlite.Config{
+					Path:        cfg.Path,
+					JournalMode: storagesqlite.JournalMode(cfg.JournalMode),
+				})
+				if err != nil {
+					return err
+				}
+				unregister, err := hub.Backend.Register("sqlite", backend)
+				if err != nil {
+					backend.Close()
+					return err
+				}
+				ctx.Provide(storage.StorageBackendServiceKey("sqlite"), backend)
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(func() {
+						unregister()
+						if err := backend.Close(); err != nil && deps.Logger != nil {
+							deps.Logger.Warn(fmt.Sprintf("storage-sqlite: backend close: %v", err))
+						}
+					}), nil
+				})
+			},
+		}
+	},
 	// Domain data form: schema-validated, change-emitting KV domains over
 	// routed backends. The routed backend table resolves at apply because
 	// the backend lifecycle service keys are injections (activation cannot
