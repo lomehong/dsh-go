@@ -10,6 +10,7 @@ import (
 	"dshgo/cordis"
 	"dshgo/cordis/loader"
 	"dshgo/fs"
+	"dshgo/gateway"
 	"dshgo/interaction/permissionpresets"
 	"dshgo/session"
 	"dshgo/session/persistence"
@@ -443,5 +444,24 @@ func TestCatalogTypertRegistryAndLookupRegistration(t *testing.T) {
 	}
 	if _, found := registry.LookupGet("agent"); found {
 		t.Fatal("agent lookup must withdraw on disposal")
+	}
+}
+
+func TestCatalogAssemblesTypertGateway(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
+		{ID: "api-gateway", Name: "@deepseek-ai/dsh-api-gateway"},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	gw, ok := root.Get(ServiceTypertGateway).(*gateway.Gateway)
+	if !ok || gw == nil {
+		t.Fatal("typertGateway service missing after assembly")
+	}
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
 	}
 }

@@ -9,6 +9,7 @@ package boot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -23,6 +24,7 @@ import (
 	"dshgo/fslocal"
 	"dshgo/fssandbox"
 	"dshgo/fssearch"
+	"dshgo/gateway"
 	"dshgo/guard"
 	"dshgo/host/webserver"
 	"dshgo/interaction/permissionpresets"
@@ -71,6 +73,7 @@ const (
 	ServiceProjections       = "projections"
 	ServiceAgents            = "agents"
 	ServiceTypert            = "typert"
+	ServiceTypertGateway     = "typertGateway"
 	ServiceLlm               = "llm"
 	ServiceSessionPersist    = "sessionPersistence"
 	ServiceUserQuestions     = "userQuestions"
@@ -290,6 +293,24 @@ var builders = map[string]pluginBuilder{
 			Apply: func(ctx *cordis.Context, config any) error {
 				registry := typert.NewRegistry(ctx, deps.Logger)
 				typert.ContextService.Provide(ctx, registry)
+				return nil
+			},
+		}
+	},
+	// The Typert Remote gateway: carrier-independent Host dispatch over
+	// strict registered definitions and the registry's lookup/Context
+	// providers. Carrier adapters (Connection /api, WebSocket mux) adapt on
+	// top.
+	"@deepseek-ai/dsh-api-gateway": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceTypertGateway},
+			Inject:  []string{ServiceTypert},
+			Apply: func(ctx *cordis.Context, config any) error {
+				registry, ok := typert.ContextService.From(ctx)
+				if !ok {
+					return errors.New("api-gateway: typert service is unavailable")
+				}
+				ctx.Provide(ServiceTypertGateway, gateway.New(ctx, registry))
 				return nil
 			},
 		}

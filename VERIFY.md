@@ -684,3 +684,11 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -p 4` **PASS=1117 FAIL=0**（+16）。
 - README：包表 typert 行、已接线 44→**45/86**、未移植面与 agent 条目账实对齐（registry 已落地，remotes 随 gateway 轮）、语义决策记录新条目（generator/loader/toJSONSchema 如实受阻；declaration merging → 字符串键运行时表+any 边界；configure=可撤销组合层；Effect 挂撤=Dispose 后注册即被撤）。
 - 诚实降级：toJSONSchema 投影（Zod 生态）、generator、loader 不硬凑，已记录。
+
+## R26 — typert gateway Host 派发核心（2026-08-30 11:37）
+
+- 落地面：`gateway/gateway.go`（carrier 无关 Invoke 派发器——strict 定义解析/withdraw 拒绝弱化/exact-args 强制/lookup 五分支/Context 接收器四分支/cancellation 注入首位/stream-in-unary 拒绝/WireFailure 映射/17 类稳定错误码）；`typert/remote.go`（Failure/LookupFailure/RemoteFailure 线上失败词形）；`boot/catalog.go` api-gateway 条目（Inject typert、Provide ServiceTypertGateway）。
+- 测试：`gateway/gateway_test.go` 10 测（happy path/取消竞态→cancelled/nil-signal 背景注入/plain 无注入/stream 拒绝/exact-args+strict 缺席/withdraw→definition-unavailable/未知 endpoint/lookup 六分支含 policy 穿透/Context 接收器 happy+四失败分支/WireFailure 映射表）；`boot/catalog_test.go` +1 组装测。
+- 诚实降级：SRC fallback 不可移植（reflect 无参数名）如实受阻；stream-protocol/mux/forwarded events + client 全 face 随 stream carrier 轮。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -p 4` **PASS=1129 FAIL=0**（+12）。
+- README：包表 gateway 行、45→**46/86**、未移植面更新（Host 派发核心已落地）、语义决策记录新条目。
