@@ -798,3 +798,11 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 偏差记录：TS 恢复链 next() 可抛错，settleDownstream 包裹后对 always 记警告继续；Go 瀑布 next 不可抛错，always 透传直接返回（无警告面）。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1176 FAIL=0**（+5）。
 - 账实对齐：67→**68/86**，缺失清单 19→18 项。
+
+## r37 — 剩余面依赖序盘点（无新行；账实对齐轮）
+
+- 逐族读官方源取证：web-search-deepseek `apply` 需 `ctx.web.registerSearchProvider`（tool-web 42.8KB 是首页）；session-title-llm 经 `ctx.sessionTitle.register`+`normalizeSessionTitle`（session-title 37.7KB 是基座）；pwsh/bash-sandbox 依赖 `LocalSandboxProvider`（sandbox-local 60.3KB 原生 landlock/ACL 执法）；webhook 官方 session.ts 逐 seam 对照 Go——agentDefaultModel/permissionPresets/workspace/agentloop.CreateAgent 四缝在位，`agentPresets.mount/standingKeyFor` 缺（Go Roster 仅 Resolve/Read，无 mount 组合面）。
+- 组装面现状核实：`dsh-sandbox-policy` + `dsh-fs-sandbox` 已 wired（catalog 1849+），shell 走 local 执行器并机会式读 policy；缺的是 shell 进程执法 provider。
+- sqlite 驱动不受阻：modernc.org/sqlite v1.34.5 已是直接依赖且 persistence-sqlite 已用——session-query-sqlite 是纯体量 epic。
+- 结论：剩余 18 项全部成族，每族有明确首页；后续每轮攻一族首页。无受阻硬凑项；本轮为盘点与地图落地。
+- 门禁：gofmt clean、vet clean、全量测试维持 **PASS=1176 FAIL=0**（无代码变更，本轮复跑确认）。
