@@ -676,3 +676,11 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 诚实降级（README 记录）：本构建只写 is_packed=0（chunk 装箱 codec.ts/行压缩 compression.ts 延后）；外来 packed 行读端 fail-loud。
 - catalog +1（44/86）：`@deepseek-ai/dsh-session-persistence-sqlite`（Inject sessions；path/journalMode/busyTimeoutMs 配置；coordinator Dispose effect；jsonl 条目同轮补 Dispose 注册——write-behind 停机排空缺口闭合）。
 - 测试：sqlite 包 14 测（:memory: 全钩子往返/修订推进/连续性拒绝/torn 修复三态/后缀读/packed 双路径/空头物化/文件库重开身份稳定/外来库拒绝/版本失配拒绝/相对路径拒绝/配置默认/契约断言）+ boot 组装测 1（sqlite 条目装配→EnsureMaterialized→ListSnapshots→Dispose 落盘验证）。全仓 gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -v -p 4`：**PASS=1101 FAIL=0**（基线 1086 → +15）。
+
+## R25 — typert 运行时 registry（2026-08-30 11:16）
+
+- 落地面：`typert/`（typert.go 线词汇+校验器、registry.go 五存储=schema/包/local+Remote 描述符/lookup/context、context.go Host|Client 适配器+identifyHost、validate.go 官方 ValidateInvocation 全量、service.go Registry 服务面+ContextService、typert_test.go 13 测）；`boot/catalog.go` typert-registry 条目（Provide ServiceTypert）+ session/agent 条目 Inject typert 注册官方 lookup（session↔sessionId、agent↔agentId）与 agent Host Context 适配器（identity 经 agent.ContextService、resolve 经 AgentRegistry.Get→Ctx）+ ServiceTypert 常量。
+- 测试：`boot/catalog_test.go` +1 组装测（lookup 注册、live session 解析、absent→nil/nil、Dispose 收敛）；三既有组装测补 typert 条目（官方 base bundle 本含 typert——fail-loud 是正确行为）；TestCatalogMissFailsLoud 改指 typert-loader（未移植，miss 仍响）。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -p 4` **PASS=1117 FAIL=0**（+16）。
+- README：包表 typert 行、已接线 44→**45/86**、未移植面与 agent 条目账实对齐（registry 已落地，remotes 随 gateway 轮）、语义决策记录新条目（generator/loader/toJSONSchema 如实受阻；declaration merging → 字符串键运行时表+any 边界；configure=可撤销组合层；Effect 挂撤=Dispose 后注册即被撤）。
+- 诚实降级：toJSONSchema 投影（Zod 生态）、generator、loader 不硬凑，已记录。

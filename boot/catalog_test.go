@@ -18,6 +18,7 @@ import (
 	"dshgo/subagent"
 	"dshgo/toolresultpruner"
 	"dshgo/tools"
+	"dshgo/typert"
 )
 
 func TestCatalogResolvesOfficialNames(t *testing.T) {
@@ -63,6 +64,7 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
 		{ID: "credentials", Name: "@deepseek-ai/dsh-credentials-local"},
 		{ID: "web", Name: "@deepseek-ai/dsh-web"},
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
 		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
 		{ID: "projections", Name: "@deepseek-ai/dsh-session-projection"},
 		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
@@ -102,6 +104,7 @@ func TestCatalogPermissionPresetsSettingsSectionAndCreationHook(t *testing.T) {
 	root := cordis.NewRoot(cordis.Discard{})
 	app, err := Assemble(root, []loader.Entry{
 		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
 		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
 		{ID: "permission-presets", Name: "@deepseek-ai/dsh-permission-presets"},
 	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
@@ -151,7 +154,7 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 	entries := []loader.Entry{}
 	for _, name := range []string{
 		"tools", "commands", "settings-file", "credentials-local", "web",
-		"session", "session-projection", "agent", "llm", "llm-deepseek",
+		"typert-registry", "session", "session-projection", "agent", "llm", "llm-deepseek",
 		"session-persistence-jsonl", "user-questions", "user-approval",
 		"permission-presets", "system-prompt", "agent-loop", "subagent",
 		"skill", "tool-skill", "tool-todo", "jobs-local", "tool-jobs",
@@ -256,6 +259,7 @@ func TestCatalogSandboxCompositionFencesEditor(t *testing.T) {
 		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
 		{ID: "credentials", Name: "@deepseek-ai/dsh-credentials-local"},
 		{ID: "web", Name: "@deepseek-ai/dsh-web"},
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
 		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
 		{ID: "projections", Name: "@deepseek-ai/dsh-session-projection"},
 		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
@@ -344,7 +348,9 @@ func TestCatalogSettingsConfigOverridesPath(t *testing.T) {
 
 func TestCatalogMissFailsLoud(t *testing.T) {
 	resolver := NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: t.TempDir()})
-	_, err := resolver("@deepseek-ai/dsh-typert-registry")
+	// The typert loader stays unported (node type stripping — recorded);
+	// the miss must still be loud.
+	_, err := resolver("@deepseek-ai/dsh-typert-loader")
 	if err == nil || !strings.Contains(err.Error(), "module not found") {
 		t.Fatalf("err = %v, want a loud module-not-found miss", err)
 	}
@@ -354,6 +360,7 @@ func TestCatalogAssemblesSqlitePersistenceAndRoundTrips(t *testing.T) {
 	home := t.TempDir()
 	root := cordis.NewRoot(cordis.Discard{})
 	app, err := Assemble(root, []loader.Entry{
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
 		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
 		{ID: "persistence", Name: "@deepseek-ai/dsh-session-persistence-sqlite",
 			Config: map[string]any{"path": filepath.Join(home, "store", "sessions.db")}},
@@ -387,5 +394,54 @@ func TestCatalogAssemblesSqlitePersistenceAndRoundTrips(t *testing.T) {
 	// The database file exists under the requested path (parent dirs made).
 	if _, err := os.Stat(filepath.Join(home, "store", "sessions.db")); err != nil {
 		t.Fatalf("database file missing: %v", err)
+	}
+}
+
+func TestCatalogTypertRegistryAndLookupRegistration(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
+		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
+		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	registry, ok := typert.ContextService.From(root)
+	if !ok {
+		t.Fatal("typert service missing after assembly")
+	}
+	// The session and agent lookups register through their entries.
+	for _, key := range []string{"session", "agent"} {
+		if _, found := registry.LookupGet(key); !found {
+			t.Fatalf("lookup %q missing after assembly", key)
+		}
+	}
+	if _, ok := registry.ContextGetHost("agent"); !ok {
+		t.Fatal("agent host context adapter missing after assembly")
+	}
+	// The session lookup resolves a live store session by wire id.
+	store := root.Get(ServiceSessions).(*session.Store)
+	if _, err := store.Create("typert-live", session.CreateOptions{}); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	lookup, _ := registry.LookupGet("session")
+	resolved, err := lookup.Resolve("typert-live")
+	if err != nil || resolved == nil {
+		t.Fatalf("session lookup resolve = %v, %v", resolved, err)
+	}
+	if absent, err := lookup.Resolve("absent"); err != nil || absent != nil {
+		t.Fatalf("absent resolve = %v, %v (want nil/nil)", absent, err)
+	}
+	// Disposal withdraws the entry-registered lookups.
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if _, found := registry.LookupGet("session"); found {
+		t.Fatal("session lookup must withdraw on disposal")
+	}
+	if _, found := registry.LookupGet("agent"); found {
+		t.Fatal("agent lookup must withdraw on disposal")
 	}
 }

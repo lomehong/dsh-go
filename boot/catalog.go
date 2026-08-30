@@ -57,6 +57,7 @@ import (
 	"dshgo/tools"
 	"dshgo/toolsjobs"
 	"dshgo/toolskill"
+	"dshgo/typert"
 )
 
 // Service names plugins publish and consume through ctx inject lists.
@@ -69,6 +70,7 @@ const (
 	ServiceSessions          = "sessions"
 	ServiceProjections       = "projections"
 	ServiceAgents            = "agents"
+	ServiceTypert            = "typert"
 	ServiceLlm               = "llm"
 	ServiceSessionPersist    = "sessionPersistence"
 	ServiceUserQuestions     = "userQuestions"
@@ -278,11 +280,49 @@ var builders = map[string]pluginBuilder{
 
 	// The session store: in-memory session aggregation; persistence stays a
 	// plugin concern (the jsonl backend lands as its own entry).
+	// The Typert runtime registry: generated-schema and package reflection,
+	// local/Remote invocation definitions, Host object lookups, and
+	// Host/Client Context adapters. Consumers register lookups in their own
+	// entries (session/agent).
+	"@deepseek-ai/dsh-typert-registry": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceTypert},
+			Apply: func(ctx *cordis.Context, config any) error {
+				registry := typert.NewRegistry(ctx, deps.Logger)
+				typert.ContextService.Provide(ctx, registry)
+				return nil
+			},
+		}
+	},
 	"@deepseek-ai/dsh-session": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
 			Provide: []string{ServiceSessions},
+			Inject:  []string{ServiceTypert},
 			Apply: func(ctx *cordis.Context, config any) error {
-				ctx.Provide(ServiceSessions, session.NewStore(adaptSessionLogger(deps.Logger)))
+				store := session.NewStore(adaptSessionLogger(deps.Logger))
+				ctx.Provide(ServiceSessions, store)
+				// The official core/session lookup: wire "sessionId" names
+				// the live Session.
+				if registry, ok := typert.ContextService.From(ctx); ok {
+					disposer, err := registry.LookupRegister("session", typert.LookupProvider{
+						Parameter:      "session",
+						Wire:           "sessionId",
+						HostTypeSymbol: "@deepseek-ai/dsh-session#Session",
+						WireTypeSymbol: "@deepseek-ai/dsh-session/types#SessionId",
+						Resolve: func(id any) (any, error) {
+							if resolved := store.Get(session.SessionID(id.(string))); resolved != nil {
+								return resolved, nil
+							}
+							return nil, nil
+						},
+					})
+					if err != nil {
+						return err
+					}
+					if err := ctx.Effect(func() (cordis.Disposer, error) { return disposer, nil }); err != nil {
+						return err
+					}
+				}
 				return nil
 			},
 		}
@@ -306,8 +346,59 @@ var builders = map[string]pluginBuilder{
 	"@deepseek-ai/dsh-agent": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
 			Provide: []string{ServiceAgents},
+			Inject:  []string{ServiceTypert},
 			Apply: func(ctx *cordis.Context, config any) error {
-				ctx.Provide(ServiceAgents, agent.NewAgentRegistry(ctx, deps.Logger))
+				registry := agent.NewAgentRegistry(ctx, deps.Logger)
+				ctx.Provide(ServiceAgents, registry)
+				// The official core/agent lookups: wire "agentId" names the
+				// live Agent, and the agent Host Context adapter projects a
+				// live context to the owning agent's id and back.
+				if typertRegistry, ok := typert.ContextService.From(ctx); ok {
+					lookupDisposer, err := typertRegistry.LookupRegister("agent", typert.LookupProvider{
+						Parameter:      "agent",
+						Wire:           "agentId",
+						HostTypeSymbol: "@deepseek-ai/dsh-agent#Agent",
+						WireTypeSymbol: "@deepseek-ai/dsh-session/types#SessionId",
+						Resolve: func(id any) (any, error) {
+							if resolved := registry.Get(session.SessionID(id.(string))); resolved != nil {
+								return resolved, nil
+							}
+							return nil, nil
+						},
+					})
+					if err != nil {
+						return err
+					}
+					if err := ctx.Effect(func() (cordis.Disposer, error) { return lookupDisposer, nil }); err != nil {
+						return err
+					}
+					contextDisposer, err := typertRegistry.ContextRegisterHost("agent", typert.HostContextAdapter{
+						Wire:           "agentId",
+						WireTypeSymbol: "@deepseek-ai/dsh-session/types#SessionId",
+						Identity: func(candidate any) (any, bool) {
+							agentCtx, isCtx := candidate.(*cordis.Context)
+							if !isCtx {
+								return nil, false
+							}
+							if owned, found := agent.ContextService.From(agentCtx); found {
+								return string(owned.ID), true
+							}
+							return nil, false
+						},
+						Resolve: func(id any) (any, bool, error) {
+							if resolved := registry.Get(session.SessionID(id.(string))); resolved != nil {
+								return resolved.Ctx, true, nil
+							}
+							return nil, false, nil
+						},
+					})
+					if err != nil {
+						return err
+					}
+					if err := ctx.Effect(func() (cordis.Disposer, error) { return contextDisposer, nil }); err != nil {
+						return err
+					}
+				}
 				return nil
 			},
 		}
