@@ -12,17 +12,20 @@ import (
 	"strings"
 	"testing"
 
+	"dshgo/agent"
 	"dshgo/commands"
 	"dshgo/cordis"
 	"dshgo/cordis/loader"
 	"dshgo/fs"
 	"dshgo/gateway"
+	"dshgo/goal"
 	"dshgo/interaction/permissionpresets"
 	"dshgo/llm"
 	"dshgo/llm/deepseek"
 	"dshgo/preset"
 	"dshgo/session"
 	"dshgo/session/persistence"
+	"dshgo/session/projection"
 	"dshgo/session/projectioncache"
 	"dshgo/sessiontitle"
 	"dshgo/settings"
@@ -32,6 +35,7 @@ import (
 	"dshgo/storage"
 	"dshgo/storagedomain"
 	"dshgo/subagent"
+	"dshgo/systemprompt"
 	"dshgo/toolresultpruner"
 	"dshgo/tools"
 	"dshgo/toolsubagent"
@@ -119,6 +123,8 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 			Config: map[string]any{"path": filepath.Join(home, "storages", "test-sqlite.db")}},
 		{ID: "session-title", Name: "@deepseek-ai/dsh-session-title"},
 		{ID: "session-title-first-prompt-llm", Name: "@deepseek-ai/dsh-session-title-first-prompt-llm"},
+		{ID: "goal", Name: "@deepseek-ai/dsh-goal"},
+		{ID: "goal-round-driver", Name: "@deepseek-ai/dsh-goal-round-driver"},
 		{ID: "session-projection-cache", Name: "@deepseek-ai/dsh-session-projection-cache",
 			Config: map[string]any{"writeEveryEvents": float64(200), "writeIntervalMs": float64(5000)}},
 	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
@@ -131,7 +137,7 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		ServiceSessions, ServiceProjections, ServiceAgents, ServiceLlm, ServiceSessionPersist,
 		ServiceUserQuestions, ServiceUserApproval, ServicePermissionPresets,
 		ServiceSystemPrompt, ServiceAgentLoop, ServiceSubagentRuntime, ServiceProjectionCache,
-		ServiceAgentDefaultModel, ServiceSessionTitle,
+		ServiceAgentDefaultModel, ServiceSessionTitle, ServiceGoals,
 	} {
 		if ctx.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
@@ -1047,6 +1053,133 @@ func TestCatalogSessionQuerySqliteLazyStore(t *testing.T) {
 	}
 	if root.Get(ServiceSessionQuerySQLite) == nil {
 		t.Fatal("sessionQuerySqlite service missing after Assemble")
+	}
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+// catalogGoalNotifications keeps the inbox quiet in the goal round trip.
+type catalogGoalNotifications struct{}
+
+func (catalogGoalNotifications) Inserted(llm.Message)       {}
+func (catalogGoalNotifications) Discarded(llm.Message)      {}
+func (catalogGoalNotifications) Claimed(llm.Message, int64) {}
+
+func TestCatalogGoalServiceAssemblesAndRoundTrips(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
+		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
+		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
+		{ID: "projections", Name: "@deepseek-ai/dsh-session-projection"},
+		{ID: "goal", Name: "@deepseek-ai/dsh-goal",
+			Config: map[string]any{"defaultMaxGoalRounds": float64(3)}},
+		{ID: "goal-round-driver", Name: "@deepseek-ai/dsh-goal-round-driver"},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	service, ok := root.Get(ServiceGoals).(*goal.Service)
+	if !ok {
+		t.Fatal("goal service missing after Assemble")
+	}
+
+	// A live agent round trip proves the seam end to end: create carries
+	// the deployment default, and the projection unit child installed
+	// through the composed registry folds the change.
+	registry := root.Get(ServiceAgents).(*agent.AgentRegistry)
+	sess, err := session.NewDetached(session.SessionID("sess-goal-catalog"), nil,
+		&session.SessionHeader{ID: session.SessionID("sess-goal-catalog")})
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+	inbox, err := agent.NewInbox(sess, catalogGoalNotifications{})
+	if err != nil {
+		t.Fatalf("inbox: %v", err)
+	}
+	live := agent.NewAgent(agent.AgentConfig{ID: sess.ID(), Session: sess, Inbox: inbox}, registry.Events())
+	detach, err := registry.Register(live)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	defer detach()
+
+	view, err := service.Create(live, goal.CreateGoalRequest{Objective: "ship it"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if view.MaxGoalRounds != 3 {
+		t.Fatalf("maxGoalRounds = %d; the deployment default must win", view.MaxGoalRounds)
+	}
+	projections := root.Get(ServiceProjections).(*projection.Registry)
+	snapshot := projections.Snapshot(sess, goal.ProjectionKey)
+	projected, ok := snapshot.Values[goal.ProjectionKey].(*goal.GoalProjection)
+	if !ok || projected == nil || projected.Goal.ID != view.ID {
+		t.Fatalf("projection = %#v; the goal unit must fold through the composed registry", snapshot.Values[goal.ProjectionKey])
+	}
+
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+func TestCatalogGoalRejectsInvalidDeploymentDefault(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	defer func() { _ = root.Dispose() }()
+	_, err := Assemble(root, []loader.Entry{
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
+		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
+		{ID: "goal", Name: "@deepseek-ai/dsh-goal",
+			Config: map[string]any{"defaultMaxGoalRounds": float64(0)}},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	// Assemble wraps plugin errors with a path prefix and flattens the
+	// chain; the official wording must still surface loudly.
+	if err == nil || !strings.Contains(err.Error(), "failed to apply loader entry goal") ||
+		!strings.Contains(err.Error(), "maxGoalRounds must be a positive safe integer") {
+		t.Fatalf("assemble = %v; an invalid deployment default must fail loudly", err)
+	}
+}
+
+// The tool-goal row registers the three model-facing goal controls over the
+// composed goal domain and renders the deployment-selected blocked threshold
+// into the shared policy section.
+func TestCatalogToolGoalRegistersControls(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
+		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
+		{ID: "tools", Name: "@deepseek-ai/dsh-tools"},
+		{ID: "system-prompt", Name: "@deepseek-ai/dsh-system-prompt"},
+		{ID: "goal", Name: "@deepseek-ai/dsh-goal"},
+		{ID: "tool-goal", Name: "@deepseek-ai/dsh-tool-goal",
+			Config: map[string]any{"blockedAfterConsecutiveRounds": float64(5)}},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	toolsRuntime := root.Get(ServiceTools).(*tools.ToolRuntime)
+	for _, name := range []string{"get_goal", "create_goal", "update_goal"} {
+		if _, ok := toolsRuntime.Get(name, nil); !ok {
+			t.Fatalf("%s missing after Assemble", name)
+		}
+	}
+	prompt := root.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt)
+	assembled, err := prompt.Assemble(systemprompt.AssembleContext{})
+	if err != nil {
+		t.Fatalf("assemble prompt: %v", err)
+	}
+	var guidance string
+	for _, section := range assembled.Sections {
+		if section.Name == "tool:goal" {
+			guidance = section.Text
+		}
+	}
+	if !strings.Contains(guidance, "at least 5 consecutive goal rounds") {
+		t.Fatalf("tool:goal section = %q; the deployment threshold must win", guidance)
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)

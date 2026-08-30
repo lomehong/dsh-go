@@ -67,6 +67,9 @@ const (
 	SourceModel   = "model"
 	SourceTool    = "tool"
 	SourceWebhook = "webhook"
+	// SourceGoal attributes an admitted goal continuation round (dsh-goal
+	// domain: the official MessageSourceMap goal entry).
+	SourceGoal = "goal"
 )
 
 // ContextForm values: the SEMANTIC kind of producer-supplied context —
@@ -128,6 +131,11 @@ type MessageSource struct {
 	// re-parse the model-facing prose frame.
 	CatalogUpdate  bool           `json:"catalogUpdate,omitempty"`
 	CatalogEntries []CatalogEntry `json:"catalogEntries,omitempty"`
+	// Goal source: the admitted continuation round attribution (dsh-goal
+	// GoalMessageSource — goal identity, durable revision, positive round).
+	GoalID       string `json:"goalId,omitempty"`
+	GoalRevision int64  `json:"revision,omitempty"`
+	GoalRound    int64  `json:"round,omitempty"`
 	// Agent-instructions source: whether this message is the complete
 	// startup/resume baseline, the discovery/precedence/budget identity
 	// that validates a resumed baseline, and the instruction transitions

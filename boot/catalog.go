@@ -33,6 +33,8 @@ import (
 	"dshgo/fssandbox"
 	"dshgo/fssearch"
 	"dshgo/gateway"
+	"dshgo/goal"
+	"dshgo/goalrounddriver"
 	"dshgo/guard"
 	"dshgo/host/webserver"
 	"dshgo/interaction/permissionpresets"
@@ -79,6 +81,7 @@ import (
 	"dshgo/todo"
 	"dshgo/tokenmeter"
 	"dshgo/toolfs"
+	"dshgo/toolgoal"
 	"dshgo/toolresultpruner"
 	"dshgo/tools"
 	"dshgo/toolsjobs"
@@ -110,7 +113,10 @@ const (
 	ServiceSessions           = "sessions"
 	// ServiceSessionTitle is the live session title service (log-backed
 	// fold surface lives in sessionquery).
-	ServiceSessionTitle      = "sessionTitle"
+	ServiceSessionTitle = "sessionTitle"
+	// ServiceGoals is the same-session goal domain (event-sourced goals
+	// with process-local continuation activation).
+	ServiceGoals             = "goals"
 	ServiceProjections       = "projections"
 	ServiceProjectionCache   = "sessionProjectionCache"
 	ServiceAttachments       = "attachments"
@@ -556,6 +562,82 @@ var builders = map[string]pluginBuilder{
 					}), nil
 				})
 				return nil
+			},
+		}
+	},
+
+	// The same-session goal domain (official dsh-goal): event-sourced goals
+	// over the owning session log with compare-and-set mutations and
+	// process-local activation; the `goal` projection unit child installs
+	// only when a projection registry is composed.
+	"@deepseek-ai/dsh-goal": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceAgents},
+			Provide: []string{ServiceGoals},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := goal.Config{}
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["defaultMaxGoalRounds"].(float64); ok {
+						value := int64(raw)
+						cfg.DefaultMaxGoalRounds = &value
+					}
+				}
+				service, err := goal.NewService(ctx, ctx.Get(ServiceAgents).(*agent.AgentRegistry), cfg)
+				if err != nil {
+					return err
+				}
+				if err := ctx.Effect(func() (cordis.Disposer, error) { return service.Dispose, nil }); err != nil {
+					return err
+				}
+				ctx.Provide(ServiceGoals, service)
+				return nil
+			},
+		}
+	},
+
+	// The automatic same-session continuation driver (official
+	// dsh-goal-round-driver): reserves one armed goal round at a time over
+	// the loop's inbox and pre-step fences, with a durability checkpoint
+	// between rounds when the persistence coordinator is composed.
+	"@deepseek-ai/dsh-goal-round-driver": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceAgents, ServiceGoals, ServiceSessions},
+			Apply: func(ctx *cordis.Context, config any) error {
+				driverConfig := goalrounddriver.Config{Logger: deps.Logger}
+				if coordinator, ok := ctx.Get(ServiceSessionPersist).(*persistence.Coordinator); ok {
+					driverConfig.Flusher = coordinator
+				}
+				_, err := goalrounddriver.New(ctx,
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					ctx.Get(ServiceGoals).(*goal.Service),
+					ctx.Get(ServiceSessions).(*session.Store),
+					driverConfig)
+				return err
+			},
+		}
+	},
+
+	// The model-facing goal controls (official dsh-tool-goal): get_goal,
+	// create_goal, and update_goal over the goal domain with direct-human
+	// and goal-round authority fences; the shared policy section renders the
+	// deployment-selected blocked threshold.
+	"@deepseek-ai/dsh-tool-goal": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceAgents, ServiceGoals, ServiceTools, ServiceSystemPrompt},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := toolgoal.Config{}
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["blockedAfterConsecutiveRounds"].(float64); ok {
+						value := int64(raw)
+						cfg.BlockedAfterConsecutiveRounds = &value
+					}
+				}
+				return toolgoal.Apply(ctx,
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					ctx.Get(ServiceGoals).(*goal.Service),
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt),
+					cfg)
 			},
 		}
 	},
