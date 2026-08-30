@@ -12,6 +12,7 @@ import (
 	"dshgo/fs"
 	"dshgo/interaction/permissionpresets"
 	"dshgo/session"
+	"dshgo/session/persistence"
 	"dshgo/settings"
 	"dshgo/shell"
 	"dshgo/subagent"
@@ -346,5 +347,45 @@ func TestCatalogMissFailsLoud(t *testing.T) {
 	_, err := resolver("@deepseek-ai/dsh-typert-registry")
 	if err == nil || !strings.Contains(err.Error(), "module not found") {
 		t.Fatalf("err = %v, want a loud module-not-found miss", err)
+	}
+}
+
+func TestCatalogAssemblesSqlitePersistenceAndRoundTrips(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
+		{ID: "persistence", Name: "@deepseek-ai/dsh-session-persistence-sqlite",
+			Config: map[string]any{"path": filepath.Join(home, "store", "sessions.db")}},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	coordinator, ok := root.Get(ServiceSessionPersist).(*persistence.Coordinator)
+	if !ok || coordinator == nil {
+		t.Fatalf("service %q is not a persistence.Coordinator", ServiceSessionPersist)
+	}
+	// A live session materializes through the sqlite backend and lists back.
+	store := root.Get(ServiceSessions).(*session.Store)
+	sess, err := store.Create("sqlite-live", session.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := coordinator.EnsureMaterialized(sess); err != nil {
+		t.Fatalf("ensure materialized: %v", err)
+	}
+	snapshots, err := coordinator.ListSnapshots()
+	if err != nil {
+		t.Fatalf("list snapshots: %v", err)
+	}
+	if len(snapshots) != 1 || snapshots[0].Header.ID != "sqlite-live" {
+		t.Fatalf("snapshots = %+v", snapshots)
+	}
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	// The database file exists under the requested path (parent dirs made).
+	if _, err := os.Stat(filepath.Join(home, "store", "sessions.db")); err != nil {
+		t.Fatalf("database file missing: %v", err)
 	}
 }

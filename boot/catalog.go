@@ -37,6 +37,7 @@ import (
 	"dshgo/session"
 	"dshgo/session/persistence"
 	"dshgo/session/persistence/jsonl"
+	"dshgo/session/persistence/sqlite"
 	"dshgo/session/projection"
 	"dshgo/settings"
 	"dshgo/settings/file"
@@ -384,6 +385,68 @@ var builders = map[string]pluginBuilder{
 					return err
 				}
 				ctx.Provide(ServiceSessionPersist, coordinator)
+				if err := ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(func() { _ = coordinator.Dispose() }), nil
+				}); err != nil {
+					return err
+				}
+				return nil
+			},
+		}
+	},
+
+	// SQLite session persistence: the same coordinator contract over the
+	// pure-Go modernc.org/sqlite driver (official dsh-session-persistence-
+	// sqlite). Config: `path` (absolute, or relative to the profile home),
+	// `journalMode` (wal|delete|truncate|persist, default wal),
+	// `busyTimeoutMs` (default 5000). The database opens lazily on first
+	// persistence use.
+	"@deepseek-ai/dsh-session-persistence-sqlite": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSessions},
+			Provide: []string{ServiceSessionPersist},
+			Apply: func(ctx *cordis.Context, config any) error {
+				path := filepath.Join(deps.Home, "sessions.db")
+				journalMode := ""
+				busyTimeoutMs := int64(0)
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["path"].(string); ok && raw != "" {
+						if filepath.IsAbs(raw) {
+							path = raw
+						} else {
+							path = filepath.Join(deps.Home, raw)
+						}
+					}
+					if raw, ok := overridden["journalMode"].(string); ok {
+						journalMode = raw
+					}
+					if raw, ok := overridden["busyTimeoutMs"].(float64); ok && raw > 0 {
+						busyTimeoutMs = int64(raw)
+					}
+				}
+				backend, err := sqlite.Open(sqlite.Config{
+					Path:          path,
+					JournalMode:   sqlite.JournalMode(journalMode),
+					BusyTimeoutMs: busyTimeoutMs,
+				})
+				if err != nil {
+					return err
+				}
+				coordinator, err := persistence.NewCoordinator(
+					backend,
+					persistence.NewSessionsAdapter(ctx.Get(ServiceSessions).(*session.Store)),
+					adaptPersistenceLogger(deps.Logger),
+					persistence.CoordinatorOptions{},
+				)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceSessionPersist, coordinator)
+				if err := ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(func() { _ = coordinator.Dispose() }), nil
+				}); err != nil {
+					return err
+				}
 				return nil
 			},
 		}
