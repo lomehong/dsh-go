@@ -436,9 +436,14 @@ var builders = map[string]pluginBuilder{
 	// and approval-policy presets, and the sandbox-override source for
 	// delegation. Config may replace the preset table (`config.presets`
 	// and `config.names`, `config.sandboxDefault`); the default lands on
-	// the schema-defaulted table over workspace-write.
+	// the schema-defaulted table over workspace-write. The composition
+	// wires the user-settings `permission` section (defaultPreset) as the
+	// live new-session default, pins the initial permission on every
+	// session creation, and backfills sessions that already exist at
+	// composition.
 	"@deepseek-ai/dsh-permission-presets": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
+			Inject:  []string{ServiceSessions},
 			Provide: []string{ServicePermissionPresets},
 			Apply: func(ctx *cordis.Context, config any) error {
 				presets, names := permissionpresets.DefaultPresets()
@@ -453,6 +458,57 @@ var builders = map[string]pluginBuilder{
 				service, err := permissionpresets.NewService(cfg)
 				if err != nil {
 					return err
+				}
+				if store := ctx.Get(ServiceSettings); store != nil {
+					settingsStore := store.(*settings.Store)
+					envelope, err := json.Marshal(map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"defaultPreset": map[string]any{
+								"type": "enum",
+								"enum": names,
+							},
+						},
+						"required": []string{"defaultPreset"},
+					})
+					if err != nil {
+						return err
+					}
+					scope, err := settingsStore.Register("permission", &settings.Schema{
+						Envelope: envelope,
+						Defaults: func() map[string]any {
+							return map[string]any{"defaultPreset": service.DefaultPreset()}
+						},
+						Validate: func(value map[string]any) error {
+							name, _ := value["defaultPreset"].(string)
+							if _, err := service.Resolve(name); err != nil {
+								return err
+							}
+							return nil
+						},
+					}, map[string]any{"defaultPreset": service.DefaultPreset()})
+					if err != nil {
+						return err
+					}
+					// setSource: the resolved section is read live at
+					// session creation; no registration replacement is
+					// needed on change.
+					service.SetDefaultSource(func() string {
+						name, _ := scope.Get()["defaultPreset"].(string)
+						return name
+					})
+				}
+				sessions := ctx.Get(ServiceSessions).(*session.Store)
+				// session/created hook: veto-capable creation announcement.
+				sessions.OnCreated(func(sess *session.Session) error {
+					return service.PinInitialPermission(sess)
+				})
+				for _, id := range sessions.List() {
+					if existing := sessions.Get(id); existing != nil {
+						if err := service.PinInitialPermission(existing); err != nil {
+							return err
+						}
+					}
 				}
 				ctx.Provide(ServicePermissionPresets, service)
 				return nil

@@ -37,6 +37,10 @@ type Service struct {
 	sandboxDefault  string
 	approvalDefault userapproval.ApprovalPolicy
 	defaultPreset   string
+	// defaultSource is the live user-settings source installed by the
+	// composition's settings section (the official setSource). Nil keeps
+	// the composition default.
+	defaultSource func() string
 }
 
 // NewService validates the composition and builds the service.
@@ -93,6 +97,25 @@ func (s *Service) OverrideOf(sess *session.Session) string {
 // DefaultPreset returns the preset currently selected as the default for
 // future sessions.
 func (s *Service) DefaultPreset() string { return s.defaultPreset }
+
+// SetDefaultSource installs the live user-settings source for the
+// new-session default (the settings section's setSource): the source
+// returns the resolved section's defaultPreset. An empty or blank result
+// falls back to the composition default. A nil source removes it.
+func (s *Service) SetDefaultSource(source func() string) {
+	s.defaultSource = source
+}
+
+// currentDefault resolves the default a freshly created session pins: the
+// live settings value when present, otherwise the composition default.
+func (s *Service) currentDefault() string {
+	if s.defaultSource != nil {
+		if name := strings.TrimSpace(s.defaultSource()); name != "" {
+			return name
+		}
+	}
+	return s.defaultPreset
+}
 
 // Current resolves the preset matching the effective knob values. A
 // still-matching last selection wins shared-bundle ties; otherwise the
@@ -210,7 +233,7 @@ func (s *Service) PinInitialPermission(sess *session.Session) error {
 		}
 	}
 	if !hasSelected && !hasSandbox && !hasApproval && !seeded {
-		name := s.defaultPreset
+		name := s.currentDefault()
 		spec, err := s.Resolve(name)
 		if err != nil {
 			return err

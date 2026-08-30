@@ -10,6 +10,9 @@ import (
 	"dshgo/cordis"
 	"dshgo/cordis/loader"
 	"dshgo/fs"
+	"dshgo/interaction/permissionpresets"
+	"dshgo/session"
+	"dshgo/settings"
 	"dshgo/shell"
 	"dshgo/subagent"
 	"dshgo/toolresultpruner"
@@ -87,6 +90,51 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 		if ctx.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
 		}
+	}
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+func TestCatalogPermissionPresetsSettingsSectionAndCreationHook(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
+		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
+		{ID: "permission-presets", Name: "@deepseek-ai/dsh-permission-presets"},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	settingsStore := root.Get(ServiceSettings).(*settings.Store)
+	if !settingsStore.HasNamespace("permission") {
+		t.Fatal("permission settings section missing after Assemble")
+	}
+	// The persisted user section overrides the composition default for
+	// sessions created after the change.
+	if err := settingsStore.ProviderPush("permission", map[string]any{"defaultPreset": "danger-full-access"}); err != nil {
+		t.Fatalf("provider push: %v", err)
+	}
+	sessions := root.Get(ServiceSessions).(*session.Store)
+	overridden, err := sessions.Create("perm-hook-overridden", session.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create overridden: %v", err)
+	}
+	if selected, ok := permissionpresets.EffectivePermissionPreset(overridden.Events()); !ok || selected != "danger-full-access" {
+		t.Fatalf("settings-driven default = %q (ok %v)", selected, ok)
+	}
+
+	// The composition default still applies while the user section holds.
+	if err := settingsStore.ProviderPush("permission", map[string]any{"defaultPreset": "workspace-write"}); err != nil {
+		t.Fatalf("provider push back: %v", err)
+	}
+	fresh, err := sessions.Create("perm-hook-fresh", session.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create fresh: %v", err)
+	}
+	if selected, ok := permissionpresets.EffectivePermissionPreset(fresh.Events()); !ok || selected != "workspace-write" {
+		t.Fatalf("composition default = %q (ok %v)", selected, ok)
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)

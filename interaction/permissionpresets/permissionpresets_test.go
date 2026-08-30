@@ -207,6 +207,58 @@ func service_append(sess *session.Session, name string) error {
 	return err
 }
 
+func TestSetDefaultSourceDrivesFreshSessions(t *testing.T) {
+	service := testService(t)
+	// Without a source, the composition default pins fresh sessions.
+	composition := newSession(t, "perm-source-none")
+	if err := service.PinInitialPermission(composition); err != nil {
+		t.Fatalf("pin: %v", err)
+	}
+	if selected, _ := EffectivePermissionPreset(composition.Events()); selected != "workspace-write" {
+		t.Fatalf("composition default = %s", selected)
+	}
+
+	// The live settings source wins for genuinely fresh sessions.
+	service.SetDefaultSource(func() string { return "danger-full-access" })
+	overridden := newSession(t, "perm-source-live")
+	if err := service.PinInitialPermission(overridden); err != nil {
+		t.Fatalf("pin overridden: %v", err)
+	}
+	if selected, _ := EffectivePermissionPreset(overridden.Events()); selected != "danger-full-access" {
+		t.Fatalf("live default = %s", selected)
+	}
+
+	// A blank source result falls back to the composition default.
+	service.SetDefaultSource(func() string { return "  " })
+	fallback := newSession(t, "perm-source-blank")
+	if err := service.PinInitialPermission(fallback); err != nil {
+		t.Fatalf("pin fallback: %v", err)
+	}
+	if selected, _ := EffectivePermissionPreset(fallback.Events()); selected != "workspace-write" {
+		t.Fatalf("fallback default = %s", selected)
+	}
+
+	// An unknown settings value fails loud at pin time, not silently.
+	service.SetDefaultSource(func() string { return "bogus" })
+	if err := service.PinInitialPermission(newSession(t, "perm-source-bogus")); err == nil {
+		t.Fatal("unknown settings preset must fail the pin")
+	}
+
+	// Seeded sessions with their own knobs ignore the source entirely.
+	service.SetDefaultSource(func() string { return "danger-full-access" })
+	seeded := newSession(t, "perm-source-seeded")
+	if err := service_append(seeded, "workspace-write"); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if err := service.PinInitialPermission(seeded); err != nil {
+		t.Fatalf("pin seeded: %v", err)
+	}
+	if selected, _ := EffectivePermissionPreset(seeded.Events()); selected != "workspace-write" {
+		t.Fatalf("seeded must keep its own preset = %s", selected)
+	}
+	service.SetDefaultSource(nil)
+}
+
 func TestPinInitialPermission(t *testing.T) {
 	service := testService(t)
 	// A genuinely fresh session pins the user default and both knobs.
