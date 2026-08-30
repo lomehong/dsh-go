@@ -839,13 +839,26 @@ var batchThreeBuilders = map[string]pluginBuilder{
 		}
 	},
 
-	// The singleton replay-aware token meter. Image route pricing is an
-	// optional llm seam; the default composition leaves it nil so image
-	// pricing falls back to estimation.
+	// The singleton replay-aware token meter plus its three O(1)
+	// projection units (usage accumulation, context occupancy, context
+	// composition). Image route pricing is an optional llm seam; the
+	// default composition leaves it nil so image pricing falls back to
+	// estimation.
 	"@deepseek-ai/dsh-token-meter": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
+			Inject:  []string{ServiceProjections},
 			Provide: []string{ServiceTokenMeter},
 			Apply: func(ctx *cordis.Context, config any) error {
+				registry := ctx.Get(ServiceProjections).(*projection.Registry)
+				for _, unit := range []projection.Definition{
+					tokenmeter.TokenUsageUnit(),
+					tokenmeter.ContextPressureUnit(),
+					tokenmeter.ContextBreakdownUnit(),
+				} {
+					if _, err := registry.Register(unit); err != nil {
+						return err
+					}
+				}
 				ctx.Provide(ServiceTokenMeter, tokenmeter.NewMeter(nil))
 				return nil
 			},
