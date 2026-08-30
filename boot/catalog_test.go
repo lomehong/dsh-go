@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -910,6 +912,141 @@ func TestCatalogWebFetchHttpProviderRegistersIntoTheSeam(t *testing.T) {
 	_, err = runtime.Search(context.Background(), web.WebSearchRequest{Query: "q"})
 	if !errors.As(err, &webErr) || webErr.Code() != web.CodeProviderUnavailable {
 		t.Fatalf("search capability = %v", err)
+	}
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+// The model-facing web tools row registers web_search/web_fetch on the tools
+// runtime only when enabled: defaults enable both, search:false removes the
+// search tool while the fetch tool stays. Deferred injection requires the
+// full provider set, so the test applies tools + system-prompt + web first.
+func TestCatalogToolWebGuidanceSectionsFollowEnablement(t *testing.T) {
+	home := t.TempDir()
+	resolver := NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home})
+
+	apply := func(t *testing.T, entries []loader.Entry) (*tools.ToolRuntime, func()) {
+		t.Helper()
+		ctx := cordis.NewRoot(cordis.Discard{})
+		for _, entry := range entries {
+			spec, err := resolver(entry.Name)
+			if err != nil {
+				t.Fatalf("resolve %s: %v", entry.Name, err)
+			}
+			if err := ctx.Inject(spec.Inject, func(injected *cordis.Context) error {
+				return spec.Apply(injected, entry.Config)
+			}); err != nil {
+				t.Fatalf("apply %s: %v", entry.Name, err)
+			}
+		}
+		toolsRuntime := ctx.Get(ServiceTools).(*tools.ToolRuntime)
+		return toolsRuntime, func() {
+			if err := ctx.Dispose(); err != nil {
+				t.Errorf("dispose: %v", err)
+			}
+		}
+	}
+
+	base := []loader.Entry{
+		{ID: "tools", Name: "@deepseek-ai/dsh-tools"},
+		{ID: "system-prompt", Name: "@deepseek-ai/dsh-system-prompt"},
+		{ID: "web", Name: "@deepseek-ai/dsh-web"},
+	}
+	runtime, teardown := apply(t, append(append([]loader.Entry{}, base...),
+		loader.Entry{ID: "tool-web", Name: "@deepseek-ai/dsh-tool-web"}))
+	defer teardown()
+	if _, ok := runtime.Get("web_search", nil); !ok {
+		t.Fatal("web_search missing under defaults")
+	}
+	if _, ok := runtime.Get("web_fetch", nil); !ok {
+		t.Fatal("web_fetch missing under defaults")
+	}
+
+	runtime2, teardown2 := apply(t, append(append([]loader.Entry{}, base...),
+		loader.Entry{ID: "tool-web", Name: "@deepseek-ai/dsh-tool-web",
+			Config: map[string]any{"search": false}}))
+	defer teardown2()
+	if _, ok := runtime2.Get("web_search", nil); ok {
+		t.Fatal("web_search registered despite search:false")
+	}
+	if _, ok := runtime2.Get("web_fetch", nil); !ok {
+		t.Fatal("web_fetch missing despite default enablement")
+	}
+}
+
+// The web-search-deepseek row registers its search provider into the web
+// seam; a search flows end-to-end through the registered provider against a
+// stub Messages endpoint, and dispose unregisters it (the seam then fails
+// loud as WEB_PROVIDER_UNAVAILABLE instead of serving the dead provider).
+func TestCatalogWebSearchDeepSeekRegistersProvider(t *testing.T) {
+	home := t.TempDir()
+	resolver := NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/messages" {
+			t.Errorf("endpoint = %s", r.URL.Path)
+		}
+		w.Header().Set("content-type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []map[string]any{
+				{"type": "web_search_tool_result", "content": []map[string]any{
+					{"type": "web_search_result", "url": "https://go.dev", "title": "Go"},
+				}},
+			},
+		})
+	}))
+	defer server.Close()
+
+	ctx := cordis.NewRoot(cordis.Discard{})
+	entries := []loader.Entry{
+		{ID: "web", Name: "@deepseek-ai/dsh-web"},
+		{ID: "web-search-deepseek", Name: "@deepseek-ai/dsh-web-search-deepseek",
+			Config: map[string]any{"baseURL": server.URL, "apiKey": "test-key", "maxUses": int64(2)}},
+	}
+	for _, entry := range entries {
+		spec, err := resolver(entry.Name)
+		if err != nil {
+			t.Fatalf("resolve %s: %v", entry.Name, err)
+		}
+		if err := ctx.Inject(spec.Inject, func(injected *cordis.Context) error {
+			return spec.Apply(injected, entry.Config)
+		}); err != nil {
+			t.Fatalf("apply %s: %v", entry.Name, err)
+		}
+	}
+	seam := ctx.Get(ServiceWeb).(*web.Runtime)
+	result, err := seam.Search(context.Background(), web.WebSearchRequest{Query: "go release"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(result.Sources) != 1 || result.Sources[0].URL != "https://go.dev" {
+		t.Fatalf("result = %+v", result)
+	}
+	if err := ctx.Dispose(); err != nil {
+		t.Fatalf("dispose: %v", err)
+	}
+	_, err = seam.Search(context.Background(), web.WebSearchRequest{Query: "go release"})
+	var webErr *llm.Error
+	if !errors.As(err, &webErr) || webErr.Code() != web.CodeProviderUnavailable {
+		t.Fatalf("post-dispose err = %v", err)
+	}
+}
+
+// The session-query-sqlite row lazily provides the FTS5 read model: the
+// store is present right after assembly (openAt "never") and closes through
+// the dispose chain.
+func TestCatalogSessionQuerySqliteLazyStore(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "session-query-sqlite", Name: "@deepseek-ai/dsh-session-query-sqlite",
+			Config: map[string]any{"path": filepath.Join(home, "query.db")}},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	if root.Get(ServiceSessionQuerySQLite) == nil {
+		t.Fatal("sessionQuerySqlite service missing after Assemble")
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)

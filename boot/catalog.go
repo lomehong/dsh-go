@@ -53,6 +53,7 @@ import (
 	"dshgo/session/projection"
 	"dshgo/session/projectioncache"
 	"dshgo/sessionlog"
+	"dshgo/sessionquerysqlite"
 	"dshgo/sessiontitle"
 	"dshgo/sessiontitlellm"
 	"dshgo/settings"
@@ -84,10 +85,12 @@ import (
 	"dshgo/toolskill"
 	"dshgo/toolsubagent"
 	"dshgo/toolsubagentreport"
+	"dshgo/toolweb"
 	"dshgo/typert"
 	"dshgo/web"
 	"dshgo/webfetchhttp"
 	"dshgo/webhook"
+	"dshgo/websearchdeepseek"
 	"dshgo/workspace"
 )
 
@@ -99,9 +102,12 @@ const (
 	ServiceWebServer = "webServer"
 	// ServiceWeb is the web access capability seam (official ctx.web):
 	// search/fetch provider registries and provider-selecting execution.
-	ServiceWeb        = "web"
-	ServiceCredential = "credentials"
-	ServiceSessions   = "sessions"
+	ServiceWeb = "web"
+	// ServiceSessionQuerySQLite is the lazy SQLite FTS5 derived read model
+	// for session full-text search (official ctx.sessionQuerySqlite).
+	ServiceSessionQuerySQLite = "sessionQuerySqlite"
+	ServiceCredential         = "credentials"
+	ServiceSessions           = "sessions"
 	// ServiceSessionTitle is the live session title service (log-backed
 	// fold surface lives in sessionquery).
 	ServiceSessionTitle      = "sessionTitle"
@@ -386,6 +392,170 @@ var builders = map[string]pluginBuilder{
 					}
 				}
 				return webfetchhttp.AsPlugin(cfg).Apply(ctx)
+			},
+		}
+	},
+
+	// The model-facing web tools (official dsh-tool-web): search/fetch
+	// registration over the web seam. Enablement controls registration; an
+	// enabled tool stays visible when its provider is unavailable and fails
+	// structured at execution. Bounds mirror the official Config defaults;
+	// per-tool budgets resolve here into the tools' timeout field.
+	"@deepseek-ai/dsh-tool-web": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceTools, ServiceWeb, ServiceSystemPrompt},
+			Apply: func(ctx *cordis.Context, config any) error {
+				overridden, _ := config.(map[string]any)
+				boolAt := func(key string, fallback bool) bool {
+					return decodeConfigBool(overridden, key, fallback)
+				}
+				intAt := func(key string, fallback int64) int64 {
+					if overridden != nil {
+						if raw, ok := overridden[key].(int64); ok && raw > 0 {
+							return raw
+						}
+						if raw, ok := overridden[key].(int); ok && raw > 0 {
+							return int64(raw)
+						}
+					}
+					return fallback
+				}
+				toolsRuntime := ctx.Get(ServiceTools).(*tools.ToolRuntime)
+				seam := ctx.Get(ServiceWeb).(*web.Runtime)
+				prompt := ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt)
+				searchEnabled := boolAt("search", true)
+				fetchEnabled := boolAt("fetch", true)
+				if searchEnabled {
+					closer, err := toolweb.ApplyWebSearchTool(toolsRuntime, prompt, seam, toolweb.SearchOptions{
+						MaxResults:   int(intAt("searchMaxResults", toolweb.WebSearchMaxResults)),
+						MaxQueries:   int(intAt("searchMaxQueries", toolweb.WebSearchMaxQueries)),
+						TimeoutMs:    float64(intAt("searchTimeoutMs", toolweb.DefaultWebToolTimeoutMs)),
+						FetchEnabled: fetchEnabled,
+					})
+					if err != nil {
+						return err
+					}
+					ctx.Effect(func() (cordis.Disposer, error) {
+						return cordis.Disposer(closer), nil
+					})
+				}
+				if fetchEnabled {
+					closer, err := toolweb.ApplyWebFetchTool(toolsRuntime, prompt, seam, toolweb.FetchOptions{
+						MaxOutputChars: int(intAt("fetchMaxOutputChars", toolweb.DefaultFetchMaxOutputChars)),
+						TimeoutMs:      float64(intAt("fetchTimeoutMs", toolweb.DefaultWebToolTimeoutMs)),
+					})
+					if err != nil {
+						return err
+					}
+					ctx.Effect(func() (cordis.Disposer, error) {
+						return cordis.Disposer(closer), nil
+					})
+				}
+				return nil
+			},
+		}
+	},
+
+	// The DeepSeek-backed search provider (official dsh-web-search-deepseek):
+	// an Anthropic-compatible Messages call with the native
+	// `web_search_20250305` server tool. It reuses DEEPSEEK_API_KEY but not
+	// DEEPSEEK_BASE_URL — search speaks the Anthropic Messages API. Options
+	// resolve per search through a thunk, so a config change never mixes one
+	// search's key with another's endpoint.
+	"@deepseek-ai/dsh-web-search-deepseek": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceWeb},
+			Apply: func(ctx *cordis.Context, config any) error {
+				overridden, _ := config.(map[string]any)
+				textAt := func(key, fallback string) string {
+					if overridden != nil {
+						if raw, ok := overridden[key].(string); ok && raw != "" {
+							return raw
+						}
+					}
+					return fallback
+				}
+				intAt := func(key string, fallback int64) int64 {
+					if overridden != nil {
+						if raw, ok := overridden[key].(int64); ok && raw > 0 {
+							return raw
+						}
+						if raw, ok := overridden[key].(int); ok && raw > 0 {
+							return int64(raw)
+						}
+					}
+					return fallback
+				}
+				apiKeyEnv := textAt("apiKeyEnv", websearchdeepseek.DefaultAPIKeyEnv)
+				baseURL := textAt("baseURL", "")
+				if baseURL == "" {
+					baseURL = os.Getenv(websearchdeepseek.SearchBaseURLEnv)
+				}
+				if baseURL == "" {
+					baseURL = websearchdeepseek.DefaultBaseURL
+				}
+				// The credential service is an optional seam (official
+				// `ctx.get('credentials')`): without it the environment is
+				// the whole credential plane.
+				var resolveKey func() (string, error)
+				if provider, ok := ctx.Get(ServiceCredential).(credentials.Provider); ok {
+					resolveKey = websearchdeepseek.ResolveAPIKeyFromCredentials(provider, apiKeyEnv)
+				} else {
+					resolveKey = websearchdeepseek.ResolveAPIKeyFromEnv(apiKeyEnv)
+				}
+				seam := ctx.Get(ServiceWeb).(*web.Runtime)
+				provider := websearchdeepseek.NewProvider(func() websearchdeepseek.Options {
+					return websearchdeepseek.Options{
+						APIKey:        textAt("apiKey", ""),
+						ResolveAPIKey: resolveKey,
+						APIKeyEnv:     apiKeyEnv,
+						BaseURL:       baseURL,
+						Model:         textAt("model", websearchdeepseek.DefaultModel),
+						APIVersion:    textAt("apiVersion", websearchdeepseek.DefaultAPIVersion),
+						MaxTokens:     int(intAt("maxTokens", websearchdeepseek.DefaultMaxTokens)),
+						MaxUses:       int(intAt("maxUses", websearchdeepseek.DefaultMaxUses)),
+					}
+				})
+				closer, err := seam.RegisterSearchProvider(provider)
+				if err != nil {
+					return err
+				}
+				ctx.Effect(func() (cordis.Disposer, error) {
+					return closer, nil
+				})
+				return nil
+			},
+		}
+	},
+
+	// SQLite FTS5 derived read model for session full-text search (official
+	// dsh-session-query-sqlite). The official base profile mounts it with
+	// path ":memory:" and openAt "never": the database opens lazily on first
+	// consumer use, never at assembly. The indexed corpus feed (revisions +
+	// live events) is the engine-composition concern this store serves.
+	"@deepseek-ai/dsh-session-query-sqlite": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceSessionQuerySQLite},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := sessionquerysqlite.Config{Path: ":memory:", JournalMode: sessionquerysqlite.JournalWAL}
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["path"].(string); ok && raw != "" {
+						cfg.Path = raw
+					}
+					if raw, ok := overridden["journalMode"].(string); ok && raw != "" {
+						cfg.JournalMode = raw
+					}
+				}
+				lazy := sessionquerysqlite.NewLazyStore(cfg)
+				ctx.Provide(ServiceSessionQuerySQLite, lazy)
+				ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(func() {
+						if err := lazy.Close(); err != nil {
+							deps.Logger.Warn(fmt.Sprintf("session-query-sqlite: close: %v", err))
+						}
+					}), nil
+				})
+				return nil
 			},
 		}
 	},

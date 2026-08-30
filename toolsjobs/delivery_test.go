@@ -3,7 +3,6 @@ package toolsjobs
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -43,6 +42,48 @@ func (r *recorderDriver) Inject(message llm.Message) {
 	r.mu.Lock()
 	r.inject = append(r.inject, message)
 	r.mu.Unlock()
+}
+
+// Followups returns a locked snapshot of the recorded followups.
+func (r *recorderDriver) Followups() []llm.Message {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]llm.Message(nil), r.followup...)
+}
+
+// Injects returns a locked snapshot of the recorded injections.
+func (r *recorderDriver) Injects() []llm.Message {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]llm.Message(nil), r.inject...)
+}
+
+// awaitNotices polls until the driver records the wanted counts. Settlement
+// dispatch runs the delivery listener after the settled channel closes, so
+// the status-poll in settle() is not sufficient synchronization on its own.
+func awaitNotices(t *testing.T, driver *recorderDriver, wantFollowup, wantInject int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		followups, injects := driver.Followups(), driver.Injects()
+		if len(followups) == wantFollowup && len(injects) == wantInject {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("notices: followup=%d (want %d) inject=%d (want %d)", len(followups), wantFollowup, len(injects), wantInject)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// assertNoNotices lets any mis-directed delivery land before asserting
+// absence.
+func assertNoNotices(t *testing.T, driver *recorderDriver) {
+	t.Helper()
+	time.Sleep(25 * time.Millisecond)
+	if followups, injects := driver.Followups(), driver.Injects(); len(followups) != 0 || len(injects) != 0 {
+		t.Fatalf("unexpected notices: followup=%d inject=%d", len(followups), len(injects))
+	}
 }
 
 // liveAgent is one entered registry agent with a recorded driver; it doubles
@@ -140,13 +181,8 @@ func TestDeliveryWakesIdleOwnerWithinBudget(t *testing.T) {
 	defer detach()
 
 	snapshot := settle(t, registry, owner)
-	notices := owner.driver.followup
-	if len(notices) != 1 {
-		t.Fatalf("followup = %d, want 1", len(notices))
-	}
-	if len(owner.driver.inject) != 0 {
-		t.Fatalf("inject = %d, want 0", len(owner.driver.inject))
-	}
+	awaitNotices(t, owner.driver, 1, 0)
+	notices := owner.driver.Followups()
 	notice := notices[0]
 	if notice.Source.Kind != llm.SourcePlugin || notice.Source.Plugin != PluginName || notice.Source.Form != NoticeForm {
 		t.Fatalf("source = %+v", notice.Source)
@@ -178,18 +214,14 @@ func TestDeliveryBudgetExhaustsAndUserInputRefills(t *testing.T) {
 	// self-exciting chain where a woken turn starts the job whose
 	// completion wakes it again.
 	settle(t, registry, owner)
-	if len(owner.driver.followup) != DefaultMaxWakes || len(owner.driver.inject) != 1 {
-		t.Fatalf("followup=%d inject=%d", len(owner.driver.followup), len(owner.driver.inject))
-	}
+	awaitNotices(t, owner.driver, DefaultMaxWakes, 1)
 
 	// A plugin-kind claim must not refill the budget.
 	owner.Events().Emit(agent.EventInboxClaimed, owner.Scope, agent.AgentClaimedPayload{
 		Agent: owner.Agent, Message: pluginNotice(), Turn: 1,
 	})
 	settle(t, registry, owner)
-	if len(owner.driver.inject) != 2 {
-		t.Fatalf("plugin claim refilled the budget: inject=%d", len(owner.driver.inject))
-	}
+	awaitNotices(t, owner.driver, DefaultMaxWakes, 2)
 	// Claiming human input is the point it enters a step: the budget
 	// refills there.
 	owner.Events().Emit(agent.EventInboxClaimed, owner.Scope, agent.AgentClaimedPayload{
@@ -199,9 +231,7 @@ func TestDeliveryBudgetExhaustsAndUserInputRefills(t *testing.T) {
 		t.Fatalf("user claim did not refill: %d", deliverer.SpentWakes(owner.Agent))
 	}
 	settle(t, registry, owner)
-	if len(owner.driver.followup) != DefaultMaxWakes+1 || len(owner.driver.inject) != 2 {
-		t.Fatalf("followup=%d inject=%d, want a fresh wake", len(owner.driver.followup), len(owner.driver.inject))
-	}
+	awaitNotices(t, owner.driver, DefaultMaxWakes+1, 2)
 }
 
 func TestDeliveryInjectsBusyOwnerAndQuietModeNeverWakes(t *testing.T) {
@@ -215,9 +245,7 @@ func TestDeliveryInjectsBusyOwnerAndQuietModeNeverWakes(t *testing.T) {
 	}
 	defer detachBusy()
 	settle(t, registry, busy)
-	if len(busy.driver.inject) != 1 || len(busy.driver.followup) != 0 {
-		t.Fatalf("busy owner: followup=%d inject=%d", len(busy.driver.followup), len(busy.driver.inject))
-	}
+	awaitNotices(t, busy.driver, 0, 1)
 
 	// Quiet delivery never opens a turn, even on an idle owner with a
 	// full budget.
@@ -228,12 +256,7 @@ func TestDeliveryInjectsBusyOwnerAndQuietModeNeverWakes(t *testing.T) {
 	}
 	defer detachQuiet()
 	settle(t, registry, quiet)
-	if len(quiet.driver.followup) != 0 || len(quiet.driver.inject) != 1 {
-		t.Fatalf("quiet: followup=%d inject=%d", len(quiet.driver.followup), len(quiet.driver.inject))
-	}
-	if strings.TrimSpace("") != "" {
-		t.Fatal("unreachable")
-	}
+	awaitNotices(t, quiet.driver, 0, 1)
 }
 
 func TestDeliverySkipsReportedAndUnknownOwners(t *testing.T) {
@@ -256,14 +279,10 @@ func TestDeliverySkipsReportedAndUnknownOwners(t *testing.T) {
 	if _, err := registry.Kill(id, owner.OwnerID(), "done"); err != nil {
 		t.Fatalf("kill: %v", err)
 	}
-	if len(owner.driver.followup) != 0 || len(owner.driver.inject) != 0 {
-		t.Fatalf("reported settlement delivered")
-	}
+	assertNoNotices(t, owner.driver)
 	// An unresolved owner is dropped, not delivered to the wrong agent.
 	settle(t, registry, strangerOwner{})
-	if len(owner.driver.followup) != 0 || len(owner.driver.inject) != 0 {
-		t.Fatalf("unresolved owner delivered")
-	}
+	assertNoNotices(t, owner.driver)
 }
 
 func TestDeliveryDetachStopsDelivery(t *testing.T) {
@@ -275,9 +294,7 @@ func TestDeliveryDetachStopsDelivery(t *testing.T) {
 	}
 	detach()
 	settle(t, registry, owner)
-	if len(owner.driver.followup) != 0 || len(owner.driver.inject) != 0 {
-		t.Fatalf("delivery survived detach")
-	}
+	assertNoNotices(t, owner.driver)
 }
 
 func pluginNotice() llm.Message {
