@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"dshgo/spill"
 )
@@ -31,10 +32,18 @@ const DefaultRootPrefix = "dsh-spill-"
 const defaultRootSuffixChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 // defaultRoot is the lazily-created private per-process spill root.
-var defaultRoot string
+// defaultRootMu guards it: concurrent first uses (parallel tool dispatch is
+// allowed) must observe exactly one root, or the loser's directory leaks
+// past the startup sweep and later reads miss earlier writes.
+var (
+	defaultRoot   string
+	defaultRootMu sync.Mutex
+)
 
 // PrivateRoot returns the lazily-created private per-process spill root.
 func PrivateRoot() (string, error) {
+	defaultRootMu.Lock()
+	defer defaultRootMu.Unlock()
 	if defaultRoot != "" {
 		return defaultRoot, nil
 	}

@@ -232,7 +232,7 @@ func (p *Plugin) Options() (*ConnectionOptions, error) {
 func (p *Plugin) ResolveAPIKey(connection *ConnectionOptions) (string, error) {
 	ref, err := credentials.CredentialRef(connection.APIKeyEnv)
 	if err != nil {
-		return "", fmt.Errorf("llm-deepseek: %v", err)
+		return "", fmt.Errorf("llm-deepseek: %w", err)
 	}
 	if p.deps.Credentials != nil {
 		hit, err := p.deps.Credentials.Resolve(ref)

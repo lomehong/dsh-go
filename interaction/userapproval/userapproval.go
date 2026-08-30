@@ -403,12 +403,7 @@ func (seam approvalSeam) Request(request tools.ApprovalRequest) tools.ApprovalOu
 
 // agentForScope resolves one live agent by its scope key.
 func (s *Service) agentForScope(target scope.ScopeKey) *agent.Agent {
-	for _, candidate := range s.registry.List() {
-		if candidate.Scope == target {
-			return candidate
-		}
-	}
-	return nil
+	return s.registry.ByScope(target)
 }
 
 // newRequestID mints one fresh request id per Request call.

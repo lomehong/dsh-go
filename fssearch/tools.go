@@ -29,7 +29,8 @@ func toString(value any) string {
 
 // Register installs the glob and grep tools (and their system-prompt
 // guidance) on the composed registries. Execution uses the ctx's
-// subprocess service. The returned undo disposes the prompt sections.
+// subprocess service. The returned undo unregisters both tools and
+// disposes the prompt sections.
 func Register(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt, ctx *cordis.Context, caps SearchCaps) (func(), error) {
 	if caps.GlobMaxResults <= 0 {
 		return nil, errArgs("globMaxResults must be positive")
@@ -150,7 +151,7 @@ func registerGlob(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt,
 			if err != nil {
 				return nil, err
 			}
-			run, err := runRipgrep(ctx, caps, "glob", BuildGlobCommand(input))
+			run, err := runRipgrep(ctx, exec.Signal, caps, "glob", BuildGlobCommand(input))
 			if err != nil {
 				return nil, err
 			}
@@ -173,11 +174,12 @@ func registerGlob(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt,
 		rollback()
 		return nil, err
 	}
-	if _, err := runtime.Register(definition); err != nil {
+	undoTool, err := runtime.Register(definition)
+	if err != nil {
 		rollback()
 		return nil, err
 	}
-	return undo, nil
+	return func() { undoTool(); undo() }, nil
 }
 
 func grepDescription(caps SearchCaps) string {
@@ -245,7 +247,7 @@ func registerGrep(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt,
 			if err != nil {
 				return nil, err
 			}
-			run, err := runRipgrep(ctx, caps, "grep", BuildGrepCommand(input))
+			run, err := runRipgrep(ctx, exec.Signal, caps, "grep", BuildGrepCommand(input))
 			if err != nil {
 				return nil, err
 			}
@@ -271,11 +273,12 @@ func registerGrep(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt,
 		rollback()
 		return nil, err
 	}
-	if _, err := runtime.Register(definition); err != nil {
+	undoTool, err := runtime.Register(definition)
+	if err != nil {
 		rollback()
 		return nil, err
 	}
-	return undo, nil
+	return func() { undoTool(); undo() }, nil
 }
 
 // retainFromValue projects the canonical value into the retained list the

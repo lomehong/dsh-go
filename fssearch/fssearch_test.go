@@ -1,12 +1,16 @@
 package fssearch
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"dshgo/cordis"
+	"dshgo/subprocess"
 )
 
 func TestParseGlobArgsValidation(t *testing.T) {
@@ -267,10 +271,30 @@ func TestRunRipgrepMissingBinaryClassification(t *testing.T) {
 	caps := DefaultCaps()
 	caps.RGPath = ""
 	resetRgPathForTest()
-	_, err := runRipgrep(nil, caps, "glob", BuildGlobCommand(GlobInput{Pattern: "x"}))
+	_, err := runRipgrep(nil, nil, caps, "glob", BuildGlobCommand(GlobInput{Pattern: "x"}))
 	var searchErr *SearchError
 	if !errors.As(err, &searchErr) || searchErr.Code != CodeSearchFailed {
 		t.Fatalf("missing binary: %v", err)
+	}
+}
+
+// A cancelled tool-call signal surfaces as SEARCH_ABORTED at the call
+// boundary: the chained context terminates the spawned search process.
+func TestRunRipgrepCancelledSignalAborts(t *testing.T) {
+	binary, err := os.Executable()
+	if err != nil {
+		t.Skipf("cannot resolve the test binary: %v", err)
+	}
+	caps := DefaultCaps()
+	caps.RGPath = binary
+	root := cordis.NewRoot(cordis.Discard{})
+	root.Provide("subprocess", subprocess.Local{})
+	signalCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = runRipgrep(root, signalCtx, caps, "grep", []string{"--json"})
+	var searchErr *SearchError
+	if !errors.As(err, &searchErr) || searchErr.Code != CodeSearchAborted {
+		t.Fatalf("cancelled signal: %v", err)
 	}
 }
 
@@ -279,7 +303,7 @@ func searchErrBoundary(t *testing.T) error {
 	t.Helper()
 	caps := DefaultCaps()
 	caps.RGPath = filepath.Join(t.TempDir(), "definitely-missing-rg")
-	_, err := runRipgrep(nil, caps, "grep", []string{"--json"})
+	_, err := runRipgrep(nil, nil, caps, "grep", []string{"--json"})
 	return err
 }
 

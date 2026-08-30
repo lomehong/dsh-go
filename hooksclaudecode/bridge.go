@@ -193,7 +193,9 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 			}
 			if context := contextFrom(b, merged); context != nil {
 				// agent.inject maps to the next-step pending-input store.
-				_ = agentRef.Inbox.Append(agent.InboxNextStep, *context)
+				if err := agentRef.Inbox.Append(agent.InboxNextStep, *context); err != nil {
+					logger.Warn(fmt.Sprintf("hooks-claude-code: SessionStart context for agent %q was not delivered: %v", agentRef.ID, err))
+				}
 			}
 		})
 		return nil
@@ -300,7 +302,9 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 			text := blockReason(merged, "continue: blocked by Stop hook")
 			// agent.steer maps to the same pending-input store; the driver
 			// re-checks it after this boundary and runs another step.
-			_ = stopping.Agent.Inbox.Append(agent.InboxNextStep, userMessage(b, text))
+			if err := stopping.Agent.Inbox.Append(agent.InboxNextStep, userMessage(b, text)); err != nil {
+				b.logger.Warn(fmt.Sprintf("hooks-claude-code: Stop steering for agent %q was not delivered: %v", stopping.Agent.ID, err))
+			}
 		}
 		return nil, false
 	}))
@@ -323,7 +327,9 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 					return
 				}
 				if context := contextFrom(b, merged); context != nil && child != nil {
-					_ = child.Inbox.Append(agent.InboxNextStep, *context)
+					if err := child.Inbox.Append(agent.InboxNextStep, *context); err != nil {
+						logger.Warn(fmt.Sprintf("hooks-claude-code: SubagentStart context for agent %q was not delivered: %v", child.ID, err))
+					}
 				}
 			})
 			return nil
@@ -352,12 +358,7 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 
 // resolveByScope maps a tool execution scope back to the live agent.
 func resolveByScope(agents *agent.AgentRegistry, key tools.ScopeKey) *agent.Agent {
-	for _, candidate := range agents.List() {
-		if candidate.Scope == key {
-			return candidate
-		}
-	}
-	return nil
+	return agents.ByScope(key)
 }
 
 // resolveChild looks a child agent up by its session id.
@@ -516,22 +517,24 @@ func nextHandlerID() int64 {
 }
 
 // lastTurn reads the last open turn number in the agent's log, or 0
-// without an agent.
+// without an agent. The scan runs newest-first: one decode instead of one
+// per turn-start in a long log.
 func lastTurn(a *agent.Agent) int64 {
 	if a == nil {
 		return 0
 	}
-	last := int64(0)
-	for _, event := range a.Session.Events() {
+	events := a.Session.Events()
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
 		if event.Type != session.EventTurnStart {
 			continue
 		}
 		var data session.TurnStartData
 		if json.Unmarshal(event.Data, &data) == nil {
-			last = data.Turn
+			return data.Turn
 		}
 	}
-	return last
+	return 0
 }
 
 // blocksToText flattens content blocks to the text a hook payload carries

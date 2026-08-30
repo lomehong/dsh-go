@@ -40,36 +40,49 @@ func (s *Store) userObjectCount() (int64, error) {
 }
 
 // begin runs read work inside a deferred transaction on the single
-// connection.
+// connection. A panic in the work rolls the transaction back before it
+// propagates: the store forces one connection, so a dangling open
+// transaction would silently swallow every later statement.
 func (s *Store) begin(read func() error) error {
 	if _, err := s.exec("BEGIN"); err != nil {
 		return fmt.Errorf("sqlite: begin: %w", err)
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			s.rollback()
+		}
+	}()
 	if err := read(); err != nil {
-		s.rollback()
 		return err
 	}
 	if _, err := s.exec("COMMIT"); err != nil {
-		s.rollback()
 		return fmt.Errorf("sqlite: commit: %w", err)
 	}
+	committed = true
 	return nil
 }
 
-// immediate runs mutation work inside a BEGIN IMMEDIATE transaction, rolling
-// back on any failure so the store keeps its pre-operation state.
+// immediate runs mutation work inside a BEGIN IMMEDIATE transaction,
+// rolling back on any failure — including a panic — so the store keeps its
+// pre-operation state.
 func (s *Store) immediate(mutate func() error) error {
 	if _, err := s.exec("BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("sqlite: begin immediate: %w", err)
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			s.rollback()
+		}
+	}()
 	if err := mutate(); err != nil {
-		s.rollback()
 		return err
 	}
 	if _, err := s.exec("COMMIT"); err != nil {
-		s.rollback()
 		return fmt.Errorf("sqlite: commit: %w", err)
 	}
+	committed = true
 	return nil
 }
 

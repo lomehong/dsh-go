@@ -101,7 +101,9 @@ func RegisterPlanCommand(runtime *commands.CommandRuntime, controller *Controlle
 				if message != "" {
 					content = append(content, llm.ContentBlock{Type: llm.BlockText, Text: message})
 				}
-				_ = agentObj.Inbox.Append(agent.InboxNextStep, llm.NewUserMessage(content, llm.MessageSource{Kind: llm.SourceUser}))
+				if appendErr := agentObj.Inbox.Append(agent.InboxNextStep, llm.NewUserMessage(content, llm.MessageSource{Kind: llm.SourceUser})); appendErr != nil {
+					agentObj.Ctx.Logger().Warn(fmt.Sprintf("plan-mode: the entry input for agent %q was not delivered: %v", agentObj.ID, appendErr))
+				}
 			}
 			if outcome == OutcomeCommitted {
 				return successResult("Plan mode on. Use /plan off to leave."), nil

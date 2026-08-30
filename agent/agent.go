@@ -751,6 +751,23 @@ func (r *AgentRegistry) List() []*Agent {
 	return out
 }
 
+// ByScope resolves one live agent by its exact scope key (nil key or
+// absent scope → nil). The one shared implementation every by-scope
+// consumer delegates to.
+func (r *AgentRegistry) ByScope(key scope.ScopeKey) *Agent {
+	if key == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range r.order {
+		if agent := r.store[id].agent; agent.Scope == key {
+			return agent
+		}
+	}
+	return nil
+}
+
 // Roots returns all live top-level agents in registration order: created
 // without an owning agent context. Durable session lineage does not affect
 // this runtime relation, so a resumed fork may still be a root.

@@ -65,23 +65,15 @@ func formatDuration(elapsedMs int64) string {
 	return parts
 }
 
-// reversed returns the session events in reverse order without mutating the
-// live slice.
-func reversed(events []session.Event) []session.Event {
-	out := make([]session.Event, len(events))
-	for index, event := range events {
-		out[len(events)-1-index] = event
-	}
-	return out
-}
-
 // precedingMessageTime finds the latest model-visible event, excluding this
-// plugin's pending append.
+// plugin's pending append. The scan runs newest-first over the live slice —
+// no reversal copy.
 func precedingMessageTime(sess *session.Session) (int64, bool) {
-	for _, event := range reversed(sess.Events()) {
-		switch event.Type {
+	events := sess.Events()
+	for index := len(events) - 1; index >= 0; index-- {
+		switch events[index].Type {
 		case session.EventUserMessage, session.EventAssistantMsg, session.EventToolResult:
-			return event.Time, true
+			return events[index].Time, true
 		}
 	}
 	return 0, false
@@ -90,7 +82,9 @@ func precedingMessageTime(sess *session.Session) (int64, bool) {
 // precedingStepContextTime finds the preceding time-context event within
 // the open turn.
 func precedingStepContextTime(sess *session.Session, turn int64) (int64, bool) {
-	for _, event := range reversed(sess.Events()) {
+	events := sess.Events()
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
 		if event.Type == session.EventTurnStart {
 			var data session.TurnStartData
 			if err := json.Unmarshal(event.Data, &data); err == nil && data.Turn == turn {
@@ -110,7 +104,9 @@ func precedingStepContextTime(sess *session.Session, turn int64) (int64, bool) {
 // latestInjectionTime finds this plugin's latest durable injection,
 // including a shadowed surface event.
 func latestInjectionTime(sess *session.Session) (int64, bool) {
-	for _, event := range reversed(sess.Events()) {
+	events := sess.Events()
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
 		if event.Type != session.EventUserMessage {
 			continue
 		}

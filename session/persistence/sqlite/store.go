@@ -45,6 +45,8 @@ type eventRow struct {
 // AppendBatch durably appends one contiguous batch, creating the header row
 // when the session is not yet materialized.
 func (s *Store) AppendBatch(meta session.SessionHeader, events []session.Event, materialized bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.openDB(); err != nil {
 		return err
 	}
@@ -56,7 +58,7 @@ func (s *Store) AppendBatch(meta session.SessionHeader, events []session.Event, 
 		if err != nil {
 			return err
 		}
-		rows, err := s.tailEventRows(sessionKey)
+		rows, err := s.eventRows(sessionKey)
 		if err != nil {
 			return err
 		}
@@ -80,6 +82,8 @@ func (s *Store) AppendBatch(meta session.SessionHeader, events []session.Event, 
 // span, the source-qualified revision, and the torn-tail marker when the
 // physical tail breaks seq contiguity.
 func (s *Store) LoadStored(id session.SessionID) (*persistence.StoredPrefix, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.openDB(); err != nil {
 		return nil, err
 	}
@@ -119,6 +123,8 @@ func (s *Store) LoadStored(id session.SessionID) (*persistence.StoredPrefix, err
 // ReadStoredRevision reads the current source-qualified revision without
 // loading the event log. An absent identity yields an empty revision.
 func (s *Store) ReadStoredRevision(id session.SessionID) (persistence.Revision, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.openDB(); err != nil {
 		return "", err
 	}
@@ -139,6 +145,8 @@ func (s *Store) ReadStoredRevision(id session.SessionID) (persistence.Revision, 
 // ReadStoredFrom returns the header plus stored events with seq >= fromSeq
 // (the SuffixReader hook; SQL addresses rows by seq directly).
 func (s *Store) ReadStoredFrom(id session.SessionID, fromSeq int64) (*persistence.StoredSuffix, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.openDB(); err != nil {
 		return nil, err
 	}
@@ -178,6 +186,8 @@ func (s *Store) CommitRepair(meta session.SessionHeader, tornMarker any, closers
 	if tornMarker == nil && len(closers) == 0 {
 		return nil
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.openDB(); err != nil {
 		return err
 	}
@@ -233,6 +243,8 @@ func (s *Store) CommitRepair(meta session.SessionHeader, tornMarker any, closers
 
 // List enumerates materialized sessions, one header per session.
 func (s *Store) List() ([]session.SessionHeader, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.openDB(); err != nil {
 		return nil, err
 	}
@@ -249,6 +261,8 @@ func (s *Store) List() ([]session.SessionHeader, error) {
 
 // ListSnapshots lists materialized sessions with cheap per-log change tokens.
 func (s *Store) ListSnapshots() ([]persistence.Snapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.openDB(); err != nil {
 		return nil, err
 	}
@@ -269,6 +283,8 @@ func (s *Store) ListSnapshots() ([]persistence.Snapshot, error) {
 // MaterializeHeader durably creates a header-only session artifact
 // (the HeaderMaterializer hook behind EnsureMaterialized).
 func (s *Store) MaterializeHeader(meta session.SessionHeader) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.openDB(); err != nil {
 		return err
 	}
@@ -282,7 +298,14 @@ func (s *Store) MaterializeHeader(meta session.SessionHeader) error {
 func (s *Store) Name() string { return BackendName }
 
 // Close releases the database handle after the coordinator reaches quiescence.
+// Idempotent; later operations fail loud instead of reopening.
 func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
+	s.closed = true
 	if !s.opened {
 		return nil
 	}
@@ -370,9 +393,9 @@ func scanRows(rows []eventRow, base int64) ([]session.Event, *int64, error) {
 	return preserved, nil, nil
 }
 
-// lastPhysicalSeq reports the highest contiguous physical seq in the tail
-// and refuses a tail broken inside its committed prefix (an append would
-// otherwise build on corrupt state).
+// lastPhysicalSeq reports the highest contiguous physical seq of the stored
+// span and refuses a span broken inside its committed prefix (an append
+// would otherwise build on corrupt state).
 func lastPhysicalSeq(id session.SessionID, rows []eventRow) (int64, error) {
 	if len(rows) == 0 {
 		return -1, nil
@@ -521,11 +544,6 @@ func (s *Store) eventRowsFrom(sessionKey int64, fromSeq int64) ([]eventRow, erro
 		"SELECT seq, type, time, data, source_event_seqs, surface_op, is_packed FROM events WHERE session_id = ? AND seq >= ? ORDER BY seq", sessionKey, fromSeq)
 }
 
-func (s *Store) tailEventRows(sessionKey int64) ([]eventRow, error) {
-	return s.queryEventRows(
-		"SELECT seq, type, time, data, source_event_seqs, surface_op, is_packed FROM events WHERE session_id = ? ORDER BY seq DESC LIMIT 1", sessionKey)
-}
-
 func (s *Store) queryEventRows(query string, args ...any) ([]eventRow, error) {
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -542,13 +560,6 @@ func (s *Store) queryEventRows(query string, args ...any) ([]eventRow, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("sqlite: event rows: %w", err)
-	}
-	// queryEventRows keeps query order; the tail query returns DESC, so
-	// reverse single-row results back into ascending order.
-	if len(out) > 0 && out[0].seq > out[len(out)-1].seq {
-		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-			out[i], out[j] = out[j], out[i]
-		}
 	}
 	return out, nil
 }

@@ -124,7 +124,9 @@ func (c *Controller) Set(agentObj *agent.Agent, active bool) (string, error) {
 	delete(c.pending, sess)
 	c.mu.Unlock()
 	if narration := c.narration(sess, active); narration != nil {
-		_ = agentObj.Inbox.Append(agent.InboxNextTurn, *narration)
+		if err := agentObj.Inbox.Append(agent.InboxNextTurn, *narration); err != nil {
+			agentObj.Ctx.Logger().Warn(fmt.Sprintf("plan-mode: the plan change narration for agent %q was not delivered: %v", agentObj.ID, err))
+		}
 	}
 	return OutcomeCommitted, nil
 }

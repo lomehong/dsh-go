@@ -596,13 +596,8 @@ func Register(runtime *tools.ToolRuntime, deps Deps, config Config) (func(), err
 // resolveExecAgent resolves the calling agent for policy resolution and
 // observation attribution.
 func resolveExecAgent(agents *agent.AgentRegistry, exec *tools.ToolRunContext) *agent.Agent {
-	if agents == nil || exec == nil || exec.Agent == nil {
+	if agents == nil || exec == nil {
 		return nil
 	}
-	for _, candidate := range agents.List() {
-		if candidate.Scope == exec.Agent {
-			return candidate
-		}
-	}
-	return nil
+	return agents.ByScope(exec.Agent)
 }

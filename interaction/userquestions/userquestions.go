@@ -265,12 +265,7 @@ func (s *Service) dispatch(request Request) (answer AskUserQuestionAnswer, err e
 // AgentByScope resolves one live agent by its scope key, for consumers that
 // only carry a tools ScopeKey (the model-facing tool).
 func (s *Service) AgentByScope(target scope.ScopeKey) *agent.Agent {
-	for _, candidate := range s.registry.List() {
-		if candidate.Scope == target {
-			return candidate
-		}
-	}
-	return nil
+	return s.registry.ByScope(target)
 }
 
 func asUserQuestionError(err error, target *UserQuestionError) bool {

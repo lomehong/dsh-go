@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
@@ -123,13 +124,20 @@ func NormalizeConfig(config Config) (Config, error) {
 	return config, nil
 }
 
-// Store opens, owns, and drives the physical session database.
+// Store opens, owns, and drives the physical session database. Every public
+// operation holds mu for its whole duration — the official store drives one
+// single-threaded DatabaseSync handle, and the Go port reproduces that
+// serialization explicitly: raw BEGIN/COMMIT boundaries are only safe when
+// no other goroutine can interleave a statement on the shared connection
+// (SetMaxOpenConns(1) limits connections, not statement interleaving).
 type Store struct {
+	mu        sync.Mutex
 	config    Config
 	db        *sql.DB
 	storeID   string
 	pathReady error
 	opened    bool
+	closed    bool
 }
 
 // Open validates filesystem ownership without opening the database; the
@@ -151,10 +159,13 @@ func Open(config Config) (*Store, error) {
 // ValidatePath settles the store's one path-validation operation.
 func (s *Store) ValidatePath() error { return s.pathReady }
 
-// openDB lazily opens and validates the database.
+// openDB lazily opens and validates the database. Callers hold mu.
 func (s *Store) openDB() error {
 	if s.opened {
 		return nil
+	}
+	if s.closed {
+		return errors.New("sqlite: store is closed")
 	}
 	if s.pathReady != nil {
 		return s.pathReady
@@ -213,6 +224,21 @@ func (s *Store) configureAndValidate() error {
 		return err
 	}
 
+	// page_size only takes effect on a database with no pages allocated,
+	// and SQLite silently ignores it inside a transaction — so it must run
+	// outside the initialization transaction, and only when the database is
+	// provably fresh (an unversioned foreign database is refused below, but
+	// rewriting its page layout first would damage it).
+	fresh, err := s.looksFresh()
+	if err != nil {
+		return err
+	}
+	if fresh {
+		if _, err := s.exec("PRAGMA page_size = 8192"); err != nil {
+			return fmt.Errorf("sqlite: page_size: %w", err)
+		}
+	}
+
 	beginErr := s.immediate(func() error {
 		userVersion, err := s.queryInt("PRAGMA user_version")
 		if err != nil {
@@ -256,6 +282,31 @@ func (s *Store) configureAndValidate() error {
 	return beginErr
 }
 
+// looksFresh reports whether the database has no user version, no
+// application identity, and no user schema objects — the only shape the
+// initializer may rewrite. Callers hold mu.
+func (s *Store) looksFresh() (bool, error) {
+	userVersion, err := s.queryInt("PRAGMA user_version")
+	if err != nil {
+		return false, fmt.Errorf("sqlite: user_version read: %w", err)
+	}
+	if userVersion != 0 {
+		return false, nil
+	}
+	applicationID, err := s.queryInt("PRAGMA application_id")
+	if err != nil {
+		return false, fmt.Errorf("sqlite: application_id read: %w", err)
+	}
+	if applicationID != 0 {
+		return false, nil
+	}
+	objects, err := s.userObjectCount()
+	if err != nil {
+		return false, err
+	}
+	return objects == 0, nil
+}
+
 // selectJournalMode sets the journal pragma and verifies the database
 // retained it. In-memory databases have no journal; SQLite reports
 // `memory` there and the official open expects exactly that.
@@ -295,9 +346,6 @@ func (s *Store) configureDurability() error {
 
 // initialize creates the schema and stamps ownership in one transaction.
 func (s *Store) initialize() error {
-	if _, err := s.exec("PRAGMA page_size = 8192"); err != nil {
-		return fmt.Errorf("sqlite: page_size: %w", err)
-	}
 	if _, err := s.exec(schemaSQL); err != nil {
 		return fmt.Errorf("sqlite: schema: %w", err)
 	}

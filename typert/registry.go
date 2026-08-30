@@ -223,9 +223,9 @@ func newDescriptorStore(kind ChangeKind, report reporter) *descriptorStore {
 	}
 }
 
-// validate refuses a batch that duplicates an endpoint or id inside the
-// batch or against the live store. It mutates nothing.
-func (s *descriptorStore) validate(descriptors []InvocationDescriptor) error {
+// validateLocked refuses a batch that duplicates an endpoint or id inside
+// the batch or against the live store. It mutates nothing. Callers hold mu.
+func (s *descriptorStore) validateLocked(descriptors []InvocationDescriptor) error {
 	endpoints := map[string]bool{}
 	ids := map[string]bool{}
 	for i := range descriptors {
@@ -252,11 +252,17 @@ func (s *descriptorStore) validate(descriptors []InvocationDescriptor) error {
 	return nil
 }
 
-// commit installs the validated batch under one owner, keeping registration
-// order, then emits one change per descriptor outside the lock.
-func (s *descriptorStore) commit(owner *ownerToken, descriptors []InvocationDescriptor) {
+// install atomically validates and commits one batch under a single lock
+// hold, then emits one change per descriptor outside the lock — a
+// concurrent registration cannot win the same endpoint or id between the
+// check and the install.
+func (s *descriptorStore) install(owner *ownerToken, descriptors []InvocationDescriptor) error {
 	keys := make([]string, 0, len(descriptors))
 	s.mu.Lock()
+	if err := s.validateLocked(descriptors); err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	for i := range descriptors {
 		endpoint := TypertEndpoint(descriptors[i])
 		s.entries[endpoint] = descriptors[i]
@@ -272,6 +278,7 @@ func (s *descriptorStore) commit(owner *ownerToken, descriptors []InvocationDesc
 	for _, endpoint := range keys {
 		s.changes.emit(RegistryChange{Kind: s.kind, Key: endpoint})
 	}
+	return nil
 }
 
 // withdraw removes exactly the calling owner's entries and emits their
@@ -347,6 +354,9 @@ func newRemoteStore(descriptors *descriptorStore) *remoteStore {
 
 // register validates and installs one Remote contribution, returning the
 // exact disposer that withdraws it. Duplicate package registration rejects.
+// The package seat and the descriptor install happen as one unit: the seat
+// is claimed under the package lock (so a concurrent registration of the
+// same package sees it taken), and a descriptor failure rolls the seat back.
 func (s *remoteStore) register(contribution TypertRemoteContribution) (Disposer, error) {
 	if err := validateSegment("Remote package name", contribution.Package); err != nil {
 		return nil, err
@@ -356,15 +366,17 @@ func (s *remoteStore) register(contribution TypertRemoteContribution) (Disposer,
 		s.mu.Unlock()
 		return nil, fmt.Errorf("typert: Remote package %q is already registered", contribution.Package)
 	}
-	s.mu.Unlock()
-	if err := s.descriptors.validate(contribution.Descriptors); err != nil {
-		return nil, err
-	}
 	owner := &ownerToken{}
-	s.mu.Lock()
 	s.packages[contribution.Package] = owner
 	s.mu.Unlock()
-	s.descriptors.commit(owner, contribution.Descriptors)
+	if err := s.descriptors.install(owner, contribution.Descriptors); err != nil {
+		s.mu.Lock()
+		if s.packages[contribution.Package] == owner {
+			delete(s.packages, contribution.Package)
+		}
+		s.mu.Unlock()
+		return nil, err
+	}
 	return Disposer(func() {
 		s.mu.Lock()
 		if s.packages[contribution.Package] == owner {

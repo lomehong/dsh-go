@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -47,8 +48,12 @@ func ValidateEventJSON(eventType string, data any) error {
 		return fmt.Errorf("session: event %s data is not JSON-serializable (%T); marshal it to the canonical shapes first",
 			eventType, data)
 	}
-	if encoded, err := json.Marshal(data); err != nil || !json.Valid(encoded) {
-		return fmt.Errorf("session: event %s data failed to encode as JSON: %v", eventType, err)
+	encoded, err := json.Marshal(data)
+	if err == nil && !json.Valid(encoded) {
+		err = errors.New("encoded payload is not valid JSON")
+	}
+	if err != nil {
+		return fmt.Errorf("session: event %s data failed to encode as JSON: %w", eventType, err)
 	}
 	return nil
 }

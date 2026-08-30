@@ -3,6 +3,7 @@ package fslocal
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,7 +131,7 @@ func readDiffBasis(path string, maxBytes int64) ([]byte, error) {
 		return nil, fmt.Errorf("fslocal: basis not diffable")
 	}
 	raw := make([]byte, info.Size())
-	if _, err := file.Read(raw); err != nil && info.Size() > 0 {
+	if _, err := io.ReadFull(file, raw); err != nil && info.Size() > 0 {
 		return nil, err
 	}
 	if bytes.ContainsRune(raw, 0) || !utf8Valid(raw) {

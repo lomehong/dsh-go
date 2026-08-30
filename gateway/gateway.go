@@ -291,7 +291,7 @@ func (g *Gateway) resolveReceiverContext(signal context.Context, descriptor type
 	}
 	context, ok := resolved.(*cordis.Context)
 	if !ok {
-		return nil, gatewayErrorf(CodeContextFailed, endpoint, invocation.Wire, invocation.Wire,
+		return nil, gatewayErrorf(CodeContextFailed, endpoint, invocation.Wire,
 			"Context provider %q resolved a non-Context value", invocation.Context)
 	}
 	return context, nil

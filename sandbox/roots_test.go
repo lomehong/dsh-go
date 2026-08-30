@@ -26,11 +26,9 @@ func TestWritableRootsByMode(t *testing.T) {
 			t.Fatalf("roots must be deduplicated: %v", roots)
 		}
 		seen[root] = true
-		// The /tmp grant is inert on Windows (nothing canonicalizes into
-		// it); every other root must be absolute.
-		if runtime.GOOS == "windows" && root == "/tmp" {
-			continue
-		}
+		// Dead grants (those that do not canonicalize to an absolute path,
+		// e.g. the host /tmp on Windows) drop out of WritableRoots, so every
+		// surviving root must be absolute.
 		if !filepath.IsAbs(root) {
 			t.Fatalf("roots must be absolute: %q", root)
 		}

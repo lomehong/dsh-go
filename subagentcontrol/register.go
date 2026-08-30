@@ -102,15 +102,10 @@ func listingServices(deps ListingDeps) subagent.ListChildrenServices {
 // (the established resolveByScope pattern); a transport sub-dispatch has no
 // agent of its own and resolves nothing.
 func resolveCaller(agents *agent.AgentRegistry, key tools.ScopeKey) *agent.Agent {
-	if key == nil {
+	if agents == nil {
 		return nil
 	}
-	for _, candidate := range agents.List() {
-		if candidate.Scope == key {
-			return candidate
-		}
-	}
-	return nil
+	return agents.ByScope(key)
 }
 
 // statusOf refines one candidate's status through the live registry and its

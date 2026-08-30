@@ -172,7 +172,7 @@ func ReadProfileManifest(binName, dir string) (map[string]any, error) {
 	path := filepath.Join(dir, "package.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("%s: failed to read profile manifest %s: %v", binName, path, err)
+		return nil, fmt.Errorf("%s: failed to read profile manifest %s: %w", binName, path, err)
 	}
 	var parsed map[string]any
 	if err := json.Unmarshal(raw, &parsed); err != nil || parsed == nil {
@@ -350,7 +350,7 @@ func LoadProfile(binName, name, installAnchor, home string, userLayer bool) (*Pr
 	// A hand-written profile manifest may omit the dsh section entirely.
 	bundles, patchReload, hasPatchReload, err := profileSection(manifest)
 	if err != nil {
-		return nil, fmt.Errorf("%s: profile manifest %s: %v", binName, filepath.Join(dir, "package.json"), err)
+		return nil, fmt.Errorf("%s: profile manifest %s: %w", binName, filepath.Join(dir, "package.json"), err)
 	}
 	if !hasPatchReload {
 		patchReload = string(DefaultProfilePatchReload)

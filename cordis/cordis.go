@@ -111,6 +111,10 @@ func newContext(parent *Context, logger Logger) *Context {
 	}
 }
 
+// Logger exposes the context's composed logger (never nil: roots default
+// to Discard).
+func (c *Context) Logger() Logger { return c.logger }
+
 // Get resolves a service by key, walking the ancestor chain only. nil means
 // "service absent"; callers degrade exactly like ctx.get(name) consumers.
 func (c *Context) Get(name string) any {

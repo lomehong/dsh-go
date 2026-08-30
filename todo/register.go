@@ -147,15 +147,10 @@ func Register(runtime *tools.ToolRuntime, agents *agent.AgentRegistry, projectio
 // resolveAgent resolves one live agent by its tools scope key; the todo
 // list is per-agent-session state, so the owning instance must be live.
 func resolveAgent(agents *agent.AgentRegistry, target scope.ScopeKey) *agent.Agent {
-	if agents == nil || target == nil {
+	if agents == nil {
 		return nil
 	}
-	for _, candidate := range agents.List() {
-		if candidate.Scope == target {
-			return candidate
-		}
-	}
-	return nil
+	return agents.ByScope(target)
 }
 
 // todosProjectionDefinition builds the todos unit: latest whole todo/write

@@ -35,12 +35,7 @@ func (r RegistryAgentSource) ResolveAgent(scope any) *agent.Agent {
 	if !ok {
 		return nil
 	}
-	for _, candidate := range r.Registry.List() {
-		if candidate.Scope == key {
-			return candidate
-		}
-	}
-	return nil
+	return r.Registry.ByScope(key)
 }
 
 // sessionCwd derives the working directory a filesystem tool resolves
