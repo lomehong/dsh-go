@@ -1,12 +1,12 @@
 // The agent-preset roster: the composition set a deployment supplies, with
 // the read, copy, and remove operations its surfaces offer.
 //
-// Ported from packages/preset/agent-presets/src/index.ts. The official
-// service also owns standing mounts (per-preset cordis scopes agents join),
-// agent reparenting, and service lookups inside a mount. Those are Loader
-// machinery: Go composes agents programmatically and has no cordis fiber to
-// re-parent, so this port keeps the roster, resolution, and authoring faces
-// and records the standing-mount machinery as deferred.
+// Ported from packages/preset/agent-presets/src/index.ts. The roster face
+// covers discovery, resolution, and authoring; the standing-mount
+// machinery (per-preset cordis scopes agents join) lives beside it in
+// mount.go. Go composes agents programmatically and has no cordis fiber to
+// re-parent, so the recompose layer that re-links agents between presets
+// stays deferred.
 package preset
 
 import (
@@ -34,8 +34,12 @@ type RosterOptions struct {
 	// there is nothing to clear.
 	ClearDefaultOverride func()
 	// Now is unused today and reserved for stamp-based mount caching;
-	// tests may leave it nil.
+	// tests may leave it nil. Stamps themselves live on the standing
+	// mounts (see mount.go).
 	Now func() int64
+	// InvalidateStanding drops any standing record for a preset id; the
+	// boot layer wires it to the mount table. nil leaves records alone.
+	InvalidateStanding func(id string)
 }
 
 // Roster is one deployment's agent-preset set.
@@ -195,9 +199,9 @@ func (r *Roster) ReadDocument(id string) (AgentPresetDocument, error) {
 //
 // A settled mount under this id can only be stale (its preset was deleted
 // from disk outside Remove); the new preset must not inherit it. Every
-// session already joined keeps the generation it runs on regardless. The Go
-// roster keeps the invalidation as a no-op: standing mounts are deferred
-// (recorded deviation), so there is nothing to drop.
+// session already joined keeps the generation it runs on regardless: the
+// standing table keys by preset id, and this id was vacant, so no live
+// generation can be attached to it.
 func (r *Roster) Copy(from string, id string, name *string) error {
 	if !ValidPresetID(from) {
 		return &InvalidPresetIDError{PresetID: from}
@@ -219,7 +223,13 @@ func (r *Roster) Copy(from string, id string, name *string) error {
 		}
 	}
 	_, err = CopyComposition(r.resolvedRoots(), source, id, name)
-	return err
+	if err != nil {
+		return err
+	}
+	if r.options.InvalidateStanding != nil {
+		r.options.InvalidateStanding(id)
+	}
+	return nil
 }
 
 // Remove deletes a locally authored preset. Sessions on the deleted preset

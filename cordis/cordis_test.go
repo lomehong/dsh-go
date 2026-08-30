@@ -85,6 +85,40 @@ func TestDeferredInjectionFailureIsReportedNotSilent(t *testing.T) {
 	}
 }
 
+func TestPendingInjectionsNamesTheMissingServices(t *testing.T) {
+	ctx := NewRoot(Discard{})
+	ctx.Inject([]string{"llm", "settings"}, func(c *Context) error { return nil })
+	ctx.Inject([]string{"llm"}, func(c *Context) error { return nil })
+	pending := ctx.PendingInjections()
+	if len(pending) != 2 {
+		t.Fatalf("pending = %v", pending)
+	}
+	if len(pending[0]) != 2 || pending[0][0] != "llm" || pending[0][1] != "settings" {
+		t.Fatalf("first set = %v", pending[0])
+	}
+	// A satisfied ancestor removes a name from the missing set.
+	ctx.Provide("llm", "svc")
+	pending = ctx.PendingInjections()
+	if len(pending) != 1 || len(pending[0]) != 1 || pending[0][0] != "settings" {
+		t.Fatalf("pending after partial satisfaction = %v", pending)
+	}
+	ctx.Provide("settings", "svc")
+	if pending := ctx.PendingInjections(); len(pending) != 0 {
+		t.Fatalf("pending after full satisfaction = %v", pending)
+	}
+}
+
+func TestPendingInjectionsSeeAncestorServices(t *testing.T) {
+	root := NewRoot(Discard{})
+	root.Provide("llm", "svc")
+	child := root.Child()
+	// An ancestor-satisfied injection runs inline and never parks.
+	child.Inject([]string{"llm"}, func(c *Context) error { return nil })
+	if child.PendingInjections() != nil {
+		t.Fatal("inline-satisfied injection counted as pending")
+	}
+}
+
 func TestDisposeRunsDisposersLIFOAndIsIdempotent(t *testing.T) {
 	ctx := NewRoot(Discard{})
 	var order []string

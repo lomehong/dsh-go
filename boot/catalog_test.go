@@ -3,6 +3,7 @@ package boot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,9 +17,11 @@ import (
 	"dshgo/gateway"
 	"dshgo/interaction/permissionpresets"
 	"dshgo/llm/deepseek"
+	"dshgo/preset"
 	"dshgo/session"
 	"dshgo/session/persistence"
 	"dshgo/session/projectioncache"
+	"dshgo/sessiontitle"
 	"dshgo/settings"
 	"dshgo/shell"
 	"dshgo/spill"
@@ -30,6 +33,8 @@ import (
 	"dshgo/tools"
 	"dshgo/toolsubagent"
 	"dshgo/typert"
+	"dshgo/webhook"
+	"dshgo/workspace"
 )
 
 func TestCatalogResolvesOfficialNames(t *testing.T) {
@@ -723,6 +728,114 @@ func TestCatalogPolicySkillAndExtensionsBatch(t *testing.T) {
 	}
 	// skill-filesystem registered its provider: the registry accepts a
 	// second provider registration without complaint (names are per-source).
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+// stubRule is a do-nothing webhook rule for the composition test.
+type stubRule struct{}
+
+func (stubRule) ID() webhook.WebhookRuleID { return "boot-composition-stub" }
+func (stubRule) Kind() string              { return "test" }
+func (stubRule) Run(webhook.VerifiedWebhookDelivery, context.Context) (*webhook.WebhookSessionRequest, error) {
+	return nil, nil
+}
+
+func TestCatalogSessionTitleWorkspacePresetsAndWebhookCompose(t *testing.T) {
+	home := t.TempDir()
+	presetRoot := t.TempDir()
+	presetDir := filepath.Join(presetRoot, "minimal")
+	if err := os.MkdirAll(presetDir, 0o755); err != nil {
+		t.Fatalf("mkdir preset: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(presetDir, preset.CompositionFile), []byte("[]"), 0o644); err != nil {
+		t.Fatalf("write composition: %v", err)
+	}
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
+		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
+		{ID: "persistence", Name: "@deepseek-ai/dsh-session-persistence-jsonl"},
+		{ID: "storage", Name: "@deepseek-ai/dsh-storage"},
+		{ID: "storage-json", Name: "@deepseek-ai/dsh-storage-json",
+			Config: map[string]any{"root": filepath.Join(home, "storages")}},
+		{ID: "storage-domain", Name: "@deepseek-ai/dsh-storage-domain",
+			Config: map[string]any{"backend": "json"}},
+		{ID: "agent-default-model", Name: "@deepseek-ai/dsh-agent-default-model",
+			Config: map[string]any{"provider": "deepseek-official", "model": "deepseek-chat"}},
+		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
+		{ID: "permission-presets", Name: "@deepseek-ai/dsh-permission-presets"},
+		{ID: "session-title", Name: "@deepseek-ai/dsh-session-title",
+			Config: map[string]any{"fallbackMaxWords": float64(5), "fallbackMaxBytes": float64(40), "maxTitleBytes": float64(80)}},
+		{ID: "workspace", Name: "@deepseek-ai/dsh-workspace"},
+		{ID: "agent-presets", Name: "@deepseek-ai/dsh-agent-presets",
+			Config: map[string]any{
+				"default":            "minimal",
+				"roots":              []any{map[string]any{"path": presetRoot, "trust": "user"}},
+				"includeShippedRoot": false,
+			}},
+		{ID: "webhook", Name: "@deepseek-ai/dsh-webhook"},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	for _, service := range []string{ServiceSessionTitle, ServiceWorkspace, ServiceAgentPresets, ServiceWebhookRuntime} {
+		if root.Get(service) == nil {
+			t.Fatalf("service %q missing after Assemble", service)
+		}
+	}
+
+	// The title service carries the base limits: normalization pins and a
+	// blank title refuses with the official invalid error.
+	sessions := root.Get(ServiceSessions).(*session.Store)
+	sess, err := sessions.Create("title-compose", session.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	titles := root.Get(ServiceSessionTitle).(*sessiontitle.Service)
+	if snapshot, err := titles.Rename(sess, "  Composed\t title  "); err != nil || snapshot.Title != "Composed title" {
+		t.Fatalf("rename = %+v, %v", snapshot, err)
+	}
+	var invalid *sessiontitle.SessionTitleInvalidError
+	if _, err := titles.Rename(sess, "   "); !errors.As(err, &invalid) {
+		t.Fatalf("blank refusal = %v", err)
+	}
+
+	// The workspace registry opens its durable domain and creates rows.
+	workspaces := root.Get(ServiceWorkspace).(*workspace.Registry)
+	if _, err := workspaces.Create(context.Background(), t.TempDir(), ""); err != nil {
+		t.Fatalf("workspace create: %v", err)
+	}
+	if len(workspaces.List()) != 1 {
+		t.Fatalf("workspaces = %d", len(workspaces.List()))
+	}
+
+	// The preset roster resolves its configured root; the standing key
+	// composes the empty composition, and an unknown id fails loud.
+	mounts := root.Get(ServiceAgentPresets).(*preset.Mounts)
+	resolved, err := mounts.Resolve("minimal")
+	if err != nil || resolved.ID != "minimal" {
+		t.Fatalf("resolve minimal = %+v, %v", resolved, err)
+	}
+	if _, err := mounts.StandingKeyFor("minimal"); err != nil {
+		t.Fatalf("standing key: %v", err)
+	}
+	if _, err := mounts.Resolve("ghost"); err == nil {
+		t.Fatal("unknown preset resolved")
+	}
+
+	// The webhook runtime registers and drains rules.
+	runtimeService := root.Get(ServiceWebhookRuntime).(*webhook.WebhookRuntime)
+	disposeRule, err := runtimeService.Register(stubRule{})
+	if err != nil {
+		t.Fatalf("register rule: %v", err)
+	}
+	if err := disposeRule(); err != nil {
+		t.Fatalf("dispose rule: %v", err)
+	}
+
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)
 	}

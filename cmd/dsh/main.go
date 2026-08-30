@@ -60,6 +60,8 @@ func run() error {
 			boot.ServiceSessionPersist, boot.ServiceUserQuestions,
 			boot.ServiceUserApproval, boot.ServicePermissionPresets,
 			boot.ServiceSystemPrompt, boot.ServiceAgentLoop, boot.ServiceSubagentRuntime,
+			boot.ServiceSessionTitle, boot.ServiceWorkspace, boot.ServiceAgentPresets,
+			boot.ServiceWebhookRuntime,
 		} {
 			present := app.Root().Get(service) != nil
 			fmt.Printf("  %-20s %v\n", service, present)

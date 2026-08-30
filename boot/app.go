@@ -15,6 +15,11 @@ type PluginSpec struct {
 	Inject []string
 	// Provide declares the services apply contributes (loader metadata).
 	Provide []string
+	// Mountable declares the plugin safe inside a preset standing
+	// composition: its registrations file into the standing scope layer
+	// (via preset.StandingScopeService) instead of the global one. The
+	// standing assembler rejects rows naming any other plugin.
+	Mountable bool
 	// Apply mounts the plugin. Config is the entry's config value.
 	Apply func(ctx *cordis.Context, config any) error
 }
@@ -98,6 +103,21 @@ func (a *App) mount(ctx *cordis.Context, entries []loader.Entry, resolver Plugin
 	}
 	return nil
 }
+
+// PendingInjections audits the assembled tree: every deferred injection
+// still waiting on unresolved services across the root and every group
+// child, one set per stranded row. Standing mounts read this to reject a
+// composition that never reached a usable state.
+func (a *App) PendingInjections() [][]string {
+	out := a.root.PendingInjections()
+	for _, child := range a.children {
+		out = append(out, child.PendingInjections()...)
+	}
+	return out
+}
+
+// Dispose tears the assembled tree down to quiescence.
+func (a *App) Dispose() error { return a.Shutdown() }
 
 // Shutdown disposes the assembled tree: child contexts unwind in reverse
 // mount order before the root, so descendants never outlive their owners.

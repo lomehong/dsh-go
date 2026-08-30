@@ -11,6 +11,7 @@ package scope
 
 import (
 	"fmt"
+	"sync"
 	"sync/atomic"
 )
 
@@ -19,6 +20,7 @@ import (
 type ScopeKey = *scopeKey
 
 type scopeKey struct {
+	mu     sync.Mutex
 	parent ScopeKey
 }
 
@@ -27,11 +29,55 @@ func NewScopeKey(parent ScopeKey) ScopeKey {
 	return &scopeKey{parent: parent}
 }
 
+// parentOf reads one key's enclosing scope with the lock held: the parent
+// is mutable through BindParent, and chain walks race it.
+func (k *scopeKey) parentOf() ScopeKey {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	return k.parent
+}
+
+// ParentOf reads one key's enclosing scope; nil for a root scope.
+func ParentOf(key ScopeKey) ScopeKey {
+	if key == nil {
+		return nil
+	}
+	return key.parentOf()
+}
+
+// ScopeParentBinding is the handle that alone may re-link a bound scope key.
+type ScopeParentBinding struct {
+	// Rebind re-links the bound key to a new parent.
+	Rebind func(next ScopeKey)
+}
+
+// BindParent links one scope key under its enclosing scope after minting.
+// A key binds once: re-linking requires the binding the original bind
+// returned. Port of bindScopeParent in packages/core/scope/src/index.ts;
+// the refusal wording is verbatim.
+func BindParent(key ScopeKey, parent ScopeKey) (ScopeParentBinding, error) {
+	if key == nil {
+		return ScopeParentBinding{}, fmt.Errorf("dsh-scope: cannot bind a nil scope key")
+	}
+	key.mu.Lock()
+	if key.parent != nil {
+		key.mu.Unlock()
+		return ScopeParentBinding{}, fmt.Errorf("dsh-scope: scope key is already bound to a parent; re-linking requires the binding returned by the original bind")
+	}
+	key.parent = parent
+	key.mu.Unlock()
+	return ScopeParentBinding{Rebind: func(next ScopeKey) {
+		key.mu.Lock()
+		key.parent = next
+		key.mu.Unlock()
+	}}, nil
+}
+
 // ChainOf returns the keys from a key to its root ancestor, nearest-first;
 // nil yields the empty chain.
 func ChainOf(key ScopeKey) []ScopeKey {
 	var chain []ScopeKey
-	for cursor := key; cursor != nil; cursor = cursor.parent {
+	for cursor := key; cursor != nil; cursor = cursor.parentOf() {
 		chain = append(chain, cursor)
 	}
 	return chain
@@ -44,7 +90,7 @@ func Admits(tag, key ScopeKey) bool {
 	if tag == nil {
 		return true
 	}
-	for cursor := key; cursor != nil; cursor = cursor.parent {
+	for cursor := key; cursor != nil; cursor = cursor.parentOf() {
 		if cursor == tag {
 			return true
 		}

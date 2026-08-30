@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"dshgo/agent"
 	"dshgo/agentinstructions"
@@ -42,6 +43,7 @@ import (
 	"dshgo/llm/deepseek"
 	"dshgo/llmretry"
 	"dshgo/planmode"
+	"dshgo/preset"
 	"dshgo/sandbox"
 	"dshgo/sandboxpolicy"
 	"dshgo/session"
@@ -51,6 +53,7 @@ import (
 	"dshgo/session/projection"
 	"dshgo/session/projectioncache"
 	"dshgo/sessionlog"
+	"dshgo/sessiontitle"
 	"dshgo/settings"
 	"dshgo/settings/file"
 	"dshgo/shell"
@@ -81,6 +84,8 @@ import (
 	"dshgo/toolsubagent"
 	"dshgo/toolsubagentreport"
 	"dshgo/typert"
+	"dshgo/webhook"
+	"dshgo/workspace"
 )
 
 // Service names plugins publish and consume through ctx inject lists.
@@ -131,6 +136,18 @@ const (
 	// one executor provider composes per host (mounting both fails loud).
 	ServiceShell = "shell"
 	ServiceFS    = "fs"
+	// ServiceSessionTitle normalizes, validates, and pins session titles
+	// (official 'sessionTitle').
+	ServiceSessionTitle = "sessionTitle"
+	// ServiceWorkspace is the durable Web Workspace registry (official
+	// 'workspaceRegistry').
+	ServiceWorkspace = "workspaceRegistry"
+	// ServiceAgentPresets is the preset roster and standing-mount table
+	// (official 'agentPresets').
+	ServiceAgentPresets = "agentPresets"
+	// ServiceWebhookRuntime is the fire-and-forget webhook rule registry
+	// (official 'webhookRuntime').
+	ServiceWebhookRuntime = "webhookRuntime"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -2197,6 +2214,163 @@ var batchThreeBuilders = map[string]pluginBuilder{
 			},
 		}
 	},
+
+	// The session title service (official dsh-session-title): normalizes,
+	// validates, and pins session titles over the live store. Config may
+	// replace the shipped base limits (5/40/80 from the base bundle).
+	"@deepseek-ai/dsh-session-title": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSessions},
+			Provide: []string{ServiceSessionTitle},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := sessiontitle.Config{FallbackMaxWords: 5, FallbackMaxBytes: 40, MaxTitleBytes: 80}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				service, err := sessiontitle.NewService(ctx.Get(ServiceSessions).(*session.Store), cfg)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceSessionTitle, service)
+				return nil
+			},
+		}
+	},
+
+	// The Web Workspace registry (official dsh-workspace): durable
+	// workspace rows over the storage domain, bootstrapped from the stored
+	// session history and live against the session store.
+	"@deepseek-ai/dsh-workspace": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSessionPersist, ServiceSessions, ServiceStorageDomain},
+			Provide: []string{ServiceWorkspace},
+			Apply: func(ctx *cordis.Context, config any) error {
+				registry, dispose, err := workspace.NewRegistry(context.Background(), workspace.RegistryHost{
+					Persistence: persistenceListAdapter{coordinator: ctx.Get(ServiceSessionPersist).(*persistence.Coordinator)},
+					Sessions:    liveSessionsAdapter{store: ctx.Get(ServiceSessions).(*session.Store)},
+					Logger:      deps.Logger,
+				}, ctx.Get(ServiceStorageDomain).(*storagedomain.Facility))
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceWorkspace, registry)
+				return ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(dispose), nil })
+			},
+		}
+	},
+
+	// The agent preset roster and standing-mount table (official
+	// dsh-agent-presets): shipped/user root discovery, authoring copies,
+	// and one standing composition per mounted preset. Config names the
+	// default and any deployment roots (base-bundle shape: `default`);
+	// `shippedRoot` is the Go seam for the bundled preset directory the
+	// official resolves from its own package. A composed settings store
+	// carries the live user default override, exactly like the official
+	// optional settings injection.
+	"@deepseek-ai/dsh-agent-presets": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceAgentPresets},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					Default            string              `json:"default"`
+					Roots              []preset.PresetRoot `json:"roots"`
+					IncludeShippedRoot *bool               `json:"includeShippedRoot"`
+					IncludeUserRoot    *bool               `json:"includeUserRoot"`
+					ShippedRoot        string              `json:"shippedRoot"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				includeShippedRoot := true
+				if cfg.IncludeShippedRoot != nil {
+					includeShippedRoot = *cfg.IncludeShippedRoot
+				}
+				includeUserRoot := true
+				if cfg.IncludeUserRoot != nil {
+					includeUserRoot = *cfg.IncludeUserRoot
+				}
+				var defaultOverride func() (string, bool)
+				var clearDefaultOverride func()
+				if store, ok := ctx.Get(ServiceSettings).(*settings.Store); ok && store != nil {
+					defaultOverride = func() (string, bool) {
+						value, present := store.Section(preset.SettingsNamespace)["default"].(string)
+						return value, present && strings.TrimSpace(value) != ""
+					}
+					clearDefaultOverride = func() {
+						section := store.Section(preset.SettingsNamespace)
+						cleared := make(map[string]any, len(section))
+						for key, value := range section {
+							if key != "default" {
+								cleared[key] = value
+							}
+						}
+						_ = store.ProviderPush(preset.SettingsNamespace, cleared)
+					}
+				}
+				var invalidateStanding func(string)
+				roster := preset.NewRoster(preset.Config{
+					Default:            cfg.Default,
+					Roots:              cfg.Roots,
+					IncludeShippedRoot: includeShippedRoot,
+					IncludeUserRoot:    includeUserRoot,
+				}, preset.RosterOptions{
+					ShippedRoot:          cfg.ShippedRoot,
+					DefaultOverride:      defaultOverride,
+					ClearDefaultOverride: clearDefaultOverride,
+					InvalidateStanding: func(id string) {
+						if invalidateStanding != nil {
+							invalidateStanding(id)
+						}
+					},
+				})
+				mounts, err := NewPresetMounts(ctx, roster, deps)
+				if err != nil {
+					return err
+				}
+				invalidateStanding = mounts.Invalidate
+				ctx.Provide(ServiceAgentPresets, mounts)
+				return nil
+			},
+		}
+	},
+
+	// The webhook rule runtime (official dsh-webhook): fire-and-forget
+	// rules whose only built-in action is the workspace-backed Session
+	// creation transaction, composed here over the injected services
+	// exactly like the official runtime's inject list.
+	"@deepseek-ai/dsh-webhook": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{
+				ServiceAgents, ServiceAgentDefaultModel, ServiceAgentPresets,
+				ServicePermissionPresets, ServiceSessionTitle, ServiceWorkspace,
+			},
+			Provide: []string{ServiceWebhookRuntime},
+			Apply: func(ctx *cordis.Context, config any) error {
+				sessionDeps := webhook.SessionDeps{
+					Logger:            deps.Logger,
+					DefaultModel:      ctx.Get(ServiceAgentDefaultModel).(*agentdefaultmodel.Config).CurrentSelection,
+					PermissionPresets: ctx.Get(ServicePermissionPresets).(*permissionpresets.Service),
+					Presets:           ctx.Get(ServiceAgentPresets).(*preset.Mounts),
+					Workspaces:        ctx.Get(ServiceWorkspace).(*workspace.Registry),
+					Agents:            ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					Titles:            ctx.Get(ServiceSessionTitle).(*sessiontitle.Service),
+				}
+				runtime := webhook.NewWebhookRuntime(deps.Logger, func(
+					delivery webhook.VerifiedWebhookDelivery,
+					ruleID webhook.WebhookRuleID,
+					request webhook.WebhookSessionRequest,
+					signal context.Context,
+				) error {
+					return webhook.CreateWebhookSession(sessionDeps, delivery, ruleID, request, signal)
+				})
+				ctx.Provide(ServiceWebhookRuntime, runtime)
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(runtime.Dispose), nil
+				})
+			},
+		}
+	},
+
 	// Event-only filesystem observation policy (official
 	// dsh-fs-observation-policy): the fs/write-intent and fs/edit-intent
 	// single-slot decisions derive from recorded fs/observed state; without
@@ -2426,6 +2600,41 @@ type maintenanceOwner struct {
 
 func (m maintenanceOwner) RunMaintenance(task func(signal context.Context) error) error {
 	return m.driver.RunMaintenance(task)
+}
+
+// persistenceListAdapter adapts the coordinator's stored-history listing to
+// the workspace registry's context-carrying persistence seam.
+type persistenceListAdapter struct {
+	coordinator *persistence.Coordinator
+}
+
+func (a persistenceListAdapter) List(context.Context) ([]session.SessionHeader, error) {
+	return a.coordinator.List()
+}
+
+// liveSessionsAdapter adapts the live session store to the workspace
+// registry's live-header seam: live sessions outrank the persisted index.
+type liveSessionsAdapter struct {
+	store *session.Store
+}
+
+func (a liveSessionsAdapter) Header(id session.SessionID) (session.SessionHeader, bool) {
+	sess := a.store.Get(id)
+	if sess == nil {
+		return session.SessionHeader{}, false
+	}
+	return sess.Header(), true
+}
+
+func (a liveSessionsAdapter) List() []session.SessionHeader {
+	ids := a.store.List()
+	headers := make([]session.SessionHeader, 0, len(ids))
+	for _, id := range ids {
+		if sess := a.store.Get(id); sess != nil {
+			headers = append(headers, sess.Header())
+		}
+	}
+	return headers
 }
 
 func init() {

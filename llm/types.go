@@ -62,10 +62,11 @@ type ContentBlock struct {
 
 // MessageSource kinds (merge-extensible).
 const (
-	SourceUser   = "user"
-	SourcePlugin = "plugin"
-	SourceModel  = "model"
-	SourceTool   = "tool"
+	SourceUser    = "user"
+	SourcePlugin  = "plugin"
+	SourceModel   = "model"
+	SourceTool    = "tool"
+	SourceWebhook = "webhook"
 )
 
 // ContextForm values: the SEMANTIC kind of producer-supplied context —
@@ -103,6 +104,12 @@ type MessageSource struct {
 	// Host-canonicalized browser zone reported by that request.
 	RPCID          string `json:"rpcId,omitempty"`
 	ClientTimeZone string `json:"clientTimeZone,omitempty"`
+	// Webhook source: the delivery provenance the acting rule recorded —
+	// the adapter instance, the provider delivery id, and the rule that
+	// acted (createWebhookSession).
+	WebhookSource string `json:"source,omitempty"`
+	DeliveryID    string `json:"deliveryId,omitempty"`
+	RuleID        string `json:"ruleId,omitempty"`
 	// Plugin context form and the fields that form requires.
 	Form     string                   `json:"form,omitempty"`
 	Sections []ContextSnapshotSection `json:"sections,omitempty"`

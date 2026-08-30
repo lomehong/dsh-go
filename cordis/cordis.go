@@ -200,6 +200,34 @@ func (c *Context) satisfiedLocked(names []string) bool {
 	return true
 }
 
+// PendingInjections reports every deferred injection still waiting on
+// unresolved services: one entry per pending injection, holding the names
+// that remain absent from this context and its ancestors. The audit lets a
+// composition fail loud on rows that never reached a usable state instead
+// of leaving them silently deferred.
+func (c *Context) PendingInjections() [][]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.pending) == 0 {
+		return nil
+	}
+	out := make([][]string, 0, len(c.pending))
+	for _, p := range c.pending {
+		missing := make([]string, 0, len(p.names))
+		for _, n := range p.names {
+			if _, ok := c.services[n]; ok {
+				continue
+			}
+			if c.parent != nil && c.parent.Get(n) != nil {
+				continue
+			}
+			missing = append(missing, n)
+		}
+		out = append(out, missing)
+	}
+	return out
+}
+
 // Inject runs fn once every named service resolves from this context: inline
 // when already present, otherwise deferred until a Provide satisfies it. The
 // deferred run reports its failures through the logger and returns nil here.

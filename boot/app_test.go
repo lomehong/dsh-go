@@ -156,3 +156,61 @@ func TestAssembleFailsLoudOnInvalidDisabled(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestAppPendingInjectionsAuditsRootAndGroups(t *testing.T) {
+	waiter := func(name string) (PluginSpec, error) {
+		if name == "dsh/waiter" {
+			return PluginSpec{Inject: []string{"absent"}, Apply: func(ctx *cordis.Context, config any) error {
+				return nil
+			}}, nil
+		}
+		return PluginSpec{}, errors.New("module not found")
+	}
+	root := cordis.NewRoot(cordis.Discard{})
+	entries := []loader.Entry{
+		{ID: "top", Name: "dsh/waiter"},
+		{ID: "grp", Name: "group", Group: true, Config: []loader.Entry{
+			{ID: "nested", Name: "dsh/waiter"},
+		}},
+	}
+	app, err := Assemble(root, entries, waiter)
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	pending := app.PendingInjections()
+	if len(pending) != 2 {
+		t.Fatalf("pending = %v", pending)
+	}
+	for _, set := range pending {
+		if len(set) != 1 || set[0] != "absent" {
+			t.Fatalf("pending set = %v", set)
+		}
+	}
+	if err := app.Dispose(); err != nil {
+		t.Fatalf("dispose: %v", err)
+	}
+}
+
+func TestMountableResolverRejectsUnflaggedPlugins(t *testing.T) {
+	inner := func(name string) (PluginSpec, error) {
+		switch name {
+		case "dsh/plain":
+			return PluginSpec{}, nil
+		case "dsh/safe":
+			return PluginSpec{Mountable: true}, nil
+		default:
+			return PluginSpec{}, errors.New("module not found")
+		}
+	}
+	resolver := mountableResolver(inner)
+	if _, err := resolver("dsh/plain"); err == nil || !strings.Contains(err.Error(), "not mountable into preset compositions") {
+		t.Fatalf("unflagged plugin = %v", err)
+	}
+	spec, err := resolver("dsh/safe")
+	if err != nil || !spec.Mountable {
+		t.Fatalf("flagged plugin = %+v, %v", spec, err)
+	}
+	if _, err := resolver("dsh/ghost"); err == nil {
+		t.Fatal("unknown plugin passed the mountable resolver")
+	}
+}
