@@ -16,6 +16,7 @@ import (
 	"dshgo/fs"
 	"dshgo/gateway"
 	"dshgo/interaction/permissionpresets"
+	"dshgo/llm"
 	"dshgo/llm/deepseek"
 	"dshgo/preset"
 	"dshgo/session"
@@ -875,6 +876,40 @@ func TestCatalogWebSeamAndWebserverCompose(t *testing.T) {
 	if _, err := runtime.Fetch(context.Background(), web.WebFetchRequest{URL: "https://example.test"}); err == nil ||
 		err.Error() != `configured web provider "http" is not registered` {
 		t.Fatalf("pinned fetch = %v", err)
+	}
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+func TestCatalogWebFetchHttpProviderRegistersIntoTheSeam(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "web", Name: "@deepseek-ai/dsh-web",
+			Config: map[string]any{"fetchProvider": "http"}},
+		{ID: "web-fetch-http", Name: "@deepseek-ai/dsh-web-fetch-http",
+			Config: map[string]any{"maxResponseBytes": float64(1000), "maxRedirects": float64(2)}},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	runtime, ok := root.Get(ServiceWeb).(*web.Runtime)
+	if !ok {
+		t.Fatal("web seam service missing after Assemble")
+	}
+	// The seam selects the registered provider: a policy rejection from the
+	// provider itself (not a seam selection failure) proves registration.
+	_, err = runtime.Fetch(context.Background(), web.WebFetchRequest{URL: "ftp://blocked"})
+	var webErr *llm.Error
+	if !errors.As(err, &webErr) || webErr.Code() != "WEB_INVALID_URL" ||
+		err.Error() != `unsupported URL scheme "ftp" (only http and https are allowed)` {
+		t.Fatalf("provider fetch = %v", err)
+	}
+	// The search capability stays untouched: still no usable provider.
+	_, err = runtime.Search(context.Background(), web.WebSearchRequest{Query: "q"})
+	if !errors.As(err, &webErr) || webErr.Code() != web.CodeProviderUnavailable {
+		t.Fatalf("search capability = %v", err)
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)

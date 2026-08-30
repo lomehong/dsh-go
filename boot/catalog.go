@@ -86,6 +86,7 @@ import (
 	"dshgo/toolsubagentreport"
 	"dshgo/typert"
 	"dshgo/web"
+	"dshgo/webfetchhttp"
 	"dshgo/webhook"
 	"dshgo/workspace"
 )
@@ -355,6 +356,36 @@ var builders = map[string]pluginBuilder{
 				}
 				ctx.Provide(ServiceWeb, web.NewRuntime(ctx, cfg))
 				return nil
+			},
+		}
+	},
+
+	// The anonymous public HTTP(S) fetch provider (official
+	// dsh-web-fetch-http, provider id "http"): public-address pinning,
+	// same-origin redirects, size/time caps, and text decoding, registered
+	// into the web seam without owning it.
+	"@deepseek-ai/dsh-web-fetch-http": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceWeb},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := webfetchhttp.Config{}
+				if overridden, ok := config.(map[string]any); ok {
+					intOf := func(key string) *int {
+						if raw, ok := overridden[key].(float64); ok {
+							value := int(raw)
+							return &value
+						}
+						return nil
+					}
+					cfg.MaxResponseBytes = intOf("maxResponseBytes")
+					cfg.MaxBodyChars = intOf("maxBodyChars")
+					cfg.TimeoutMs = intOf("timeoutMs")
+					cfg.MaxRedirects = intOf("maxRedirects")
+					if raw, ok := overridden["userAgent"].(string); ok && raw != "" {
+						cfg.UserAgent = raw
+					}
+				}
+				return webfetchhttp.AsPlugin(cfg).Apply(ctx)
 			},
 		}
 	},
