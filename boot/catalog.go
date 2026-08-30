@@ -42,6 +42,7 @@ import (
 	"dshgo/settings/file"
 	"dshgo/shell"
 	"dshgo/shelllocal"
+	"dshgo/shelltool"
 	"dshgo/skill"
 	"dshgo/strreplaceeditor"
 	"dshgo/subagent"
@@ -609,6 +610,57 @@ func toolsCallerOf(agents *agent.AgentRegistry) toolsjobs.CallerOf {
 	}
 }
 
+// agentResolverOf adapts the live agent registry onto the by-scope
+// resolver seam (the established resolveByScope pattern).
+func agentResolverOf(agents *agent.AgentRegistry) func(tools.ScopeKey) *agent.Agent {
+	return func(sc tools.ScopeKey) *agent.Agent {
+		if sc == nil {
+			return nil
+		}
+		for _, candidate := range agents.List() {
+			if candidate.Scope == sc {
+				return candidate
+			}
+		}
+		return nil
+	}
+}
+
+// buildShellTool builds the model-facing shell tool plugin spec (shared by
+// the dsh-tool-bash and dsh-tool-pwsh rows): injects the tool runtime, the
+// composed shell executor, the prompt, the managed DSH_* registry, and the
+// optional jobs service; the executor flavor picks the tool identity.
+func buildShellTool() pluginBuilder {
+	return func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools, ServiceShell, ServiceSystemPrompt, ServiceShellEnv, ServiceJobs, ServiceAgents},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				prompt := (*systemprompt.SystemPrompt)(nil)
+				if candidate := ctx.Get(ServiceSystemPrompt); candidate != nil {
+					prompt = candidate.(*systemprompt.SystemPrompt)
+				}
+				jobsRegistry := (*jobs.LocalRegistry)(nil)
+				if candidate := ctx.Get(ServiceJobs); candidate != nil {
+					jobsRegistry = candidate.(*jobs.LocalRegistry)
+				}
+				toolDeps := shelltool.Deps{
+					Runtime: ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					Prompt:  prompt,
+					Shell:   ctx.Get(ServiceShell).(shell.ShellExecutor),
+					Env:     ctx.Get(ServiceShellEnv).(*shell.ShellEnvRegistry),
+					Jobs:    jobsRegistry,
+					Agents:  agentResolverOf(ctx.Get(ServiceAgents).(*agent.AgentRegistry)),
+				}
+				cfg := shelltool.DefaultConfig()
+				cfg.BackgroundEnabled = decodeConfigBool(config, "enableRunInBackground", true)
+				_, err := shelltool.Register(toolDeps, cfg)
+				return err
+			},
+		}
+	}
+}
+
 // decodeConfigBool reads one boolean composition field with its default.
 func decodeConfigBool(config any, key string, fallback bool) bool {
 	if overridden, ok := config.(map[string]any); ok {
@@ -1042,7 +1094,7 @@ var batchThreeBuilders = map[string]pluginBuilder{
 	// path is not composed yet, so that contributor lands with it.
 	"@deepseek-ai/dsh-shell-env": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
-			Inject:  []string{},
+			Inject:  []string{ServiceAgents},
 			Provide: []string{ServiceShellEnv},
 			Apply: func(ctx *cordis.Context, config any) error {
 				var cfg struct {
@@ -1051,11 +1103,20 @@ var batchThreeBuilders = map[string]pluginBuilder{
 				if err := decodeConfigJSON(config, &cfg); err != nil {
 					return err
 				}
-				ctx.Provide(ServiceShellEnv, shell.NewShellEnvRegistry(cfg.DshHome, nil))
+				ctx.Provide(ServiceShellEnv, shell.NewShellEnvRegistry(cfg.DshHome, agentResolverOf(ctx.Get(ServiceAgents).(*agent.AgentRegistry))))
 				return nil
 			},
 		}
 	},
+
+	// The model-facing shell tools (dsh-tool-bash + dsh-tool-pwsh): one
+	// tool per composed executor flavor, sharing one surface — command/
+	// description/timeoutMs/workdir, run_in_background through the jobs
+	// seam when the jobs service is composed, foreground results rendered
+	// with the exit-status markers. The profile composes exactly one row:
+	// tool-bash on POSIX, tool-pwsh on win32.
+	"@deepseek-ai/dsh-tool-bash": buildShellTool(),
+	"@deepseek-ai/dsh-tool-pwsh": buildShellTool(),
 
 	// The filesystem discovery tool suite (`glob`, `grep`): foreground
 	// spawns of a ripgrep binary through the subprocess seam with fixed

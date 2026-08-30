@@ -3,12 +3,14 @@ package boot
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"dshgo/cordis"
 	"dshgo/cordis/loader"
 	"dshgo/fs"
+	"dshgo/shell"
 	"dshgo/subagent"
 	"dshgo/tools"
 )
@@ -115,12 +117,21 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		loader.Entry{ID: "fs-sandbox", Name: "@deepseek-ai/dsh-fs-sandbox"},
 		loader.Entry{ID: "editor", Name: "@deepseek-ai/dsh-tool-str-replace-editor"},
 		loader.Entry{ID: "shell-env", Name: "@deepseek-ai/dsh-shell-env"},
-		loader.Entry{ID: "bash", Name: "@deepseek-ai/dsh-bash-local"},
-		loader.Entry{ID: "pwsh", Name: "@deepseek-ai/dsh-pwsh-local"},
 		loader.Entry{ID: "tool-fs", Name: "@deepseek-ai/dsh-tool-fs"},
 		loader.Entry{ID: "tool-fs-search", Name: "@deepseek-ai/dsh-tool-fs-search"},
 		loader.Entry{ID: "subprocess", Name: "@deepseek-ai/dsh-subprocess"},
 	)
+	// One shell executor + one model-facing shell tool per host: the
+	// official win32 layer swaps the bash rows for the pwsh ones.
+	if runtime.GOOS == "windows" {
+		entries = append(entries,
+			loader.Entry{ID: "pwsh", Name: "@deepseek-ai/dsh-pwsh-local"},
+			loader.Entry{ID: "tool-pwsh", Name: "@deepseek-ai/dsh-tool-pwsh"})
+	} else {
+		entries = append(entries,
+			loader.Entry{ID: "bash", Name: "@deepseek-ai/dsh-bash-local"},
+			loader.Entry{ID: "tool-bash", Name: "@deepseek-ai/dsh-tool-bash"})
+	}
 	app, err := Assemble(root, entries, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
 	if err != nil {
 		t.Fatalf("assemble: %v", err)
@@ -147,6 +158,15 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		if _, ok := toolRuntime.Get(name, nil); !ok {
 			t.Fatalf("tool %q missing after Assemble", name)
 		}
+	}
+	// The model-facing shell tool follows the composed executor flavor.
+	shellExecutor := root.Get(ServiceShell).(shell.ShellExecutor)
+	shellTool := "bash"
+	if shellExecutor.Name() == "pwsh-local" {
+		shellTool = "pwsh"
+	}
+	if _, ok := toolRuntime.Get(shellTool, nil); !ok {
+		t.Fatalf("shell tool %q missing after Assemble", shellTool)
 	}
 	// Under a confining backend the escalation fields are advertised.
 	schema := toolRuntime.Schemas(nil)

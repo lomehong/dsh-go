@@ -191,6 +191,9 @@ type ShellProcess interface {
 //     boundary is ctx.subprocess disposal, so a background process
 //     survives an executor-only reload.
 type ShellExecutor interface {
+	// Name identifies the executor flavor ("bash-local"/"pwsh-local") —
+	// the tool layer derives its tool identity from it.
+	Name() string
 	// SandboxMode is the sandbox mode this executor applies by default,
 	// or empty when it does not sandbox commands.
 	SandboxMode() string
