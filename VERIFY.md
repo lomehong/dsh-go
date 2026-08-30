@@ -814,3 +814,12 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - goal① 清单逐项实证（README 批行）：continuation manager 生产装配、app-boot、settings/credentials、storage hub、llm-deepseek、webserver、permission-presets section+created 钩子全部在位；唯 webhook SessionCreator 仍待 preset-mount。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -v -p 4` **PASS=1182 FAIL=0**（+6）。
 - 账实对齐：68→**69/86**，缺失清单 18→17 项。
+
+## r39 — 账目审计修正 + 四行处置（loader/worker 架构面）
+
+- 程序化审计重建权威账目：yml 86 行逐条（id→name 配对）vs catalog 实名——**wired 64/86、missing 22**。此前簿记"69/86、17 项"系逐轮累计误差（r33 基线即已偏低），r39 起以程序化比对为准，README 全量更正。
+- 四行新处置（逐一读官方源取证，不硬凑）：`dsh-typert-loader`（21.5KB）——loader 动态挂载时读 package.json `./typert` 导出自动注册 manifest；Go 无动态加载，registry 行已在组装期静态注册，能力等价。`dsh-plugin-package-inventory-deepseek`（10.3KB）——注入 `loader` 服务盘点 npm 插件包身份供 DeepSeek 请求；Go 无 loader/npm 插件面，N-A。`dsh-workflow-worker-thread`（95.6KB）——Node worker 线程执行模型 JS 编排脚本；Go workflow 引擎直执行编译态 `Script`（engine.go 架构注释即此义），worker 面不存在。`dsh-tool-workflow`（24.7KB）——模型面 JS 脚本工具，执行依赖 JS 运行时；与 PTC run_code 同因受阻，Go 引擎保留为库面（Go 侧编排可用）。
+- 盘点副产：llm-pi-ai 实为 173.9KB/15 文件的 pi-ai SDK 多路适配器（泛化"继承已装 provider 的端点/协议/目录"机制 TS-SDK 特有）——Go 等价物为逐 provider 直写适配器，是否需要取决于部署要接的 provider 清单，列待深盘不硬凑。
+- 权威待办 16 行按族落 README（title 2 / web 3 / sandbox 3 / goal 5 / 存储+遥测 2 / llm-pi-ai 1）。
+- 门禁：gofmt clean、vet clean、全量测试维持 **PASS=1182 FAIL=0**（本轮无代码变更，-v 复跑确认）。
+- 账实对齐：簿记修正为 **wired 64/86**；处置累计 6 行；待办 16 行。
