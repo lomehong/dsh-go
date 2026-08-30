@@ -52,6 +52,7 @@ import (
 	"dshgo/todo"
 	"dshgo/tokenmeter"
 	"dshgo/toolfs"
+	"dshgo/toolresultpruner"
 	"dshgo/tools"
 	"dshgo/toolsjobs"
 	"dshgo/toolskill"
@@ -80,6 +81,9 @@ const (
 	ServicePlanMode          = "planMode"
 	ServiceTokenMeter        = "tokenMeter"
 	ServiceCompaction        = "compaction"
+	// ServiceToolResultPruner is the optional model-free tool-result prune
+	// pass; compaction-basic consumes it when composed.
+	ServiceToolResultPruner = "toolResultPruner"
 	// ServiceSubprocess is the child-process execution seam (fs-search and
 	// the shell tools consume it).
 	ServiceSubprocess = "subprocess"
@@ -868,7 +872,10 @@ var batchThreeBuilders = map[string]pluginBuilder{
 	// The replay-aware compaction engine: config resolved fail-loud at
 	// composition; summarization rides the llm runtime, capacity resolution
 	// rides the same runtime's model info, durability rides the persistence
-	// coordinator's flush.
+	// coordinator's flush. The tool-result pruner is an optional
+	// composition: mount the pruner entry BEFORE this entry (cordis apply
+	// order, matching the official README), or compaction composes without
+	// it.
 	"@deepseek-ai/dsh-compaction-basic": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
 			Inject:  []string{ServiceLlm, ServiceTokenMeter, ServiceSessionPersist},
@@ -879,17 +886,44 @@ var batchThreeBuilders = map[string]pluginBuilder{
 					return err
 				}
 				runtime := ctx.Get(ServiceLlm).(*llm.Runtime)
-				engine, err := compactionbasic.NewEngine(cfg, compactionbasic.EngineConfig{
+				engineConfig := compactionbasic.EngineConfig{
 					LLM:       runtime,
 					Meter:     ctx.Get(ServiceTokenMeter).(*tokenmeter.Meter),
 					Logger:    deps.Logger,
 					ModelInfo: runtime,
 					Flusher:   ctx.Get(ServiceSessionPersist).(*persistence.Coordinator),
-				})
+				}
+				if pruner := ctx.Get(ServiceToolResultPruner); pruner != nil {
+					engineConfig.Pruner = pruner.(*toolresultpruner.Pruner)
+				}
+				engine, err := compactionbasic.NewEngine(cfg, engineConfig)
 				if err != nil {
 					return err
 				}
 				ctx.Provide(ServiceCompaction, engine)
+				return nil
+			},
+		}
+	},
+
+	// The model-free tool-result pruner: deterministic head/middle/tail
+	// budgets over the current tool-result surface, replacements priced by
+	// the adjacent compaction/prune shadow-price event. Pricing rides the
+	// same fixed estimator the token meter's fold uses, so no service
+	// dependency is declared.
+	"@deepseek-ai/dsh-compaction-tool-result-pruner": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceToolResultPruner},
+			Apply: func(ctx *cordis.Context, config any) error {
+				decoded, err := toolresultpruner.DecodeConfig(config)
+				if err != nil {
+					return err
+				}
+				resolved, err := toolresultpruner.ResolveConfig(decoded)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceToolResultPruner, toolresultpruner.New(resolved))
 				return nil
 			},
 		}

@@ -11,6 +11,7 @@ import (
 	"dshgo/llm"
 	"dshgo/session"
 	"dshgo/tokenmeter"
+	"dshgo/toolresultpruner"
 )
 
 // Compaction triggers.
@@ -25,7 +26,7 @@ const (
 // (dsh-compaction-tool-result-pruner). Compaction remains independently
 // composable without it.
 type Pruner interface {
-	PruneSession(sess *session.Session)
+	PruneSession(sess *session.Session) (toolresultpruner.PruneResult, error)
 }
 
 // SessionFlusher is the durability checkpoint seam the manual transaction
@@ -190,7 +191,9 @@ func (e *Engine) CompactIfNeeded(view AgentView, trigger string, signal context.
 
 	if trigger == TriggerContextOverflow {
 		if pruner != nil {
-			pruner.PruneSession(view.Session())
+			if _, err := pruner.PruneSession(view.Session()); err != nil {
+				return nil, err
+			}
 			measurement, err = e.meter.Measure(view.Session(), nil)
 			if err != nil {
 				return nil, err
@@ -236,7 +239,9 @@ func (e *Engine) CompactIfNeeded(view AgentView, trigger string, signal context.
 	// Once pressure qualifies, land the model-free pass before choosing a
 	// summary range, then remeasure through the singleton replay fold.
 	if pruner != nil {
-		pruner.PruneSession(view.Session())
+		if _, err := pruner.PruneSession(view.Session()); err != nil {
+			return nil, err
+		}
 		measurement, err = e.meter.Measure(view.Session(), nil)
 		if err != nil {
 			return nil, err

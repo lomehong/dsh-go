@@ -12,6 +12,7 @@ import (
 	"dshgo/fs"
 	"dshgo/shell"
 	"dshgo/subagent"
+	"dshgo/toolresultpruner"
 	"dshgo/tools"
 )
 
@@ -106,7 +107,8 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		"permission-presets", "system-prompt", "agent-loop", "subagent",
 		"skill", "tool-skill", "tool-todo", "jobs-local", "tool-jobs",
 		"plan-mode", "repeat-tool-reminder", "token-meter",
-		"compaction-basic", "command-compact", "tool-subagent-control",
+		"compaction-tool-result-pruner", "compaction-basic", "command-compact",
+		"tool-subagent-control",
 	} {
 		entries = append(entries, runtimeSpec(name))
 	}
@@ -148,10 +150,17 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 	if fork.Capabilities().OutputSchema {
 		t.Fatal("fork must not advertise outputSchema before the structured round")
 	}
-	for _, service := range []string{ServiceSkills, ServiceJobs, ServicePlanMode, ServiceTokenMeter, ServiceCompaction, ServiceSandboxPolicy, ServiceFS, ServiceSubprocess} {
+	for _, service := range []string{ServiceSkills, ServiceJobs, ServicePlanMode, ServiceTokenMeter, ServiceCompaction, ServiceToolResultPruner, ServiceSandboxPolicy, ServiceFS, ServiceSubprocess} {
 		if root.Get(service) == nil {
 			t.Fatalf("service %q missing after Assemble", service)
 		}
+	}
+	// The pruner entry mounted before compaction-basic composes into the
+	// engine's optional prune pass: the resolved budgets are the plugin's
+	// defaults.
+	pruner := root.Get(ServiceToolResultPruner).(*toolresultpruner.Pruner)
+	if pruner.Config() != toolresultpruner.Defaults {
+		t.Fatalf("pruner budgets: %+v", pruner.Config())
 	}
 	toolRuntime := root.Get(ServiceTools).(*tools.ToolRuntime)
 	for _, name := range []string{"read", "write", "edit", "glob", "grep"} {
