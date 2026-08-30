@@ -14,6 +14,7 @@ import (
 	"dshgo/fs"
 	"dshgo/gateway"
 	"dshgo/interaction/permissionpresets"
+	"dshgo/llm/deepseek"
 	"dshgo/session"
 	"dshgo/session/persistence"
 	"dshgo/settings"
@@ -180,7 +181,7 @@ func TestCatalogRegistersInProcessProviders(t *testing.T) {
 		loader.Entry{ID: "shell-env", Name: "@deepseek-ai/dsh-shell-env"},
 		loader.Entry{ID: "tool-fs", Name: "@deepseek-ai/dsh-tool-fs"},
 		loader.Entry{ID: "tool-fs-search", Name: "@deepseek-ai/dsh-tool-fs-search"},
-		loader.Entry{ID: "subprocess", Name: "@deepseek-ai/dsh-subprocess"},
+		loader.Entry{ID: "subprocess", Name: "@deepseek-ai/dsh-subprocess-local"},
 	)
 	// One shell executor + one model-facing shell tool per host: the
 	// official win32 layer swaps the bash rows for the pwsh ones.
@@ -549,5 +550,45 @@ func TestCatalogStorageHubDomainAndSpillRoundTrip(t *testing.T) {
 	// unit rather than silently serving.
 	if _, err := hub.Domain(); err == nil {
 		t.Fatal("domain form must unmount on disposal")
+	}
+}
+
+func TestCatalogPolicySkillAndExtensionsBatch(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
+		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
+		{ID: "tools", Name: "@deepseek-ai/dsh-tools"},
+		{ID: "llm", Name: "@deepseek-ai/dsh-llm"},
+		{ID: "skills", Name: "@deepseek-ai/dsh-skill"},
+		{ID: "persistence", Name: "@deepseek-ai/dsh-session-persistence-jsonl"},
+		{ID: "timeout-policy", Name: "@deepseek-ai/dsh-tool-call-timeout-policy"},
+		{ID: "agent-instructions", Name: "@deepseek-ai/dsh-agent-instructions"},
+		{ID: "skill-filesystem", Name: "@deepseek-ai/dsh-skill-filesystem"},
+		{ID: "skill-badge", Name: "@deepseek-ai/dsh-skill-badge"},
+		{ID: "checkpoint-policy", Name: "@deepseek-ai/dsh-session-checkpoint-policy"},
+		{ID: "deepseek-extensions", Name: "@deepseek-ai/dsh-deepseek-llm-api-extensions"},
+		{ID: "session-log-deepseek", Name: "@deepseek-ai/dsh-session-log-deepseek",
+			Config: map[string]any{"enabled": true}},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	if root.Get(ServiceDeepseekExt) == nil {
+		t.Fatal("deepseek extensions registry missing after assembly")
+	}
+	registry := root.Get(ServiceDeepseekExt).(*deepseek.ExtensionRegistry)
+	if _, err := registry.Prepare(context.Background(), deepseek.RequestFacts{SessionID: "s-1"}); err != nil {
+		t.Fatalf("extensions prepare: %v", err)
+	}
+	// skill-badge materialized its embedded assets under the profile home.
+	if _, err := os.Stat(filepath.Join(home, "skill-badge")); err != nil {
+		t.Fatalf("skill-badge asset dir: %v", err)
+	}
+	// skill-filesystem registered its provider: the registry accepts a
+	// second provider registration without complaint (names are per-source).
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
 	}
 }

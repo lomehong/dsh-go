@@ -40,6 +40,9 @@ type PluginDeps struct {
 	Credentials credentials.Provider
 	// Logger receives keep-last-good and replace-failure records.
 	Logger cordis.Logger
+	// Extensions registers independently owned top-level request fields
+	// contributed by companion plugins; nil carries none.
+	Extensions *ExtensionRegistry
 	// Environment reads launch-environment layers (base URL, ambient key);
 	// nil skips the ambient lookups.
 	Environment environmentValue
@@ -93,6 +96,7 @@ func Apply(deps PluginDeps, config Config) (*Plugin, error) {
 		Options:       plugin.Options,
 		ResolveAPIKey: plugin.ResolveAPIKey,
 		ResolveUserID: deps.ResolveUserID,
+		Extensions:    deps.Extensions,
 	})
 	if err := deps.Runtime.RegisterConfigurableProviders([]llm.ConfigurableProvider{{
 		Provider:     ProviderRoute,

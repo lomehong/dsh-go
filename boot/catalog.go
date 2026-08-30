@@ -14,7 +14,9 @@ import (
 	"path/filepath"
 
 	"dshgo/agent"
+	"dshgo/agentinstructions"
 	"dshgo/agentloop"
+	"dshgo/checkpointpolicy"
 	"dshgo/commands"
 	"dshgo/compaction"
 	"dshgo/compactionbasic"
@@ -41,12 +43,15 @@ import (
 	"dshgo/session/persistence/jsonl"
 	"dshgo/session/persistence/sqlite"
 	"dshgo/session/projection"
+	"dshgo/sessionlog"
 	"dshgo/settings"
 	"dshgo/settings/file"
 	"dshgo/shell"
 	"dshgo/shelllocal"
 	"dshgo/shelltool"
 	"dshgo/skill"
+	"dshgo/skillbadge"
+	"dshgo/skillfilesystem"
 	"dshgo/spill"
 	"dshgo/spilllocal"
 	"dshgo/spillpolicy"
@@ -96,6 +101,7 @@ const (
 	ServiceStorage           = "storage"
 	ServiceSpillStore        = "spillStore"
 	ServiceStorageDomain     = "storageDomain"
+	ServiceDeepseekExt       = "deepseekLlmApiExtensions"
 	// ServiceToolResultPruner is the optional model-free tool-result prune
 	// pass; compaction-basic consumes it when composed.
 	ServiceToolResultPruner = "toolResultPruner"
@@ -321,6 +327,162 @@ var builders = map[string]pluginBuilder{
 				}
 				ctx.Provide(ServiceTypertGateway, gateway.New(ctx, registry))
 				return nil
+			},
+		}
+	},
+	// Request deadline enforcement for tools that declare a timeoutMs
+	// budget (the model-visible isError text mirrors the canonical shape).
+	"@deepseek-ai/dsh-tool-call-timeout-policy": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceTools},
+			Apply: func(ctx *cordis.Context, config any) error {
+				detach := guard.AttachTimeoutPolicy(ctx.Get(ServiceTools).(*tools.ToolRuntime))
+				return ctx.Effect(func() (cordis.Disposer, error) { return detach, nil })
+			},
+		}
+	},
+
+	// Baseline + dynamic project instructions (AGENTS.md family) mounted
+	// on every agent. maxBytes defaults to the base-bundle value.
+	"@deepseek-ai/dsh-agent-instructions": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceAgents, ServiceTools},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := agentinstructions.Config{DSHHome: deps.Home, MaxBytes: 65536}
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["maxBytes"].(float64); ok && raw > 0 {
+						cfg.MaxBytes = int64(raw)
+					}
+				}
+				detach, err := agentinstructions.Register(
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					deps.Logger, cfg,
+				)
+				if err != nil {
+					return err
+				}
+				return ctx.Effect(func() (cordis.Disposer, error) { return detach, nil })
+			},
+		}
+	},
+
+	// Filesystem skill source: discovers directory-bundle and flat
+	// Markdown skills from project/custom/home roots; watcher invalidates
+	// the registry catalog through ProviderControl.Invalidate.
+	"@deepseek-ai/dsh-skill-filesystem": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceSkills},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg skillfilesystem.Config
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				resolved, err := skillfilesystem.ResolveConfig(cfg)
+				if err != nil {
+					return err
+				}
+				registry := ctx.Get(ServiceSkills).(*skill.Registry)
+				detach, err := registry.RegisterProviderIn(nil, func(control skill.ProviderControl) (skill.Provider, error) {
+					return skillfilesystem.New(resolved, control.Invalidate, deps.Logger), nil
+				})
+				if err != nil {
+					return err
+				}
+				return ctx.Effect(func() (cordis.Disposer, error) { return detach, nil })
+			},
+		}
+	},
+
+	// Bundled badge skill (embedded assets materialized under the profile
+	// home). The base bundle ships this row disabled; the entry exists so
+	// enabling it in a profile resolves.
+	"@deepseek-ai/dsh-skill-badge": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceSkills},
+			Apply: func(ctx *cordis.Context, config any) error {
+				detach, err := skillbadge.RegisterIn(
+					ctx.Get(ServiceSkills).(*skill.Registry),
+					nil, filepath.Join(deps.Home, "skill-badge"),
+				)
+				if err != nil {
+					return err
+				}
+				return ctx.Effect(func() (cordis.Disposer, error) { return detach, nil })
+			},
+		}
+	},
+
+	// Semantic durability checkpoints: every model request prefix and
+	// top-level tool dispatch requires the session log durable through its
+	// input. A checkpoint rejection prevents adapter dispatch.
+	"@deepseek-ai/dsh-session-checkpoint-policy": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceLlm, ServiceTools, ServiceAgents, ServiceSessionPersist, ServiceSessions},
+			Apply: func(ctx *cordis.Context, config any) error {
+				agents := ctx.Get(ServiceAgents).(*agent.AgentRegistry)
+				coordinator := ctx.Get(ServiceSessionPersist).(*persistence.Coordinator)
+				sessions := ctx.Get(ServiceSessions).(*session.Store)
+				resolveAgent := agentResolverOf(agents)
+				flusher := checkpointFlusherOf(coordinator, sessions)
+				detach, err := checkpointpolicy.Attach(
+					ctx.Get(ServiceLlm).(*llm.Runtime),
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					agents, flusher,
+					func(key tools.ScopeKey) (string, bool) {
+						resolved := resolveAgent(key)
+						if resolved == nil {
+							return "", false
+						}
+						return string(resolved.ID), true
+					},
+				)
+				if err != nil {
+					return err
+				}
+				return ctx.Effect(func() (cordis.Disposer, error) { return detach, nil })
+			},
+		}
+	},
+
+	// The DeepSeek API extensions registry: independently owned top-level
+	// request fields merged into official DeepSeek requests. Optional
+	// companion — llm-deepseek reads it opportunistically.
+	"@deepseek-ai/dsh-deepseek-llm-api-extensions": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceDeepseekExt},
+			Apply: func(ctx *cordis.Context, config any) error {
+				ctx.Provide(ServiceDeepseekExt, deepseek.NewExtensionRegistry())
+				return nil
+			},
+		}
+	},
+
+	// Incremental session-log contribution (dsh_session_log) for official
+	// DeepSeek requests; config enabled defaults to false (register
+	// nothing until a profile turns it on).
+	"@deepseek-ai/dsh-session-log-deepseek": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceDeepseekExt, ServiceSessions},
+			Apply: func(ctx *cordis.Context, config any) error {
+				enabled := false
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["enabled"].(bool); ok {
+						enabled = raw
+					}
+				}
+				if !enabled {
+					return nil
+				}
+				detach, err := sessionlog.RegisterDeepseekField(
+					ctx.Get(ServiceDeepseekExt).(*deepseek.ExtensionRegistry),
+					ctx.Get(ServiceSessions).(*session.Store),
+					sessionlog.NewFolder(),
+				)
+				if err != nil {
+					return err
+				}
+				return ctx.Effect(func() (cordis.Disposer, error) { return detach, nil })
 			},
 		}
 	},
@@ -632,13 +794,16 @@ var builders = map[string]pluginBuilder{
 						return err
 					}
 				}
-				deps := deepseek.PluginDeps{
+				pluginDeps := deepseek.PluginDeps{
 					Runtime:     ctx.Get(ServiceLlm).(*llm.Runtime),
 					Settings:    ctx.Get(ServiceSettings).(*settings.Store),
 					Credentials: ctx.Get(ServiceCredential).(credentials.Provider),
 					Logger:      deps.Logger,
 				}
-				_, err := deepseek.Apply(deps, cfg)
+				if candidate := ctx.Get(ServiceDeepseekExt); candidate != nil {
+					pluginDeps.Extensions = candidate.(*deepseek.ExtensionRegistry)
+				}
+				_, err := deepseek.Apply(pluginDeps, cfg)
 				return err
 			},
 		}
@@ -1021,6 +1186,24 @@ func toolsCallerOf(agents *agent.AgentRegistry) toolsjobs.CallerOf {
 		return ""
 	}
 }
+
+// checkpointFlusherOf adapts the persistence coordinator onto the
+// checkpoint flusher seam: a checkpoint requires the live session's
+// write-behind queue durable through its input.
+func checkpointFlusherOf(coordinator *persistence.Coordinator, sessions *session.Store) checkpointpolicy.Flusher {
+	return flusherFunc(func(sessionID string) error {
+		sess := sessions.Get(session.SessionID(sessionID))
+		if sess == nil {
+			return fmt.Errorf("session-checkpoint-policy: session %q is not live", sessionID)
+		}
+		return coordinator.FlushSession(sess)
+	})
+}
+
+// flusherFunc lifts a function into the checkpoint Flusher seam.
+type flusherFunc func(sessionID string) error
+
+func (f flusherFunc) FlushSession(sessionID string) error { return f(sessionID) }
 
 // agentResolverOf adapts the live agent registry onto the by-scope
 // resolver seam (the established resolveByScope pattern).
@@ -1477,7 +1660,7 @@ var batchThreeBuilders = map[string]pluginBuilder{
 	// presentation belong to consumers (fs-search, the bash executor seam).
 	// The official terminal-process primitive (pty allocation) is a
 	// documented deferral, not a silent gap.
-	"@deepseek-ai/dsh-subprocess": func(deps CatalogDeps) PluginSpec {
+	"@deepseek-ai/dsh-subprocess-local": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
 			Inject:  []string{},
 			Provide: []string{ServiceSubprocess},
