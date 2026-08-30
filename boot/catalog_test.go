@@ -1,6 +1,8 @@
 package boot
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,6 +18,10 @@ import (
 	"dshgo/session/persistence"
 	"dshgo/settings"
 	"dshgo/shell"
+	"dshgo/spill"
+	"dshgo/spilllocal"
+	"dshgo/storage"
+	"dshgo/storagedomain"
 	"dshgo/subagent"
 	"dshgo/toolresultpruner"
 	"dshgo/tools"
@@ -463,5 +469,85 @@ func TestCatalogAssemblesTypertGateway(t *testing.T) {
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+func TestCatalogStorageHubDomainAndSpillRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "tools", Name: "@deepseek-ai/dsh-tools"},
+		{ID: "storage", Name: "@deepseek-ai/dsh-storage"},
+		{ID: "storage-json", Name: "@deepseek-ai/dsh-storage-json",
+			Config: map[string]any{"root": filepath.Join(home, "storages")}},
+		{ID: "storage-domain", Name: "@deepseek-ai/dsh-storage-domain",
+			Config: map[string]any{"backend": "json"}},
+		{ID: "spill-local", Name: "@deepseek-ai/dsh-spill-local",
+			Config: map[string]any{"root": filepath.Join(home, "spill"), "cleanupPeriodDays": float64(0)}},
+		{ID: "spill-policy", Name: "@deepseek-ai/dsh-spill-policy",
+			Config: map[string]any{"maxInlineBytes": float64(50000)}},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	hub, ok := root.Get(ServiceStorage).(*storage.Hub)
+	if !ok || hub == nil {
+		t.Fatal("storage hub missing after assembly")
+	}
+	if _, err := hub.Backend.Get("json"); err != nil {
+		t.Fatalf("json backend not registered: %v", err)
+	}
+	if root.Get(storage.StorageBackendServiceKey("json")) == nil {
+		t.Fatal("backend lifecycle service missing")
+	}
+	facility, err := hub.Domain()
+	if err != nil {
+		t.Fatalf("domain facility not mounted: %v", err)
+	}
+	spec, err := storagedomain.DefineDomain(storagedomain.DomainSpec{
+		Name:    "notes",
+		Version: 1,
+		Tables:  []string{"rows"},
+		ValidateRecord: func(table string, key string, raw json.RawMessage) error {
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("define domain: %v", err)
+	}
+	domain, err := facility.Open(spec)
+	if err != nil {
+		t.Fatalf("open domain: %v", err)
+	}
+	if err := domain.Table("rows").Put("a-1", json.RawMessage(`{"v":1}`)); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	if got := string(domain.Table("rows").Get("a-1")); got != `{"v":1}` {
+		t.Fatalf("get = %s", got)
+	}
+	store, ok := root.Get(ServiceSpillStore).(*spilllocal.LocalSpillStore)
+	if !ok || store == nil {
+		t.Fatal("spill store missing after assembly")
+	}
+	ref, err := store.SaveText(context.Background(), spill.SaveTextSpill{
+		Owner:         spill.SpillOwner{SessionID: "s-1"},
+		Source:        spill.SpillSource{ToolName: "grep", CallID: "call-1", Label: "result"},
+		SuggestedName: "grep-results.txt",
+		Content:       strings.Repeat("x", 100),
+	})
+	if err != nil {
+		t.Fatalf("save text: %v", err)
+	}
+	if _, err := os.Stat(ref.Locator); err != nil {
+		t.Fatalf("spill file missing: %v", err)
+	}
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	// Domain close through the plugin disposer: the facility unmounted with
+	// the composition; a second open of the same spec now fails on a closed
+	// unit rather than silently serving.
+	if _, err := hub.Domain(); err == nil {
+		t.Fatal("domain form must unmount on disposal")
 	}
 }

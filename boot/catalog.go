@@ -47,6 +47,12 @@ import (
 	"dshgo/shelllocal"
 	"dshgo/shelltool"
 	"dshgo/skill"
+	"dshgo/spill"
+	"dshgo/spilllocal"
+	"dshgo/spillpolicy"
+	"dshgo/storage"
+	"dshgo/storagedomain"
+	"dshgo/storagejson"
 	"dshgo/strreplaceeditor"
 	"dshgo/subagent"
 	"dshgo/subagentcontrol"
@@ -87,6 +93,9 @@ const (
 	ServicePlanMode          = "planMode"
 	ServiceTokenMeter        = "tokenMeter"
 	ServiceCompaction        = "compaction"
+	ServiceStorage           = "storage"
+	ServiceSpillStore        = "spillStore"
+	ServiceStorageDomain     = "storageDomain"
 	// ServiceToolResultPruner is the optional model-free tool-result prune
 	// pass; compaction-basic consumes it when composed.
 	ServiceToolResultPruner = "toolResultPruner"
@@ -312,6 +321,174 @@ var builders = map[string]pluginBuilder{
 				}
 				ctx.Provide(ServiceTypertGateway, gateway.New(ctx, registry))
 				return nil
+			},
+		}
+	},
+	// The storage hub: named backend registry plus mounted data-form
+	// facilities. The hub itself performs no IO.
+	"@deepseek-ai/dsh-storage": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceStorage},
+			Apply: func(ctx *cordis.Context, config any) error {
+				ctx.Provide(ServiceStorage, storage.NewHub())
+				return nil
+			},
+		}
+	},
+
+	// JSON storage backend: one human-readable document per unit under
+	// config root (required — assemblies state the location explicitly, per
+	// the official no-cwd-fallback stance).
+	"@deepseek-ai/dsh-storage-json": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceStorage},
+			Provide: []string{storage.StorageBackendServiceKey("json")},
+			Apply: func(ctx *cordis.Context, config any) error {
+				root := ""
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["root"].(string); ok {
+						root = raw
+					}
+				}
+				if root == "" {
+					return errors.New("storage-json: config root is required")
+				}
+				hub := ctx.Get(ServiceStorage).(*storage.Hub)
+				backend := storagejson.NewJsonStorageBackend(root)
+				unregister, err := hub.Backend.Register("json", backend)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(storage.StorageBackendServiceKey("json"), backend)
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(func() {
+						unregister()
+						if err := backend.Close(); err != nil && deps.Logger != nil {
+							deps.Logger.Warn(fmt.Sprintf("storage-json: backend close: %v", err))
+						}
+					}), nil
+				})
+			},
+		}
+	},
+
+	// Domain data form: schema-validated, change-emitting KV domains over
+	// routed backends. The routed backend table resolves at apply because
+	// the backend lifecycle service keys are injections (activation cannot
+	// race backend registration); a route naming an unregistered backend
+	// fails loud here instead of at first open.
+	"@deepseek-ai/dsh-storage-domain": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceStorage, storage.StorageBackendServiceKey("json")},
+			Provide: []string{ServiceStorageDomain},
+			Apply: func(ctx *cordis.Context, config any) error {
+				backendName := "json"
+				routes := map[string]string{}
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["backend"].(string); ok && raw != "" {
+						backendName = raw
+					}
+					if raw, ok := overridden["routes"].(map[string]any); ok {
+						for key, value := range raw {
+							if name, ok := value.(string); ok {
+								routes[key] = name
+							}
+						}
+					}
+				}
+				hub := ctx.Get(ServiceStorage).(*storage.Hub)
+				routed := map[string]storagedomain.Backend{}
+				resolve := func(name string) error {
+					backend, err := hub.Backend.Get(name)
+					if err != nil {
+						return fmt.Errorf("storage-domain: backend route %q: %w", name, err)
+					}
+					routed[name] = backend
+					return nil
+				}
+				if err := resolve(backendName); err != nil {
+					return err
+				}
+				for _, name := range routes {
+					if err := resolve(name); err != nil {
+						return err
+					}
+				}
+				facility := storagedomain.NewFacility(storagedomain.Config{
+					Backend: backendName,
+					Routes:  routes,
+				}, routed, deps.Logger)
+				unmount, err := hub.Mount("domain", facility)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceStorageDomain, facility)
+				return ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(unmount), nil })
+			},
+		}
+	},
+
+	// Local spill backend: private session-scoped spill files plus the
+	// one-shot startup cleanup sweep (Close awaits sweep quiescence).
+	"@deepseek-ai/dsh-spill-local": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Provide: []string{ServiceSpillStore},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := spilllocal.Config{}
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["root"].(string); ok && raw != "" {
+						cfg.Root = raw
+					}
+					if raw, ok := overridden["cleanupPeriodDays"].(float64); ok {
+						cfg.CleanupPeriodDays = int(raw)
+						cfg.CleanupPeriodDaysSet = true
+					}
+				}
+				store, err := spilllocal.NewLocalSpillStore(spilllocal.ResolveConfig(cfg), deps.Logger)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceSpillStore, store)
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(store.Close), nil
+				})
+			},
+		}
+	},
+
+	// Spill policy: post-execute transformer that keeps oversized
+	// plain-text tool results out of model context. The store is optional
+	// (official `ctx.get('spillStore')`): absent backend keeps everything
+	// inline with a warning.
+	"@deepseek-ai/dsh-spill-policy": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceTools, ServiceAgents},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cap *int
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["maxInlineBytes"].(float64); ok {
+						value := int(raw)
+						cap = &value
+					}
+				}
+				runtime := ctx.Get(ServiceTools).(*tools.ToolRuntime)
+				var store spill.Store
+				if candidate := ctx.Get(ServiceSpillStore); candidate != nil {
+					store = candidate.(*spilllocal.LocalSpillStore)
+				}
+				agents := ctx.Get(ServiceAgents).(*agent.AgentRegistry)
+				resolveOwner := func(key tools.ScopeKey) (session.SessionID, bool) {
+					resolved := agentResolverOf(agents)(key)
+					if resolved == nil {
+						return "", false
+					}
+					return resolved.ID, true
+				}
+				detach, err := spillpolicy.Attach(runtime, store, deps.Logger, spillpolicy.Config{MaxInlineBytes: cap}, resolveOwner)
+				if err != nil {
+					return err
+				}
+				return ctx.Effect(func() (cordis.Disposer, error) { return detach, nil })
 			},
 		}
 	},

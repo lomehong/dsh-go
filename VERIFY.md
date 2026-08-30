@@ -692,3 +692,10 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 诚实降级：SRC fallback 不可移植（reflect 无参数名）如实受阻；stream-protocol/mux/forwarded events + client 全 face 随 stream carrier 轮。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -p 4` **PASS=1129 FAIL=0**（+12）。
 - README：包表 gateway 行、45→**46/86**、未移植面更新（Host 派发核心已落地）、语义决策记录新条目。
+
+- **R27（storage/spill 族组装——目标① "storage hub 接入 loader" 闭合）**
+- 落地面：`boot/catalog.go` 五条目——`@deepseek-ai/dsh-storage`（Provide storage=NewHub）、`@deepseek-ai/dsh-storage-json`（Inject storage、config root 必填无回退、backend `json` 注册 + `storage.backend.json` 生命周期键、Dispose 链 unregister→Close）、`@deepseek-ai/dsh-storage-domain`（Inject storage+backend 生命周期键、routed backend 表 apply 期解析、hub.Mount("domain") + storageDomain 服务、Dispose 链 unmount）、`@deepseek-ai/dsh-spill-local`（Provide spillStore、root/cleanupPeriodDays 配置、构造期启动清扫、Close=等清扫静止）、`@deepseek-ai/dsh-spill-policy`（Inject tools/agents、maxInlineBytes 配置缺省不注册、opportunistic spillStore 缺席容忍、resolveOwner 经 agentResolverOf）。
+- 测试：`boot/catalog_test.go` +1 组装测 TestCatalogStorageHubDomainAndSpillRoundTrip——五件套装配→backend 注册断言→生命周期键在场→domain facility 经 hub.Domain() 访问→DefineDomain+Open→Table Put/Get 往返→spill SaveText 落盘文件断言→Shutdown 后 domain 形态卸载断言。
+- 决策记录（README 语义决策新两条）：routed 表 apply 期解析=把官方 inject 激活门保证的"竞速不可能"显式化（路由未注册装载期 fail-loud，非首次 open）；spill store 可选语义（ctx.get 非 inject）逐字对齐 + maxInlineBytes 缺省宽容偏差记录。
+- 账实对齐：README 46→**51/86**、"其余 42 项"→37 项、spill 从重件待续清单移除；storagedomain/storage/spill 三行接线状态刷新；fssearch trySaveFormattedResult 缺口重述（spillStore 服务已在、缺的是 Render 面 exec 通道，随展示轮与 presentationMeta 并入）。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1130 FAIL=0**（+1）。
