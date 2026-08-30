@@ -78,6 +78,10 @@ type Config struct {
 	// MaxDepthProviderManaged sends no cap: the recursion budget belongs to
 	// the child runtime (out-of-process providers).
 	MaxDepthProviderManaged bool `json:"maxDepthProviderManaged,omitempty"`
+	// ModelSelectionSettings opts this instance into model-facing child
+	// route selection (official modelSelectionSettings, default false); it
+	// requires the selection settings service and the LLM runtime.
+	ModelSelectionSettings bool `json:"modelSelectionSettings,omitempty"`
 }
 
 // ResolveConfig applies defaults and validates the load-time invariants.
@@ -116,6 +120,13 @@ type Deps struct {
 	Prompt    *systemprompt.SystemPrompt
 	Subagents *subagent.SubagentRuntime
 	Jobs      *jobs.LocalRegistry
+	// Llm resolves child routes for model selection preflight and the
+	// list_subagent_models discovery tool; required by a
+	// modelSelectionSettings instance.
+	Llm *llm.Runtime
+	// Selection is the user-preference owner sampled when an agent first
+	// selects a child route; required by a modelSelectionSettings instance.
+	Selection *SubagentModelSelectionConfig
 	Logger    cordisLogger
 	// ResolveAgent maps the executing scope key to the live calling agent;
 	// a transport sub-dispatch resolves nothing and the tool rejects.
@@ -138,6 +149,9 @@ func Register(deps Deps, config Config) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	if config.ModelSelectionSettings && (deps.Llm == nil || deps.Selection == nil) {
+		return nil, fmt.Errorf("tool-subagent: `modelSelectionSettings` requires the subagent model-selection settings service and the LLM runtime (compose @deepseek-ai/dsh-tool-subagent/model-selection-settings)")
+	}
 	provider, ok := deps.Subagents.GetProvider(config.Provider)
 	if !ok {
 		return nil, fmt.Errorf("tool-subagent: subagent provider %q is not registered yet; compose the provider before this tool", config.Provider)
@@ -149,6 +163,19 @@ func Register(deps Deps, config Config) (func(), error) {
 
 	wording := providerWording(provider.InheritsParentContext())
 	description := wording.description + backgroundSuffix(config)
+	if config.ModelSelectionSettings {
+		// The provider-route-defaults variant is out of scope: the Go
+		// provider face carries no agentRouteDefaults (README decision).
+		description += selectionDescription(provider.InheritsParentContext())
+	}
+
+	var listModelsUndo func()
+	if config.ModelSelectionSettings {
+		listModelsUndo, err = registerListSubagentModels(deps, config)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	var sectionUndo func()
 	if config.EnableRunInBackground && continuable && deps.Prompt != nil {
@@ -181,6 +208,9 @@ func Register(deps Deps, config Config) (func(), error) {
 		},
 	})
 	if err != nil {
+		if listModelsUndo != nil {
+			listModelsUndo()
+		}
 		if sectionUndo != nil {
 			sectionUndo()
 		}
@@ -188,6 +218,9 @@ func Register(deps Deps, config Config) (func(), error) {
 	}
 	unregister, err := deps.Runtime.Register(definition)
 	if err != nil {
+		if listModelsUndo != nil {
+			listModelsUndo()
+		}
 		if sectionUndo != nil {
 			sectionUndo()
 		}
@@ -195,6 +228,9 @@ func Register(deps Deps, config Config) (func(), error) {
 	}
 	return func() {
 		unregister()
+		if listModelsUndo != nil {
+			listModelsUndo()
+		}
 		if sectionUndo != nil {
 			sectionUndo()
 		}
@@ -210,7 +246,7 @@ func assertProviderConfiguration(provider subagent.SubagentProvider, config Conf
 			"tool-subagent: provider %q cannot enforce maxDepth (no depthLimit capability) — set maxDepth: 'provider-managed' to leave the recursion budget to the provider",
 			provider.Name())
 	}
-	if config.AgentOptions != nil && !capabilities.AgentOptions {
+	if (config.AgentOptions != nil || config.ModelSelectionSettings) && !capabilities.AgentOptions {
 		return fmt.Errorf("tool-subagent: provider %q does not support child agentOptions", provider.Name())
 	}
 	if continuable {
@@ -236,6 +272,67 @@ func backgroundSuffix(config Config) string {
 type delegationWording struct {
 	description       string
 	promptDescription string
+}
+
+// selectionDescription is the model-selection choice wording appended to a
+// modelSelectionSettings instance's tool description. The official
+// provider-route-defaults variant needs the agentRouteDefaults provider
+// face, which the Go provider interface does not carry, so the
+// parent-inheritance variant always applies.
+func selectionDescription(inheritsConversation bool) string {
+	text := " Child LLM selection is optional. Omit `provider`, `model`, and `reasoning_effort` to use configured child defaults and inherit compatible missing values from the parent Agent. Supply `provider` and `model` together after using `list_subagent_models` to inspect advertised routes and efforts. Changing the effective route without naming an effort uses the selected model's default effort."
+	if inheritsConversation {
+		text += " Changing the route can prevent provider-side reuse of the inherited conversation prefix."
+	}
+	return text
+}
+
+// registerListSubagentModels mounts the fixed discovery tool for one
+// modelSelectionSettings instance; routes resolve live at call time.
+func registerListSubagentModels(deps Deps, config Config) (func(), error) {
+	definition, err := tools.DefineTool(tools.DefineToolOptions{
+		Name: "list_subagent_models",
+		Description: "Discover LLM routes for subagents without changing the current Agent. Call with no arguments to list " +
+			"registered providers, with `provider` to list its advertised models, or with `provider` and `model` " +
+			"to inspect that exact model and its reasoning efforts. Catalog membership is advisory: an adapter may " +
+			"accept an unlisted model id. Use the returned ids with a delegation tool's `provider`, `model`, and " +
+			"`reasoning_effort` fields.",
+		Parameters: map[string]tools.PropSpec{
+			"provider": {ValueSchemaSpec: tools.ValueSchemaSpec{
+				Type:        "string",
+				Description: "Registered LLM provider id. Omit to list providers.",
+			}},
+			"model": {ValueSchemaSpec: tools.ValueSchemaSpec{
+				Type:        "string",
+				Description: "Exact model id to inspect. Requires provider; omit to list that provider's advertised models.",
+			}},
+		},
+		Output: tools.ToolOutput{
+			Schema: &tools.ValueSchemaSpec{Type: "string"},
+			Render: func(args map[string]any, value any) []llm.ContentBlock {
+				return []llm.ContentBlock{{Type: llm.BlockText, Text: renderValue(value)}}
+			},
+		},
+		IsConcurrencySafe: func(args map[string]any) bool { return true },
+		Execute: func(args map[string]any, exec *tools.ToolRunContext) (any, error) {
+			parent := deps.ResolveAgent(exec.Agent)
+			var policy *ModelSelectionPolicy
+			if parent != nil {
+				resolved, err := resolveDelegationPolicy(deps.Selection, parent)
+				if err != nil {
+					return nil, err
+				}
+				// An unconfigured preference reads as no authorized
+				// routes: the discovery face lists nothing.
+				policy = resolved
+			}
+			return listSubagentModels(deps.Llm, policy, args)
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return deps.Runtime.Register(definition)
 }
 
 // providerWording derives truthful wording from the provider's conversation
@@ -274,6 +371,20 @@ func parameterSpec(config Config, wording delegationWording) map[string]tools.Pr
 		parameters["run_in_background"] = tools.PropSpec{ValueSchemaSpec: tools.ValueSchemaSpec{
 			Type:        "boolean",
 			Description: text,
+		}}
+	}
+	if config.ModelSelectionSettings {
+		parameters["provider"] = tools.PropSpec{ValueSchemaSpec: tools.ValueSchemaSpec{
+			Type:        "string",
+			Description: "LLM provider route for the child. Supply together with model; omit both to use configured child defaults or inherit the parent route.",
+		}}
+		parameters["model"] = tools.PropSpec{ValueSchemaSpec: tools.ValueSchemaSpec{
+			Type:        "string",
+			Description: "Model id interpreted by provider. Supply together with provider; omit both to use configured child defaults or inherit the parent route.",
+		}}
+		parameters["reasoning_effort"] = tools.PropSpec{ValueSchemaSpec: tools.ValueSchemaSpec{
+			Type:        "string",
+			Description: "Adapter-owned reasoning effort for the effective child route. Omit to inherit a compatible configured/parent effort or use a newly selected model's default.",
 		}}
 	}
 	return parameters
@@ -384,6 +495,30 @@ func execute(deps Deps, config Config, continuable bool, args map[string]any, ex
 	}
 	if config.AgentOptions != nil {
 		request.AgentOptions = config.AgentOptions
+	}
+	// Child LLM route selection: merge the model-supplied fields over the
+	// configured defaults, enforce the session policy, and preflight the
+	// effective route through its live adapter. Pure inheritance stays
+	// outside the policy because no model-facing choice occurred.
+	modelRequest := parseDelegationModelRequest(args)
+	if hasDelegationModelRequest(modelRequest) {
+		policy, err := resolveDelegationPolicy(deps.Selection, parent)
+		if err != nil {
+			return nil, err
+		}
+		requested, err := requestedAgentOptions(parent.Options, config.AgentOptions, modelRequest, config.ModelSelectionSettings)
+		if err != nil {
+			return nil, err
+		}
+		if err := assertAllowedModelSelection(policy, parent.Options, requested, modelRequest); err != nil {
+			return nil, err
+		}
+		if err := preflightChildLlmRoute(deps.Llm, parent.Options, requested); err != nil {
+			return nil, err
+		}
+		if requested != nil {
+			request.AgentOptions = requested
+		}
 	}
 	if config.Persona != "" {
 		request.Persona = config.Persona

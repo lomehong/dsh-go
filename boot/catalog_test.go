@@ -26,6 +26,7 @@ import (
 	"dshgo/subagent"
 	"dshgo/toolresultpruner"
 	"dshgo/tools"
+	"dshgo/toolsubagent"
 	"dshgo/typert"
 )
 
@@ -116,6 +117,71 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 	forkTool, ok := registry.Get("subagent_fork", nil)
 	if !ok || !strings.Contains(forkTool.Description, "inherits this conversation") {
 		t.Fatalf("fork delegation tool: %v", ok)
+	}
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+func TestCatalogSubagentModelSelectionSettingsSection(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "tools", Name: "@deepseek-ai/dsh-tools"},
+		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
+		{ID: "credentials", Name: "@deepseek-ai/dsh-credentials-local"},
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
+		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
+		{ID: "projections", Name: "@deepseek-ai/dsh-session-projection"},
+		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
+		{ID: "llm", Name: "@deepseek-ai/dsh-llm"},
+		{ID: "deepseek", Name: "@deepseek-ai/dsh-llm-deepseek"},
+		{ID: "persistence", Name: "@deepseek-ai/dsh-session-persistence-jsonl"},
+		{ID: "user-questions", Name: "@deepseek-ai/dsh-user-questions"},
+		{ID: "user-approval", Name: "@deepseek-ai/dsh-user-approval"},
+		{ID: "permission-presets", Name: "@deepseek-ai/dsh-permission-presets"},
+		{ID: "system-prompt", Name: "@deepseek-ai/dsh-system-prompt"},
+		{ID: "agent-loop", Name: "@deepseek-ai/dsh-agent-loop"},
+		{ID: "subagent", Name: "@deepseek-ai/dsh-subagent"},
+		{ID: "spawn", Name: "@deepseek-ai/dsh-subagent-spawn-in-process"},
+		{ID: "subagent-model-selection-settings", Name: "@deepseek-ai/dsh-tool-subagent/model-selection-settings",
+			Config: map[string]any{"enabled": true, "allowedModels": []any{
+				map[string]any{"provider": "deepseek", "model": "deepseek-chat"},
+			}}},
+		{ID: "tool-subagent", Name: "@deepseek-ai/dsh-tool-subagent",
+			Config: map[string]any{"provider": "spawn", "modelSelectionSettings": true}},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	ctx := root
+	// The preference owner samples the installed settings section.
+	selection, ok := ctx.Get(ServiceSubagentModelSelection).(*toolsubagent.SubagentModelSelectionConfig)
+	if !ok {
+		t.Fatal("subagentModelSelection service missing")
+	}
+	current := selection.Current()
+	if !current.Enabled || len(current.AllowedModels) != 1 || current.AllowedModels[0].Model != "deepseek-chat" {
+		t.Fatalf("preference: %+v", current)
+	}
+	// The delegation definition carries the selection parameters, wording,
+	// and the fixed discovery tool.
+	registry := ctx.Get(ServiceTools).(*tools.ToolRuntime)
+	definition, ok := registry.Get("subagent", nil)
+	if !ok {
+		t.Fatal("delegation tool missing")
+	}
+	properties, _ := definition.Parameters["properties"].(map[string]any)
+	for _, name := range []string{"provider", "model", "reasoning_effort"} {
+		if _, has := properties[name]; !has {
+			t.Fatalf("selection parameter %q missing", name)
+		}
+	}
+	if !strings.Contains(definition.Description, "Child LLM selection is optional") {
+		t.Fatalf("selection wording missing: %q", definition.Description)
+	}
+	if _, ok := registry.Get("list_subagent_models", nil); !ok {
+		t.Fatal("list_subagent_models not mounted")
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)

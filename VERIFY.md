@@ -722,3 +722,15 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - 测试：toolsubagent 包 6 测（defaults/能力门/路由矩阵/stop-reason 文案/前台 settle 形状/注册与卸载+双 wording+absent provider）；subagent 包 TestInProcessProvidersPrepareContinuable（spawn 空 seed、fork fresh parent 空 seed）；boot 组装测扩双行断言（spawn continuable description、fork inherits wording）。
 - 账实对齐：58→**60/86**、"其余 30 项"→28 项；tool-subagent(-fork) 移出受阻清单。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1138 FAIL=0**（+7）。
+
+## r30 — model-selection 子面（工具子代理模型可选子路由）
+
+- `toolsubagent/modelselection.go`（官方 model-selection* 三文件 + list-models.ts 移植）：AllowedModelRoute/ModelSelectionPolicy + assertAllowedModelRoutes（空值/重复逐字）；DelegationModelRequest{provider,model,reasoning_effort}+requestedAgentOptions 合并（成对规则、route 变更清 configured effort、effort 显式胜出、父值补基线、disabled 逐字拒绝）；assertAllowedModelSelection（纯继承不入门、off-policy `child LLM route %q is not allowed for this Session` 逐字）；preflightChildLlmRoute 经 `llm.ResolveCallConfig`（route 未变 effort 继承父、无有效 route 逐字）。
+- 会话策略事件 `subagent/model-selection-policy`：日志级 append-once（nil intent），读侧校验 ≥1 route；`resolveDelegationPolicy` 活解析序=会话事件→设置采样记录一次（官方 per-agent 安装期 selectForAgent 的 execute 期等价）。
+- `SubagentModelSelectionConfig` 偏好服务 + catalog 行 `@deepseek-ai/dsh-tool-subagent/model-selection-settings`（官方 web-app bundle 行名，base 86 行外附加）：settings section `subagent-model-selection`（enabled 缺省 false、enabled 需 ≥1 route 逐字、Validate+setSource 活读）。
+- `list_subagent_models` 固定发现工具：providers→models→efforts 三级（policy 过滤、`(no LLM providers)`/`(no advertised models for X)`/`(no advertised reasoning efforts)`、default effort 标记、not allowed/not registered+可用清单逐字）；仅在 modelSelectionSettings 实例上挂载，随实例卸载。
+- 工具面接线：enabled 时委派 description 追加 Child LLM selection 文案（父继承变体+fork 前缀重用警告）+ provider/model/reasoning_effort 三参数；execute 期显式路由请求走 合并→策略门→preflight→覆盖 request.AgentOptions。
+- 死锁修复（组装测抓到）：settings Defaults 在存储锁内运行，活源闭包读回 `Scope.Get` 重入死锁→Defaults 固定组合初值（permission-presets 同形）；base 以 JSON 文档形状传 routes（强类型切片过不了读侧 `[]any` 断言）。
+- Go 偏差如实记录（README 已记）：工具 schema 注册期静态——官方 per-agent 参数存在性改为例：enabled 时参数常驻、策略 execute 期活解析、无 preset 父链回退；provider `agentRouteDefaults` 面未移植（choiceDescription 恒用父继承变体）。
+- 测试：toolsubagent +7（routes 校验/合并矩阵/策略门/preflight/会话事件 append-once/发现三级流/策略活解析与采样一次）；boot +1（组装：偏好服务、三参数+文案、list_subagent_models 挂载）。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1146 FAIL=0**（+8）。

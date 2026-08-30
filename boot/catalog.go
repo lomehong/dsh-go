@@ -94,15 +94,18 @@ const (
 	ServiceSystemPrompt      = "systemPrompt"
 	ServiceAgentLoop         = "agentLoop"
 	ServiceSubagentRuntime   = "subagentRuntime"
-	ServiceSkills            = "skills"
-	ServiceJobs              = "jobs"
-	ServicePlanMode          = "planMode"
-	ServiceTokenMeter        = "tokenMeter"
-	ServiceCompaction        = "compaction"
-	ServiceStorage           = "storage"
-	ServiceSpillStore        = "spillStore"
-	ServiceStorageDomain     = "storageDomain"
-	ServiceDeepseekExt       = "deepseekLlmApiExtensions"
+	// ServiceSubagentModelSelection is the user-preference owner for
+	// model-selectable delegation (official 'subagentModelSelection').
+	ServiceSubagentModelSelection = "subagentModelSelection"
+	ServiceSkills                 = "skills"
+	ServiceJobs                   = "jobs"
+	ServicePlanMode               = "planMode"
+	ServiceTokenMeter             = "tokenMeter"
+	ServiceCompaction             = "compaction"
+	ServiceStorage                = "storage"
+	ServiceSpillStore             = "spillStore"
+	ServiceStorageDomain          = "storageDomain"
+	ServiceDeepseekExt            = "deepseekLlmApiExtensions"
 	// ServiceToolResultPruner is the optional model-free tool-result prune
 	// pass; compaction-basic consumes it when composed.
 	ServiceToolResultPruner = "toolResultPruner"
@@ -334,6 +337,92 @@ var builders = map[string]pluginBuilder{
 	// Delegation tools (official tool-subagent rows): spawn + fork.
 	"@deepseek-ai/dsh-tool-subagent":      buildDelegationTool("spawn", "subagent"),
 	"@deepseek-ai/dsh-tool-subagent-fork": buildDelegationTool("fork", "subagent_fork"),
+
+	// The user-preference owner for model-selectable delegation (official
+	// same-package named export; the web-app bundle composes it — the base
+	// bundle does not).
+	"@deepseek-ai/dsh-tool-subagent/model-selection-settings": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSettings},
+			Provide: []string{ServiceSubagentModelSelection},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var raw struct {
+					Enabled       bool  `json:"enabled"`
+					AllowedModels []any `json:"allowedModels"`
+				}
+				if err := decodeConfigJSON(config, &raw); err != nil {
+					return err
+				}
+				initial := toolsubagent.ModelSelectionSettings{Enabled: raw.Enabled}
+				for _, item := range raw.AllowedModels {
+					entry, ok := item.(map[string]any)
+					if !ok {
+						return fmt.Errorf("subagent-model-selection: allowedModels entries must be objects")
+					}
+					section := toolsubagent.ParseModelSelectionSection(map[string]any{"allowedModels": []any{entry}})
+					if len(section.AllowedModels) == 1 {
+						initial.AllowedModels = append(initial.AllowedModels, section.AllowedModels[0])
+					}
+				}
+				routesAsAny := make([]any, 0, len(initial.AllowedModels))
+				for _, route := range initial.AllowedModels {
+					routesAsAny = append(routesAsAny, map[string]any{"provider": route.Provider, "model": route.Model})
+				}
+				service, err := toolsubagent.NewModelSelectionConfig(initial)
+				if err != nil {
+					return err
+				}
+				store := ctx.Get(ServiceSettings)
+				if store == nil {
+					return fmt.Errorf("subagent-model-selection-settings: the settings store is required")
+				}
+				settingsStore := store.(*settings.Store)
+				envelope, err := json.Marshal(map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"enabled": map[string]any{"type": "boolean"},
+						"allowedModels": map[string]any{
+							"type": "array",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"provider": map[string]any{"type": "string"},
+									"model":    map[string]any{"type": "string"},
+								},
+								"required": []string{"provider", "model"},
+							},
+						},
+					},
+				})
+				if err != nil {
+					return err
+				}
+				settingsScope, err := settingsStore.Register("subagent-model-selection", &settings.Schema{
+					Envelope: envelope,
+					// The composition initial, not the live source: the
+					// source closure reads back through this same store,
+					// and Defaults runs under the store lock. Routes stay
+					// in the JSON document shape the reader parses back.
+					Defaults: func() map[string]any {
+						return map[string]any{"enabled": initial.Enabled, "allowedModels": routesAsAny}
+					},
+					Validate: func(value map[string]any) error {
+						return service.Validate(toolsubagent.ParseModelSelectionSection(value))
+					},
+				}, map[string]any{"enabled": initial.Enabled, "allowedModels": routesAsAny})
+				if err != nil {
+					return err
+				}
+				// setSource: consumers sample at first selection, so a
+				// settings update never rebuilds a running Agent's tools.
+				service.SetSource(func() toolsubagent.ModelSelectionSettings {
+					return toolsubagent.ParseModelSelectionSection(settingsScope.Get())
+				})
+				ctx.Provide(ServiceSubagentModelSelection, service)
+				return nil
+			},
+		}
+	},
 	// Request deadline enforcement for tools that declare a timeoutMs
 	// budget (the model-visible isError text mirrors the canonical shape).
 	"@deepseek-ai/dsh-tool-call-timeout-policy": func(deps CatalogDeps) PluginSpec {
@@ -1220,11 +1309,21 @@ func buildDelegationTool(defaultProvider string, defaultToolName string) pluginB
 				if candidate := ctx.Get(ServiceJobs); candidate != nil {
 					jobsRegistry = candidate.(*jobs.LocalRegistry)
 				}
+				llmRuntime := (*llm.Runtime)(nil)
+				if candidate := ctx.Get(ServiceLlm); candidate != nil {
+					llmRuntime = candidate.(*llm.Runtime)
+				}
+				selection := (*toolsubagent.SubagentModelSelectionConfig)(nil)
+				if candidate := ctx.Get(ServiceSubagentModelSelection); candidate != nil {
+					selection = candidate.(*toolsubagent.SubagentModelSelectionConfig)
+				}
 				_, err := toolsubagent.Register(toolsubagent.Deps{
 					Runtime:      ctx.Get(ServiceTools).(*tools.ToolRuntime),
 					Prompt:       prompt,
 					Subagents:    ctx.Get(ServiceSubagentRuntime).(*subagent.SubagentRuntime),
 					Jobs:         jobsRegistry,
+					Llm:          llmRuntime,
+					Selection:    selection,
 					ResolveAgent: agentResolverOf(agents),
 				}, cfg)
 				return err
