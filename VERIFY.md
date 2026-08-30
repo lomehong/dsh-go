@@ -738,3 +738,14 @@ ow "id"）；scanRoot 排序 order 升序 nil→+Inf 平局 id 字节序、非 i
 - Go 偏差如实记录（README 已记）：工具 schema 注册期静态——官方 per-agent 参数存在性改为例：enabled 时参数常驻、策略 execute 期活解析、无 preset 父链回退；provider `agentRouteDefaults` 面未移植（choiceDescription 恒用父继承变体）。
 - 测试：toolsubagent +7（routes 校验/合并矩阵/策略门/preflight/会话事件 append-once/发现三级流/策略活解析与采样一次）；boot +1（组装：偏好服务、三参数+文案、list_subagent_models 挂载）。
 - 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1146 FAIL=0**（+8）。
+
+## r31 — toolsubagentreport 批（continuable 子代理 report 工具）
+
+- 新包 `toolsubagentreport`（官方 packages/subagent/tool-subagent-report/src 5.8KB 移植）：子代理 `report` 工具 + 使用指引，装入每个 continuable 子的未发布创建上下文；roots、one-shot 子、remote provider、agentless 执行不可见。
+- 贡献面：`SubagentRuntime.SetupRegistry().Register(contribution)`——boot 的 ManagerExt.Setup 缝此前已装配；contribution 从子上下文经 agent 服务派生 `child.Scope`，装子作用域 prompt section（tool:report、OrderToolReport=2900、文案逐字）+ `Tools.RegisterIn(scope,…)` 子作用域工具（description/output 参数/messageId output schema/`report accepted by the agent that started you as message %v` render 逐字）。
+- execute：`ReportFrom(child, content, SubagentReportOptions{Delivery, Signal})`；continuation manager 缺席的 runtime 错误透传（`continuable subagents require the agents service`）；无活解析 agent 时权威边界拒绝（`the report tool requires a calling agent`）。
+- Config.reportDelivery 缺省 next-step（quiet|next-step 枚举校验逐字）。
+- 语义决策（README 已记）：贡献失败 panic→setup registry 回滚（官方 throw 同形）；注册器撤销不可失败故 disposer 不聚合错误（官方 AggregateError 路径无 Go 对应需求）。
+- 测试：toolsubagentreport +5（枚举校验/deps 校验/子作用域装+泄漏到全局=否+陌生人执行拒+卸载撤销/nil child panic/经真 SetupRegistry.Apply 的贡献接线）。
+- 账实对齐：60→**61/86**、"其余 28 项"→27 项；tool-subagent-report 移出待办；tool-subagent-control 行核实已在位（旧账清）。
+- 门禁：gofmt clean、vet clean、`go test ./... -count=1 -timeout 600s -p 4` **PASS=1151 FAIL=0**（+5）。

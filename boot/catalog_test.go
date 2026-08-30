@@ -92,6 +92,8 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 			Config: map[string]any{"provider": "spawn", "toolName": "subagent", "backgroundMode": "continuable"}},
 		{ID: "tool-subagent-fork", Name: "@deepseek-ai/dsh-tool-subagent-fork",
 			Config: map[string]any{"provider": "fork", "toolName": "subagent_fork"}},
+		{ID: "tool-subagent-report", Name: "@deepseek-ai/dsh-tool-subagent-report",
+			Config: map[string]any{"reportDelivery": "next-step"}},
 	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
 	if err != nil {
 		t.Fatalf("assemble: %v", err)

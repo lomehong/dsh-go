@@ -71,6 +71,7 @@ import (
 	"dshgo/toolsjobs"
 	"dshgo/toolskill"
 	"dshgo/toolsubagent"
+	"dshgo/toolsubagentreport"
 	"dshgo/typert"
 )
 
@@ -338,6 +339,31 @@ var builders = map[string]pluginBuilder{
 	"@deepseek-ai/dsh-tool-subagent":      buildDelegationTool("spawn", "subagent"),
 	"@deepseek-ai/dsh-tool-subagent-fork": buildDelegationTool("fork", "subagent_fork"),
 
+	// The child-scoped report tool for continuable children (official
+	// dsh-tool-subagent-report: installs through the activation setup
+	// registry, invisible to parents and siblings).
+	"@deepseek-ai/dsh-tool-subagent-report": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSubagentRuntime, ServiceTools, ServiceSystemPrompt, ServiceAgents},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					ReportDelivery string `json:"reportDelivery"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				agents := ctx.Get(ServiceAgents).(*agent.AgentRegistry)
+				_, err := toolsubagentreport.Register(toolsubagentreport.Deps{
+					Subagents:    ctx.Get(ServiceSubagentRuntime).(*subagent.SubagentRuntime),
+					Tools:        ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					Prompt:       ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt),
+					ResolveAgent: agentResolverOf(agents),
+				}, toolsubagentreport.Config{ReportDelivery: subagent.SubagentReportDelivery(cfg.ReportDelivery)})
+				return err
+			},
+		}
+	},
 	// The user-preference owner for model-selectable delegation (official
 	// same-package named export; the web-app bundle composes it — the base
 	// bundle does not).
