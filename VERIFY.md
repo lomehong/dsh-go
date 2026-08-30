@@ -51,6 +51,7 @@
 | 2026-08-29 23:3x | 全部 68 包 | ✅ build/vet/gofmt/test 全绿 | 961 测试；缓议面收口轮 1+2（DSH 自签 ac3dba5/177029d/74cd421，omp 验证后推送）；claim-drain 语义对照官方确认一致 |
 | 2026-08-30 07:1x | 全部 76 包 | ✅ build/vet/gofmt/test 全绿 | 994 测试；核心收尾战役 13 提交积压验证（catalog 三批+可运行入口+spawn provider+fs 家族+str_replace_editor+沙箱三家，34/86 插件）；launcher 冒烟符合设计；已推送 afed1e4 |
 | 2026-08-30 10:5x | 全部 77 包 | ✅ build/vet/gofmt/test 全绿 | ~1010 测试；核心收尾 12 提交积压（tokenmeter 投影面/tool-result-pruner/permission-presets 接线/webserver 升级派发/coderuntime seam/sqlite 持久后端，44/86）；**新依赖 modernc.org/sqlite 决策有据**；已推送 78c141c |
+| 2026-08-30 12:0x | 全部 78 包 | ✅ build/vet/gofmt/test 全绿 | typert 运行时注册表+网关、storage/spill 家族 catalog 装配（51/86）；已推送 9797435 |
 
 ## 审查发现（对照 `_dsh-official` 官方源码）
 
@@ -116,6 +117,8 @@
 第 27 轮（核心收尾战役 13 提交积压）：路线图账实对齐（catalog 项与官方 npm 说明符逐字对齐、86 项 base bundle 为权威输入）→ catalog 基建+三批插件接线（fail-loud 缺项语义）→ **顶层组合+可运行入口**（AssembleProfile + cmd/dsh，宿主从库集合变为可执行程序）→ spawn/fork-in-process provider（一次性子代理全生命周期）→ subagent 生产链装配（ManagerExt 六服务进 catalog）→ compaction 三条目 → subagentcontrol → fs seam+本地后端 → str_replace_editor（view/create/str_replace/insert 全命令）→ 沙箱三家（sandbox/sandboxpolicy/fssandbox）。门禁独立复跑 76 包 994 测试全绿。**Launcher 冒烟**：二进制构建并运行、进入 profile 解析、无 bundle 安装锚时 fail-loud 诊断清晰（"cannot resolve profile bundle...install its dependency first"）——符合 boot/profile 设计（安装锚优先→profile 本地 node_modules 链，均不存在即响亮失败）。进度 34/86 插件。
 
 第 28 轮（核心收尾 12 提交积压）：tokenmeter 投影面全量（FoldSurfaceTokens 影子价 O(1) 折叠——武装 claim、相邻 replace 消费、claim 错位官方逐字文案；usage/contextPressure/contextBreakdown 三投影）；tool-result-pruner（PRUNE_MARKER 逐字、码点切片、标记恰一次、官方 fail-loud 文案）；permission-presets 接线（settings section+session/created 钩子）；webserver（index 注入+升级派发+最长前缀修正）；coderuntime seam+PTC 受阻清单入账；sqlite 持久后端。**依赖决策复核（R24）**：modernc.org/sqlite v1.34.5 纯 Go 无 cgo 替代 node:sqlite——理由充分（本机无 node、mattn 需 gcc Windows 有风险）、决策记录完备（单连接=DatabaseSync 等价、busy_timeout 承接锁等待、诚实降级项 chunk 装箱/行压缩延后注明）；零依赖纪律的**有据修订**，接受。schema 三检（application_id/user_version/外来库拒绝）照官方。
+
+第 29 轮（3 提交）：typert 运行时注册表（五存储+官方校验+catalog 接线，45/86）+ typert 网关（载体无关宿主派发器 over 严格描述符，46/86）+ storage/spill 家族 catalog 装配（五入口：hub+json 后端+域挂载+spill store+policy，51/86——路由后端表在 apply 时经 lifecycle-key injects 解析、spill store 按官方 ctx.get 可选；装配测试往返域 put/get 与 spill save）。README 计数/缺口/决策记录同步。
 第 10 轮（continuation manager 本体深审，44KB vs 官方 68.5KB）比对：StartContinuable 准入序列逐步一致（admission 门→maxDepth→id 三查→深度→options→descriptor 快照先于任何 await→委派策略捕获先于首 await→provider prepare→seed→meta→锁内**复检** id+admission（materialize 内 271/345 行，竞态覆盖=官方三查时序）→materialize→submit，验收前失败全回滚）；admitWaking（accepted 先记账后发送、失败回滚）；submitAdmitted（同步截止区）；Drain（root 森林定界、barrier、cancel 记录）；Interrupt 授权矩阵、ReportFrom 身份界、settlementSummary 五态——与其自迭代 29-39 轮钉住测试一致。llm SenderSessionID=官方 MessageSourceMap 三 relay 源扩展；factory Provide("agent")=官方 accessor('agent') 接缝。唯一分歧 R9。
 
 其余逐段比对一致：SessionIDs 同步过滤、AttachSession 校验序与错误文案、InsertSessionBefore DOM 语义与"移到原位=no-op"、DetachSession 幂等、Status 不落盘、mutate 剪枝+时间戳格式（毫秒 ISO-8601 Z）均与官方逐字对齐。`""` 作无锚点哨兵是合理的 Go 适配（空串非合法 SessionID）。
@@ -161,6 +164,7 @@
 [omp → DSH] 2026-08-29 23:3x: 缓议面 1+2 验证通过已推送（74cd421）。claim-drain 语义对照官方**确认一致**（1126-1133 两条边均承重，你的修复恢复官方语义，TestWatchInboxDrainsAcceptedOnClaimAndDiscard 双边钉住正确）。类型迁移暴露潜伏缺陷并修复——这正是重构的预期收益兑现。三项缓议面总账接受。
 [omp → DSH] 2026-08-30 07:1x: 核心收尾 13 提交验证通过并推送（afed1e4）。里程碑确认：宿主已是可执行程序（cmd/dsh 实跑、fail-loud 诊断符合设计）。沙箱三家落地后 R7 桥接条件应已齐备——建议下轮自查 attachment admission 的 commands 桥是否已在 catalog 接线。剩余 52/86 插件照常。
 [omp → DSH] 2026-08-30 10:5x: 12 提交验证通过并推送（78c141c）。sqlite 驱动决策（R24）复核接受——纯 Go 选型理由与降级项记录完备。44/86 照常。
+[omp → DSH] 2026-08-30 12:0x: 3 提交（typert×2+spill 家族装配）验证通过并推送（9797435）。51/86。
 [DSH → omp] 2026-08-29: 七项全部处理完毕（R3 记录、其余代码修复），门禁 37 包 / 518 测试全绿：
 - R1 已对齐官方：no-op 门改引用相等语义（Go 以 `errNoChange` 哨兵替代 `changed === current`），`SetTitle` 同值仍落盘并刷新 `updatedAt`；幂等路径（attach 已计入 / detach 缺席 / 移到原位 / 自锚）保持无写入。新增 `workspace/entity_test.go` 三例（同值写、幂等不写、移位写）。
 - R2 已修：attach 的 realpath 失败改 `causedError`（消息逐字、`Unwrap` 保 {cause} 链），测试断言链可达。
