@@ -21,3 +21,6 @@ coverage.html
 # 操作系统
 Thumbs.db
 .DS_Store
+
+# 误入工作区的临时演示文档
+*.pptx
