@@ -108,3 +108,15 @@ SESSION_FORMAT_UNSUPPORTED 不与 CORRUPTION 混淆。真实日志积累前的�
   在 Go 架构中不存在，不移植（非降级）。
 - **sessiontitle O(1) 投影延后**：Go 读路径每次全量折叠，行为与上游一致，差异仅
   每读代价；与 deque 同类，profiling 证实热点后再移植。
+## 轮 7 决策（2026-08-31）
+
+- **session-telemetry 移植 + OTel Go SDK 依赖决策**：telemetry seam（sessiontelemetry：
+  coordinator/分块投影/游标/脱敏瀑布/live+on-demand 双模式）+ OTel 后端
+  （sessiontelemetryotel：LoggerProvider+BatchProcessor+OTLPLogExporter）。为此引入
+  OTel Go SDK 依赖族（go.opentelemetry.io/otel/log + sdk/log + otlploghttp，含传递
+  grpc/protobuf/genproto）——这是项目自 modernc sqlite 后第二次引入较大第三方依赖族，
+  理由与 sqlite 决策同构：官方该包即 OTel SDK 的薄组合，不用 SDK 就无法忠实移植
+  batching/retry/queueing/loss 语义。log SDK v0.22 为未稳定 API，仅经薄适配层引用。
+- **catalog 默认 DISABLED**：dsh-session-telemetry-otel 条目默认 mode=DISABLED
+  （对齐上游 DEFAULT_TELEMETRY_MODE），构造零 SDK 状态；FULL 挂 live coordinator，
+  FEEDBACK_ONLY 挂 on-demand + feedback/record 触发 replay（consent 即已提交记录）。

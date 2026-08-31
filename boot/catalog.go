@@ -57,6 +57,8 @@ import (
 	"dshgo/session/projectioncache"
 	"dshgo/sessionlog"
 	"dshgo/sessionquerysqlite"
+	"dshgo/sessiontelemetry"
+	"dshgo/sessiontelemetryotel"
 	"dshgo/sessiontitle"
 	"dshgo/sessiontitlellm"
 	"dshgo/settings"
@@ -172,6 +174,10 @@ const (
 	// ServiceWorkflowEngine is the Go-realm workflow engine fanning child
 	// runs out through the subagent runtime (official 'workflowEngine').
 	ServiceWorkflowEngine = "workflowEngine"
+	// ServiceTelemetry is the session-telemetry backend (official
+	// 'sessionTelemetry'); one implementation per context, duplicate load
+	// fails loud.
+	ServiceTelemetry = "sessionTelemetry"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -2675,6 +2681,57 @@ var batchThreeBuilders = map[string]pluginBuilder{
 					Getenv: os.Getenv,
 				})
 				return err
+			},
+		}
+	},
+
+	// The OpenTelemetry session-telemetry backend (official
+	// dsh-session-telemetry-otel): composes the OTel SDK pipeline and the
+	// capture coordinator for the sharing policy. DISABLED (the default)
+	// constructs no SDK state and warns when recorded feedback stays local;
+	// FULL wires the live capture coordinator; FEEDBACK_ONLY wires an
+	// on-demand coordinator that replays the canonical log through each
+	// accepted feedback/record consent.
+	"@deepseek-ai/dsh-session-telemetry-otel": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSessions},
+			Provide: []string{ServiceTelemetry},
+			Apply: func(ctx *cordis.Context, config any) error {
+				cfg := sessiontelemetryotel.Config{Mode: sessiontelemetryotel.ModeDisabled}
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["mode"].(string); ok {
+						cfg.Mode = sessiontelemetryotel.Mode(raw)
+					}
+					if raw, ok := overridden["url"].(string); ok {
+						cfg.URL = raw
+					}
+				}
+				backend, err := sessiontelemetryotel.New(cfg)
+				if err != nil {
+					return err
+				}
+				store := ctx.Get(ServiceSessions).(*session.Store)
+				var detach cordis.Disposer
+				switch cfg.Mode {
+				case sessiontelemetryotel.ModeFull:
+					coord := sessiontelemetry.NewCoordinator(store, nil, deps.Logger, backend, nil)
+					detach = func() { coord.Shutdown() }
+				case sessiontelemetryotel.ModeFeedbackOnly:
+					coord := sessiontelemetry.NewOnDemandCoordinator(store, deps.Logger, backend, nil)
+					store.OnEvent(func(sess *session.Session, event session.Event) {
+						if event.Type != "feedback/record" {
+							return
+						}
+						coord.CaptureSession(sess, event.Seq)
+					})
+					detach = func() { coord.Shutdown() }
+				default:
+					// DISABLED: no SDK state, no coordinator. The backend
+					// still owns the sharing disclosure.
+					detach = func() {}
+				}
+				ctx.Provide(ServiceTelemetry, backend)
+				return ctx.Effect(func() (cordis.Disposer, error) { return detach, nil })
 			},
 		}
 	},

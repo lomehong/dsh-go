@@ -189,3 +189,12 @@ workflow / typert / sdk / boot / jobs / interaction / guard 的 src 在 alpha.2 
 | dsh-command-goal | ✅ 包已在（r49），本轮补 catalog 行（真实缺口系漏接线） |
 | dsh-tool-ralph | ⏳ 唯一真未移植件（439 行工具插件，workflowEngine+subagents 均在位）——独立轮，下一批首项 |
 | catalog 精确账 | 82/85（base 名单 85 非 86；处置 7 + 受阻 4；真实缺口=tool-ralph 1 件）。genstatus 计数修正为全键形态 |
+## 轮 7 执行状态（2026-08-31）
+
+| 项 | 结果 |
+|---|---|
+| session-telemetry seam + coordinator | ✅ 移植完成（live+on-demand 双模式/分块投影/游标/脱敏瀑布/agent-error 中继/shutdown 标记） |
+| session-telemetry-otel 后端 | ✅ 移植完成（OTel v0.22 log SDK 组合/severity 映射/shutdown 时限/DISABLED 零 SDK） |
+| catalog 接线 | ✅ dsh-session-telemetry-otel 条目（三模式 + ServiceTelemetry） |
+| OTel Go SDK 依赖族 | ✅ 引入（决策入账，见 DECISIONS.md） |
+| sandbox 家族 | ⏳ 下一批（sandbox-local + windows-acl + bash/pwsh-sandbox，OS 原生执法层） |
