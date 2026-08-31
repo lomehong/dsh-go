@@ -28,6 +28,7 @@ import (
 	"dshgo/compactionbasic"
 	"dshgo/cordis"
 	"dshgo/credentials"
+	"dshgo/filereference"
 	"dshgo/fs"
 	"dshgo/fslocal"
 	"dshgo/fsobservationpolicy"
@@ -191,6 +192,9 @@ const (
 	// (official 'sessionQuery'); exact reads, filters, and traces are
 	// concrete; full-text search requires a mounted backend.
 	ServiceSessionQuery = "sessionQuery"
+	// ServiceFileReference is the workspace file-reference discovery service
+	// (official 'fileReferences'); one local owner per context.
+	ServiceFileReference = "fileReferences"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -2633,6 +2637,67 @@ var batchThreeBuilders = map[string]pluginBuilder{
 				}
 				ctx.Provide(ServiceShellEnv, shell.NewShellEnvRegistry(cfg.DshHome, agentResolverOf(ctx.Get(ServiceAgents).(*agent.AgentRegistry))))
 				return nil
+			},
+		}
+	},
+
+	// The local file-reference discovery owner (official
+	// dsh-file-reference-local): one per-agent workspace index over the
+	// seam, invalidated on tool results and disposed with the agent. The
+	// `context:file-reference` prompt section installs host-wide.
+	"@deepseek-ai/dsh-file-reference-local": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceAgents, ServiceTools, ServiceSystemPrompt},
+			Provide: []string{ServiceFileReference},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					MaxResults          *int     `json:"maxResults"`
+					MaxEntries          *int     `json:"maxEntries"`
+					ExcludedDirectories []string `json:"excludedDirectories"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				searchConfig := filereference.DefaultServiceConfig()
+				if cfg.MaxResults != nil {
+					searchConfig.MaxResults = *cfg.MaxResults
+				}
+				if cfg.MaxEntries != nil {
+					searchConfig.MaxEntries = *cfg.MaxEntries
+				}
+				if cfg.ExcludedDirectories != nil {
+					searchConfig.ExcludedDirectories = cfg.ExcludedDirectories
+				}
+				service, err := filereference.NewService(searchConfig)
+				if err != nil {
+					return err
+				}
+				agents := ctx.Get(ServiceAgents).(*agent.AgentRegistry)
+				agents.Events().OnEmit(agent.EventAgentDisposed, nil, func(payload any) error {
+					if typed, ok := payload.(agent.AgentLifecyclePayload); ok {
+						service.DisposeAgent(string(typed.Agent.ID))
+					}
+					return nil
+				})
+				ctx.Get(ServiceTools).(*tools.ToolRuntime).OnResult(nil, func(exec *tools.ToolExecution, _ *tools.ToolExecutionResult) {
+					if exec.Agent != nil {
+						if resolved := agents.ByScope(exec.Agent); resolved != nil {
+							service.InvalidateAgent(string(resolved.ID))
+						}
+					}
+				})
+				prompt := ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt)
+				if _, err := prompt.Section(nil, systemprompt.PromptSection{
+					Name:  "context:file-reference",
+					Order: systemprompt.OrderFileReference,
+					TextProvider: func(systemprompt.AssembleContext) string {
+						return filereference.FileReferencePrompt
+					},
+				}); err != nil {
+					return err
+				}
+				ctx.Provide(ServiceFileReference, service)
+				return ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(service.Dispose), nil })
 			},
 		}
 	},
