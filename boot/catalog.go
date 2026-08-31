@@ -178,6 +178,9 @@ const (
 	// 'sessionTelemetry'); one implementation per context, duplicate load
 	// fails loud.
 	ServiceTelemetry = "sessionTelemetry"
+	// ServiceSandbox is the process-confinement provider seam (official
+	// 'sandbox'): confine returns enforcing argv or fails closed.
+	ServiceSandbox = "sandbox"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -2421,6 +2424,26 @@ var batchThreeBuilders = map[string]pluginBuilder{
 					return err
 				}
 				ctx.Provide(ServiceSandboxPolicy, service)
+				return nil
+			},
+		}
+	},
+
+	// The process-confinement provider seam (official dsh-sandbox-local).
+	// This composition provides the sandbox service with a fail-closed
+	// provider: confine always refuses with SANDBOX_UNAVAILABLE until a
+	// native enforcement runner (Windows ACL restricted-token, Linux
+	// bwrap+Landlock, macOS Seatbelt) is composed — "missing or unusable
+	// confinement fails closed rather than returning the original argv", the
+	// official semantics. The native runner bodies are a dedicated
+	// security-validated round (recorded in ROADMAP); the seam vocabulary
+	// itself is fully ported in the sandbox package.
+	"@deepseek-ai/dsh-sandbox-local": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{},
+			Provide: []string{ServiceSandbox},
+			Apply: func(ctx *cordis.Context, config any) error {
+				ctx.Provide(ServiceSandbox, sandbox.FailClosedProvider{})
 				return nil
 			},
 		}

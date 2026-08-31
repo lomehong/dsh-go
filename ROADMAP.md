@@ -198,3 +198,10 @@ workflow / typert / sdk / boot / jobs / interaction / guard 的 src 在 alpha.2 
 | catalog 接线 | ✅ dsh-session-telemetry-otel 条目（三模式 + ServiceTelemetry） |
 | OTel Go SDK 依赖族 | ✅ 引入（决策入账，见 DECISIONS.md） |
 | sandbox 家族 | ⏳ 下一批（sandbox-local + windows-acl + bash/pwsh-sandbox，OS 原生执法层） |
+## 轮 8 执行状态（2026-08-31）
+
+| 项 | 结果 |
+|---|---|
+| sandbox seam 契约 | ✅ 移植完成（ConfinedArgv/Provider/UnavailableError/RunnerFailureRule/Policy + FailClosedProvider，3 测） |
+| dsh-sandbox-local catalog | ✅ 接线（fail-closed provider 默认） |
+| bash/pwsh-sandbox + windows-acl 执法器 | ⏳ 独立安全验证轮（1738 行安全关键 Win32，x/sys 缺 CreateRestrictedToken 需手工桥接；随执法器同轮） |

@@ -120,3 +120,14 @@ SESSION_FORMAT_UNSUPPORTED 不与 CORRUPTION 混淆。真实日志积累前的�
 - **catalog 默认 DISABLED**：dsh-session-telemetry-otel 条目默认 mode=DISABLED
   （对齐上游 DEFAULT_TELEMETRY_MODE），构造零 SDK 状态；FULL 挂 live coordinator，
   FEEDBACK_ONLY 挂 on-demand + feedback/record 触发 replay（consent 即已提交记录）。
+## 轮 8 决策（2026-08-31）
+
+- **sandbox 进程执法层移植边界定谳**：seam 契约（ConfinedArgv/SandboxProvider/
+  SandboxUnavailableError/RunnerFailureRule/Policy/ExecutionPolicy + FailClosedProvider）
+  完整移植入 sandbox 包（可验证、下游依赖）；dsh-sandbox-local catalog 条目提供
+  fail-closed provider（无执法器时 confine 恒拒 SANDBOX_UNAVAILABLE = 上游 missing
+  confinement fails closed 语义）。**原生执法运行器本体（Windows ACL 限制令牌、
+  Linux bwrap+Landlock、macOS Seatbelt）不硬凑**：windows-acl 为 1738 行安全关键
+  Win32 代码且 x/sys 缺 CreateRestrictedToken 需手工桥接——草率移植安全边界比如实
+  保留缺口更危险，按项目"受阻如实记录"纪律入账为独立安全验证轮（bash/pwsh-sandbox
+  薄包装在其上，随执法器同轮）。
