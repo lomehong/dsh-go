@@ -22,6 +22,7 @@ import (
 	"dshgo/agentloop"
 	"dshgo/checkpointpolicy"
 	"dshgo/commandfeedback"
+	"dshgo/commandgoal"
 	"dshgo/commands"
 	"dshgo/compaction"
 	"dshgo/compactionbasic"
@@ -638,6 +639,22 @@ var builders = map[string]pluginBuilder{
 					ctx.Get(ServiceTools).(*tools.ToolRuntime),
 					ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt),
 					cfg)
+			},
+		}
+	},
+
+	// The /goal human command over the goal service: the seven-form grammar
+	// (bare show, create, clear, edit, pause, resume, help) with state
+	// rendering verbatim.
+	"@deepseek-ai/dsh-command-goal": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceCommands, ServiceGoals},
+			Apply: func(ctx *cordis.Context, config any) error {
+				_, err := commandgoal.Register(
+					ctx.Get(ServiceCommands).(*commands.CommandRuntime),
+					ctx.Get(ServiceGoals).(*goal.Service),
+				)
+				return err
 			},
 		}
 	},
@@ -1569,9 +1586,10 @@ var builders = map[string]pluginBuilder{
 	// composition.
 	"@deepseek-ai/dsh-permission-presets": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
-			Inject:  []string{ServiceSessions},
+			Inject:  []string{ServiceSessions, ServiceProjections},
 			Provide: []string{ServicePermissionPresets},
 			Apply: func(ctx *cordis.Context, config any) error {
+				projections := ctx.Get(ServiceProjections).(*projection.Registry)
 				presets, names := permissionpresets.DefaultPresets()
 				cfg := permissionpresets.Config{
 					Presets:        presets,
@@ -1637,6 +1655,11 @@ var builders = map[string]pluginBuilder{
 					}
 				}
 				ctx.Provide(ServicePermissionPresets, service)
+				// The `permissions` projection unit: the three-knob fold
+				// with the preset select derived at view time.
+				if _, err := projections.Register(service.ProjectionDefinition()); err != nil {
+					return err
+				}
 				return nil
 			},
 		}
@@ -2017,9 +2040,11 @@ var batchThreeBuilders = map[string]pluginBuilder{
 	},
 
 	// Plan mode: the /plan command and its exit tool over one controller.
+	// The plan projection unit registers here: the controller's state reads
+	// go through the registry (the official require-the-registry seam).
 	"@deepseek-ai/dsh-plan-mode": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
-			Inject:  []string{ServiceCommands, ServiceTools, ServiceUserQuestions},
+			Inject:  []string{ServiceCommands, ServiceTools, ServiceUserQuestions, ServiceProjections},
 			Provide: []string{ServicePlanMode},
 			Apply: func(ctx *cordis.Context, config any) error {
 				section := "plan"
@@ -2028,7 +2053,11 @@ var batchThreeBuilders = map[string]pluginBuilder{
 						section = raw
 					}
 				}
-				controller, err := planmode.NewController(section)
+				projections := ctx.Get(ServiceProjections).(*projection.Registry)
+				if _, err := projections.Register(planmode.ProjectionDefinition()); err != nil {
+					return err
+				}
+				controller, err := planmode.NewController(section, projections)
 				if err != nil {
 					return err
 				}

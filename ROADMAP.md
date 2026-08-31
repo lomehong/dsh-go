@@ -178,3 +178,14 @@ workflow / typert / sdk / boot / jobs / interaction / guard 的 src 在 alpha.2 
 | 6 | B4 permission 种子边界 / B5 plan+title 投影化 / B6 preset live-mount-first | ⏳ 待逐项核实远程线并入状态（r40-r49 合并可能已带部分语义） |
 
 **开放项**：F12 shelllocal 全量并发下 spawn 时序 flake（单跑/分块全绿；需专门的时限余量容差轮）。
+## 轮 6 执行状态（2026-08-31 续）
+
+| 项 | 结果 |
+|---|---|
+| B4 permission 种子边界 | ✅ 单元已在（远程线 r39+），本轮补 permissions 单元 catalog 注册 + Inject 接线 |
+| B5a plan require-registry | ✅ plan 单元生产注册（原为死代码）+ Controller 状态读改投影（NewController 必需接缝） |
+| B5b title O(1) 投影 | ⏳ 行为等价、纯性能内部项——与 deque 同类延后待 profiling |
+| B6 preset live-mount-first | ✅ 架构性 N/A 入账：Go 静态单运行时组合下，挂载后文件损坏不影响已组合运行时（无 HMR 多 fiber 面），上游场景不存在 |
+| dsh-command-goal | ✅ 包已在（r49），本轮补 catalog 行（真实缺口系漏接线） |
+| dsh-tool-ralph | ⏳ 唯一真未移植件（439 行工具插件，workflowEngine+subagents 均在位）——独立轮，下一批首项 |
+| catalog 精确账 | 82/85（base 名单 85 非 86；处置 7 + 受阻 4；真实缺口=tool-ralph 1 件）。genstatus 计数修正为全键形态 |

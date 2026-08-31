@@ -49,25 +49,45 @@ type pendingIntent struct {
 // the source's pending-intent WeakMap is a map keyed by session; entries
 // are removed when consumed, and sessions are process-lifetime residents.
 type Controller struct {
-	mu      sync.Mutex
-	section string
-	pending map[*session.Session]pendingIntent
+	mu          sync.Mutex
+	section     string
+	projections *projection.Registry
+	pending     map[*session.Session]pendingIntent
 }
 
 // NewController validates the deployment-owned guidance and builds the
 // controller.
-func NewController(section string) (*Controller, error) {
+func NewController(section string, projections *projection.Registry) (*Controller, error) {
 	resolved, err := ResolveSection(section)
 	if err != nil {
 		return nil, err
 	}
-	return &Controller{section: resolved, pending: map[*session.Session]pendingIntent{}}, nil
+	if projections == nil {
+		return nil, fmt.Errorf("plan-mode: the session projection registry is required")
+	}
+	return &Controller{section: resolved, projections: projections, pending: map[*session.Session]pendingIntent{}}, nil
+}
+
+// active reads the logged plan mode from the loop-registered `plan`
+// projection unit (O(1) after the first touch folds history): the
+// official controller stopped re-scanning the event log per read once the
+// projection registry became a required seam.
+func (c *Controller) active(sess *session.Session) bool {
+	state, ok := c.projections.StateOf(sess, ProjectionKey)
+	if !ok {
+		return false
+	}
+	unit, ok := state.(planUnitState)
+	if !ok {
+		return false
+	}
+	return unit.Active
 }
 
 // Get reads the logged plan state and any selected state awaiting the next
 // accepted in-turn pre-step.
 func (c *Controller) Get(sess *session.Session) (active bool, pending bool, hasPending bool) {
-	active = FoldPlanMode(sess.Events(), -1)
+	active = c.active(sess)
 	c.mu.Lock()
 	intent, ok := c.pending[sess]
 	c.mu.Unlock()
@@ -95,7 +115,7 @@ func (c *Controller) Set(agentObj *agent.Agent, active bool) (string, error) {
 	if hasPending {
 		target = pending.active
 	} else {
-		target = FoldPlanMode(sess.Events(), -1)
+		target = c.active(sess)
 	}
 	if active == target {
 		return OutcomeNoop, nil
@@ -104,14 +124,14 @@ func (c *Controller) Set(agentObj *agent.Agent, active bool) (string, error) {
 		c.mu.Lock()
 		c.pending[sess] = pendingIntent{active: active, narrate: true}
 		c.mu.Unlock()
-		if FoldPlanMode(sess.Events(), -1) == active {
+		if c.active(sess) == active {
 			return OutcomeCancelled, nil
 		}
 		return OutcomeQueued, nil
 	}
 	// No open turn: commit now. Delete only after append succeeds so a
 	// failed durable write leaves the selection retryable, not dropped.
-	if active == FoldPlanMode(sess.Events(), -1) {
+	if active == c.active(sess) {
 		c.mu.Lock()
 		delete(c.pending, sess)
 		c.mu.Unlock()
@@ -252,6 +272,9 @@ func (c *Controller) narration(sess *session.Session, target bool) *llm.Message 
 	return &message
 }
 
+// ProjectionKey is the projection registry key for the plan unit.
+const ProjectionKey = "plan"
+
 // planUnitState is the projection unit state: the logged mode, the latest
 // successful `/plan` selection not yet resolved by a `plan/mode` commit,
 // and an execution whose paired command settlement has not landed. Plain
@@ -287,7 +310,7 @@ type PlanProjection struct {
 // and cold reads all recover it from the log alone.
 func ProjectionDefinition() projection.Definition {
 	return projection.Unit[planUnitState]{
-		Key:          "plan",
+		Key:          ProjectionKey,
 		StateVersion: 2,
 		Init: func(header session.SessionHeader) planUnitState {
 			return planUnitState{Active: false, Wanted: nil, Running: nil}

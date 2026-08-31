@@ -96,3 +96,15 @@ SESSION_FORMAT_UNSUPPORTED 不与 CORRUPTION 混淆。真实日志积累前的�
 - **goal 折叠（B3）核实**：r49 的 goal 包落地晚于 alpha.2，fold 已含 goal-source
   rounds 语义——上游的 light-projection 读路径差异记录为 Go 偏好严格折叠的既有
   立场（fail-loud 重放），不另改。
+## 轮 6 决策（2026-08-31）
+
+- **plan-mode require-registry**：NewController 增必需 projections 参数（对齐上游
+  8645053ca0）；plan 单元由 plan-mode 条目生产注册（此前定义存在但从未注册——
+  生产死代码，本轮接通）；Controller 的 active 读经 StateOf 投影（首触折叠历史，
+  之后 O(1)）。HasOpenTurn 暂保留事件扫描（turnBoundary 收敛留待下轮，无语义差）。
+- **preset live-mount-first 架构性 N/A**：上游场景是 cordis 多运行时 + HMR 下
+  "挂载后的文件被改坏不影响 standing composition"；Go 静态单运行时组合在启动时
+  读取一次组合，运行期文件损坏本就不影响已挂载预设——上游修复所针对的竞态窗口
+  在 Go 架构中不存在，不移植（非降级）。
+- **sessiontitle O(1) 投影延后**：Go 读路径每次全量折叠，行为与上游一致，差异仅
+  每读代价；与 deque 同类，profiling 证实热点后再移植。

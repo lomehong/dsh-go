@@ -75,14 +75,22 @@ func run() error {
 	if readErr != nil {
 		return readErr
 	}
-	builderRe := regexp.MustCompile(`(?m)^\t"[^"]+": func\(deps CatalogDeps\) PluginSpec \{`)
-	wired := len(builderRe.FindAllString(string(catalogData), -1))
+	// Wired catalog entries: every builder map key in boot/catalog.go —
+	// both inline func(deps) builders and shared builder-factory values.
+	// Only official-name keys (dsh/cordis) count toward the wired total.
+	builderRe := regexp.MustCompile(`(?m)^\t"([^"]+)":`)
+	wired := 0
+	for _, match := range builderRe.FindAllStringSubmatch(string(catalogData), -1) {
+		if strings.Contains(match[1], "dsh") || strings.Contains(match[1], "cordis") {
+			wired++
+		}
+	}
 
 	block := strings.Join([]string{
 		fmt.Sprintf("- 工具链：%s / %s", runtime.Version(), runtime.GOOS+"/"+runtime.GOARCH),
 		fmt.Sprintf("- 包：%d（含测试 %d，cmd 入口不计测试）", packages, withTests),
 		fmt.Sprintf("- 行为测试函数：%d", tests),
-		fmt.Sprintf("- catalog 接线：%d / 86（官方基线 cordis.patch.yml 名单为分母）", wired),
+		fmt.Sprintf("- catalog 接线：%d / 85（base cordis.patch.yml 唯一名为分母）", wired),
 		fmt.Sprintf("- 生成时间：见 git log（由 `go run ./scripts/genstatus` 生成）"),
 	}, "\n")
 

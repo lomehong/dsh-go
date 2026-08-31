@@ -1,6 +1,6 @@
 # dsh-go — DSH 宿主的 Go 重写工程
 
-对照官方 `deepseek-ai/deepseek-harness` 标签 **dsh-v0.1.2-alpha.1** 的源码语义，把宿主运行时从 TypeScript/Node 重写为 Go；Web 客户端与插件 SDK 契约保持 TypeScript。语言分界画在 wire 契约上，不在实现上。
+对照官方 `deepseek-ai/deepseek-harness` 标签 **dsh-v0.1.2-alpha.2** 的源码语义（基线 alpha.1，r50 起 alpha.2 增量已并入），把宿主运行时从 TypeScript/Node 重写为 Go；Web 客户端与插件 SDK 契约保持 TypeScript。语言分界画在 wire 契约上，不在实现上。
 
 
 ## 文档导航

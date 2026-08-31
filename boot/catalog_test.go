@@ -243,6 +243,7 @@ func TestCatalogPermissionPresetsSettingsSectionAndCreationHook(t *testing.T) {
 		{ID: "settings", Name: "@deepseek-ai/dsh-settings-file"},
 		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
 		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
+		{ID: "projections", Name: "@deepseek-ai/dsh-session-projection"},
 		{ID: "permission-presets", Name: "@deepseek-ai/dsh-permission-presets"},
 	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
 	if err != nil {
@@ -783,6 +784,7 @@ func TestCatalogSessionTitleWorkspacePresetsAndWebhookCompose(t *testing.T) {
 		{ID: "agent-default-model", Name: "@deepseek-ai/dsh-agent-default-model",
 			Config: map[string]any{"provider": "deepseek-official", "model": "deepseek-chat"}},
 		{ID: "agents", Name: "@deepseek-ai/dsh-agent"},
+		{ID: "projections", Name: "@deepseek-ai/dsh-session-projection"},
 		{ID: "permission-presets", Name: "@deepseek-ai/dsh-permission-presets"},
 		{ID: "session-title", Name: "@deepseek-ai/dsh-session-title",
 			Config: map[string]any{"fallbackMaxWords": float64(5), "fallbackMaxBytes": float64(40), "maxTitleBytes": float64(80)}},

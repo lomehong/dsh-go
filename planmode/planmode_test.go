@@ -10,6 +10,7 @@ import (
 	"dshgo/cordis"
 	"dshgo/llm"
 	"dshgo/session"
+	"dshgo/session/projection"
 )
 
 // noopNotifications satisfies the inbox observer contract; plan tests only
@@ -67,7 +68,7 @@ func TestResolveSectionFailsLoud(t *testing.T) {
 	if _, err := ResolveSection(" guidance "); err != nil {
 		t.Fatalf("valid section: %v", err)
 	}
-	if _, err := NewController(""); err == nil {
+	if _, err := NewControllerWithRegistry(t, ""); err == nil {
 		t.Fatal("NewController must fail loud on missing guidance")
 	}
 }
@@ -118,7 +119,7 @@ func TestHasOpenTurnAndLastHeader(t *testing.T) {
 }
 
 func TestSetCommitsBetweenTurnsAndNarrates(t *testing.T) {
-	controller, err := NewController("plan guidance section")
+	controller, err := NewControllerWithRegistry(t, "plan guidance section")
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
 	}
@@ -162,7 +163,7 @@ func TestSetCommitsBetweenTurnsAndNarrates(t *testing.T) {
 }
 
 func TestSetQueuesDuringOpenTurnAndPreStepCommits(t *testing.T) {
-	controller, err := NewController("plan guidance section")
+	controller, err := NewControllerWithRegistry(t, "plan guidance section")
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
 	}
@@ -219,7 +220,7 @@ func TestSetQueuesDuringOpenTurnAndPreStepCommits(t *testing.T) {
 }
 
 func TestSetCancelClearsOppositePending(t *testing.T) {
-	controller, err := NewController("plan guidance section")
+	controller, err := NewControllerWithRegistry(t, "plan guidance section")
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
 	}
@@ -252,7 +253,7 @@ func TestSetCancelClearsOppositePending(t *testing.T) {
 }
 
 func TestSectionTextFollowsState(t *testing.T) {
-	controller, err := NewController("plan guidance section")
+	controller, err := NewControllerWithRegistry(t, "plan guidance section")
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
 	}
@@ -269,7 +270,7 @@ func TestSectionTextFollowsState(t *testing.T) {
 }
 
 func TestSectionTextPendingExitHidesImmediately(t *testing.T) {
-	controller, err := NewController("plan guidance section")
+	controller, err := NewControllerWithRegistry(t, "plan guidance section")
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
 	}
@@ -296,7 +297,7 @@ func TestSectionTextPendingExitHidesImmediately(t *testing.T) {
 	if _, err := sess.Append(EventPlanMode, PlanModeData{Active: false}, nil); err != nil {
 		t.Fatalf("append inactive: %v", err)
 	}
-	controller2, err := NewController("plan guidance section")
+	controller2, err := NewControllerWithRegistry(t, "plan guidance section")
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
 	}
@@ -409,4 +410,15 @@ func mustJSON(t *testing.T, value any) json.RawMessage {
 		t.Fatalf("marshal: %v", err)
 	}
 	return encoded
+}
+
+// NewControllerWithRegistry builds the controller with its required
+// projection registry carrying the plan unit.
+func NewControllerWithRegistry(t *testing.T, section string) (*Controller, error) {
+	t.Helper()
+	registry := projection.NewRegistry()
+	if _, err := registry.Register(ProjectionDefinition()); err != nil {
+		t.Fatalf("register plan unit: %v", err)
+	}
+	return NewController(section, registry)
 }

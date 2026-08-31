@@ -39,7 +39,7 @@ func newExitWorld(t *testing.T, active bool) *exitWorld {
 	if err != nil {
 		t.Fatalf("NewToolRuntime: %v", err)
 	}
-	controller, err := NewController("Plan guidance stays inside the plan.")
+	controller, err := NewControllerWithRegistry(t, "Plan guidance stays inside the plan.")
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestExitToolReloadDuringReview(t *testing.T) {
 // newPlanCommandWorld builds a command runtime, controller, and idle agent.
 func newPlanCommandWorld(t *testing.T) (*commands.CommandRuntime, *Controller, *agent.Agent, *session.Session) {
 	t.Helper()
-	controller, err := NewController("Plan guidance stays inside the plan.")
+	controller, err := NewControllerWithRegistry(t, "Plan guidance stays inside the plan.")
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestPlanCommandEntryDuringOpenTurnQueues(t *testing.T) {
 }
 
 func TestPlanCommandUndoUnregisters(t *testing.T) {
-	controller, err := NewController("Plan guidance stays inside the plan.")
+	controller, err := NewControllerWithRegistry(t, "Plan guidance stays inside the plan.")
 	if err != nil {
 		t.Fatalf("NewController: %v", err)
 	}

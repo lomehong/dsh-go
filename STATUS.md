@@ -100,6 +100,6 @@
 - 工具链：go1.26.5 / windows/amd64
 - 包：107（含测试 104，cmd 入口不计测试）
 - 行为测试函数：1349
-- catalog 接线：76 / 86（官方基线 cordis.patch.yml 名单为分母）
+- catalog 接线：83 / 85（base cordis.patch.yml 唯一名为分母）
 - 生成时间：见 git log（由 `go run ./scripts/genstatus` 生成）
 <!-- END GENERATED -->
