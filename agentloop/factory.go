@@ -184,31 +184,38 @@ func (l *AgentLoop) prepare(id session.SessionID, options agent.AgentOptions, se
 // teardown fires, each with its own reason. The returned stop releases the
 // watchers when teardown never fires.
 func (l *AgentLoop) fuseDeactivation(goCtx context.Context, cancel context.CancelCauseFunc, id session.SessionID, callerSignal context.Context) (stop func()) {
+	stopped := make(chan struct{})
 	var watchers sync.WaitGroup
 	if callerSignal != nil {
 		watchers.Add(1)
 		go func() {
 			defer watchers.Done()
-			<-callerSignal.Done()
-			if cause := context.Cause(callerSignal); cause != nil && cause != callerSignal.Err() {
-				cancel(cause)
-			} else if callerSignal.Err() != nil {
-				cancel(fmt.Errorf("agent %q creation aborted", id))
+			select {
+			case <-callerSignal.Done():
+				if cause := context.Cause(callerSignal); cause != nil && cause != callerSignal.Err() {
+					cancel(cause)
+				} else if callerSignal.Err() != nil {
+					cancel(fmt.Errorf("agent %q creation aborted", id))
+				}
+			case <-stopped:
 			}
 		}()
 	}
 	watchers.Add(1)
 	go func() {
 		defer watchers.Done()
-		<-l.ownership.signal().Done()
-		cancel(context.Cause(l.ownership.signal()))
+		select {
+		case <-l.ownership.signal().Done():
+			cancel(context.Cause(l.ownership.signal()))
+		case <-stopped:
+		}
 	}()
 	return func() {
-		// Settle the signal watchers: a fused cancellation that never fired
-		// ends quietly once goCtx is cancelled by dispose.
-		go func() {
-			watchers.Wait()
-		}()
+		// Release and reap both watchers: without the stopped gate each
+		// watcher pins its source context forever, so a fused cancellation
+		// that never fired leaked two goroutines per agent past dispose.
+		close(stopped)
+		watchers.Wait()
 	}
 }
 

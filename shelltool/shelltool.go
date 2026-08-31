@@ -64,7 +64,9 @@ const pwshGuidance = "Non-zero exits are reported as `[exit code: N]` markers; i
 // toolDescription rebuilds the model-facing description. The escalation
 // tail stays off: the Go composition mounts no confining shell executor,
 // so the fields are unadvertised and the markers unreachable (an honest
-// composition fact, not a wording gap).
+// composition fact, not a wording gap). The sandbox clause follows the
+// executor's SandboxMode the same way — it is only promised when the
+// composed executor actually confines.
 func toolDescription(e shell.ShellExecutor, background bool) string {
 	var backgroundClause string
 	if background {
@@ -80,9 +82,11 @@ func toolDescription(e shell.ShellExecutor, background bool) string {
 	}
 	base += "Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — " +
 		"pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. " +
-		"Current harness environment facts are exposed through managed `$DSH_*` variables; inspect them when needed. " +
-		"Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. " +
-		"Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. " +
+		"Current harness environment facts are exposed through managed `$DSH_*` variables; inspect them when needed. "
+	if e.SandboxMode() != "" {
+		base += "Commands run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. "
+	}
+	base += "Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. " +
 		backgroundClause
 	return base
 }

@@ -219,7 +219,10 @@ func (b *SubjectEventBus) Serial(event string, agentScope scope.ScopeKey, payloa
 }
 
 // Waterfall dispatches one around-middleware chain in the agent's scope with
-// base as the innermost default.
+// base as the innermost default. Listener panics deliberately propagate to
+// the driver's recovery boundary, which converts them into a turn abortion
+// and state restore — that path is contractual (the userquestions
+// throwing-answerer regression pins it), so the bus must not contain here.
 func (b *SubjectEventBus) Waterfall(event string, agentScope scope.ScopeKey, payload any, base func(any) any) any {
 	b.mu.Lock()
 	eventListeners := b.waterfall[event]

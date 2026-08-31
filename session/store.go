@@ -80,12 +80,11 @@ type Store struct {
 	seq   int
 	items map[SessionID]*storeEntry
 
-	logger         Logger
-	created        []func(*Session) error
-	disposed       []func(*Session)
-	flush          []func(*Session) error
-	eventSink      func(*Session, Event)
-	flushAfterWait sync.WaitGroup
+	logger    Logger
+	created   []func(*Session) error
+	disposed  []func(*Session)
+	flush     []func(*Session) error
+	eventSink func(*Session, Event)
 }
 
 // Logger is the minimal logging face the store needs (satisfied by

@@ -196,10 +196,38 @@ func (t *LineTransport) Flush() error {
 	return t.writer.Flush()
 }
 
+// maxFrameBytes caps one JSON-RPC line: the read loop would otherwise grow
+// without bound on a newline-less peer. The cap clears the attachment
+// pipeline's worst-case base64 image frame (~5.5 MiB) with headroom.
+const maxFrameBytes = 16 << 20
+
+// readFrameLine reads one newline-terminated frame under the frame cap. A
+// partial tail line comes back alongside its error, preserving ReadString
+// semantics for a peer that closes mid-line.
+func readFrameLine(reader *bufio.Reader) (string, error) {
+	var line []byte
+	for {
+		chunk, isPrefix, err := reader.ReadLine()
+		line = append(line, chunk...)
+		if err != nil {
+			if len(line) <= maxFrameBytes {
+				return string(line), err
+			}
+			return "", err
+		}
+		if !isPrefix {
+			return string(line), nil
+		}
+		if len(line) > maxFrameBytes {
+			return "", fmt.Errorf("jsonrpc: frame exceeds the %d-byte cap", maxFrameBytes)
+		}
+	}
+}
+
 func (t *LineTransport) read() {
 	reader := bufio.NewReaderSize(t.input, 1<<16)
 	for {
-		line, err := reader.ReadString('\n')
+		line, err := readFrameLine(reader)
 		if len(line) > 0 {
 			t.handleLine(line)
 		}

@@ -85,6 +85,21 @@ func saveInput(image EncodedImageAttachment) (SaveImageAttachment, error) {
 // and per-image validation, ordered commit — to the store. This is the
 // shared entry for every endpoint accepting browser uploads.
 func AdmitEncodedImages(attachments Store, images []EncodedImageAttachment) ([]ImageAttachmentRef, error) {
+	// Fast-path gate before any decode: the store's checks stay
+	// authoritative, but decoding unbounded payloads first would allocate
+	// ahead of the limit decision. DecodedLen prices each encoded payload
+	// exactly, and a zero limit means the deployment configured no gate.
+	limits := attachments.ImageLimits()
+	if limits.MaxImagesPerMessage > 0 && len(images) > limits.MaxImagesPerMessage {
+		return nil, NewAttachmentError("Image batch exceeds the configured image-count limit.", CodeTooManyImages)
+	}
+	totalBytes := 0
+	for _, image := range images {
+		totalBytes += base64.StdEncoding.DecodedLen(len(image.Data))
+	}
+	if limits.MaxMessageImageBytes > 0 && totalBytes > limits.MaxMessageImageBytes {
+		return nil, NewAttachmentError("Image batch exceeds the configured aggregate image-byte limit.", CodeImagesTooLarge)
+	}
 	inputs := make([]SaveImageAttachment, 0, len(images))
 	for _, image := range images {
 		input, err := saveInput(image)

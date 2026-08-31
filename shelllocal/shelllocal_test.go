@@ -188,9 +188,19 @@ type realFlavor struct {
 func newRealExecutor(t *testing.T) *realFlavor {
 	t.Helper()
 	sub := subprocess.NewLocal()
+	realConfig := func() Config {
+		cfg := testConfig()
+		// Load-tolerant deadlines for real-process spawns: the full suite
+		// runs ~110 packages concurrently and Windows spawn+teardown can
+		// exceed the 5s shared default, flaking completion tests. The
+		// dedicated timeout tests override explicitly.
+		cfg.TimeoutMs = 30000
+		cfg.MaxTimeoutMs = 60000
+		return cfg
+	}
 	if look, err := lookPath("bash"); err == nil && runtime.GOOS != "windows" {
 		_ = look
-		bash, err := NewBash(sub, testConfig())
+		bash, err := NewBash(sub, realConfig())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -202,7 +212,7 @@ func newRealExecutor(t *testing.T) *realFlavor {
 		}
 	}
 	// win32: probe the pwsh deployment (PS7 store/MSI install, 5.1 fallback).
-	cfg := testConfig()
+	cfg := realConfig()
 	cfg.GraceMs = 200
 	pwsh, err := NewPwsh(sub, cfg)
 	if err != nil {

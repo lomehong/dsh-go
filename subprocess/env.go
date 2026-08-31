@@ -11,7 +11,7 @@ import (
 // NOT forwarded to children (the harness's own secrets must not leak into a
 // spawned process implicitly). A deliberately supplied entry survives
 // because explicit env layers merge after the scrub.
-var sensitiveEnvPattern = regexp.MustCompile(`KEY|PASSWORD|SECRET|TOKEN`)
+var sensitiveEnvPattern = regexp.MustCompile(`KEY|PASSWORD|SECRET|TOKEN|DATABASE_URL|REDIS_URL|MONGO_URL|MONGO_URI|SSH_AUTH_SOCK`)
 
 // ScrubbedParentEnv returns the ambient parent environment minus
 // credential-shaped names and minus all DSH_* names (both case-insensitive:

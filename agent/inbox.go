@@ -187,13 +187,22 @@ func (i *Inbox) Prepend(target InboxTarget, message llm.Message) error {
 // Replace replaces one pending message in place, possibly changing its
 // identity. A successful replacement publishes the old message as discarded
 // and the new message as inserted. Reports whether the message was still
-// pending.
+// pending. Locate and splice share one lock hold: coordinates from a
+// released locate could go stale under a concurrent splice and delete the
+// wrong message.
 func (i *Inbox) Replace(messageID llm.MessageID, newMessage llm.Message) (bool, error) {
-	target, index, ok := i.locate(messageID)
+	i.mu.Lock()
+	target, index, ok := i.locateLocked(messageID)
 	if !ok {
+		i.mu.Unlock()
 		return false, nil
 	}
-	_, err := i.Splice(target, int64(index), 1, []llm.Message{newMessage})
+	_, err := i.mutateLocked(target, int64(index), 1, []llm.Message{newMessage}, true)
+	pending := i.drainNotificationsLocked()
+	i.mu.Unlock()
+	for _, notify := range pending {
+		notify()
+	}
 	if err != nil {
 		return false, err
 	}
@@ -201,13 +210,23 @@ func (i *Inbox) Replace(messageID llm.MessageID, newMessage llm.Message) (bool, 
 }
 
 // Remove removes one pending message and durably records its cancellation.
-// Reports whether the message was still pending.
+// Reports whether the message was still pending. Locate and splice share
+// one lock hold: coordinates from a released locate could go stale under a
+// concurrent splice and delete the wrong message.
 func (i *Inbox) Remove(messageID llm.MessageID) (bool, error) {
-	target, index, ok := i.locate(messageID)
+	i.mu.Lock()
+	target, index, ok := i.locateLocked(messageID)
 	if !ok {
+		i.mu.Unlock()
 		return false, nil
 	}
-	if _, err := i.Splice(target, int64(index), 1, nil); err != nil {
+	_, err := i.mutateLocked(target, int64(index), 1, nil, true)
+	pending := i.drainNotificationsLocked()
+	i.mu.Unlock()
+	for _, notify := range pending {
+		notify()
+	}
+	if err != nil {
 		return false, err
 	}
 	return true, nil
@@ -252,12 +271,10 @@ func (i *Inbox) setList(target InboxTarget, list []llm.Message) {
 	i.nextStep = list
 }
 
-// locate finds one pending identity across both owned lists, next-turn
-// first. Coordinates are valid only at the instant of the call; callers
-// follow up with a serialized splice.
-func (i *Inbox) locate(messageID llm.MessageID) (InboxTarget, int, bool) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
+// locateLocked finds one pending identity across both owned lists,
+// next-turn first. Caller holds i.mu, so the returned coordinates are
+// consumed before the lock is released.
+func (i *Inbox) locateLocked(messageID llm.MessageID) (InboxTarget, int, bool) {
 	for _, target := range []InboxTarget{InboxNextTurn, InboxNextStep} {
 		for index, message := range i.list(target) {
 			if message.ID == messageID {

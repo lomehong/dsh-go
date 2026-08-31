@@ -70,18 +70,21 @@ func run() error {
 		}
 	}
 
-	// Wired catalog entries: builder map keys in boot/catalog.go.
+	// baseCatalogTotal is the official base cordis.patch.yml unique-name
+	// count the wired figure is reported against; it moves only when the
+	// upstream base roster moves.
+	const baseCatalogTotal = 85
 	catalogData, readErr := os.ReadFile(filepath.Join(root, "boot", "catalog.go"))
 	if readErr != nil {
 		return readErr
 	}
 	// Wired catalog entries: every builder map key in boot/catalog.go —
 	// both inline func(deps) builders and shared builder-factory values.
-	// Only official-name keys (dsh/cordis) count toward the wired total.
+	// Only official @deepseek-ai-scoped names count toward the wired total.
 	builderRe := regexp.MustCompile(`(?m)^\t"([^"]+)":`)
 	wired := 0
 	for _, match := range builderRe.FindAllStringSubmatch(string(catalogData), -1) {
-		if strings.Contains(match[1], "dsh") || strings.Contains(match[1], "cordis") {
+		if strings.HasPrefix(match[1], "@deepseek-ai/") {
 			wired++
 		}
 	}
@@ -90,7 +93,7 @@ func run() error {
 		fmt.Sprintf("- 工具链：%s / %s", runtime.Version(), runtime.GOOS+"/"+runtime.GOARCH),
 		fmt.Sprintf("- 包：%d（含测试 %d，cmd 入口不计测试）", packages, withTests),
 		fmt.Sprintf("- 行为测试函数：%d", tests),
-		fmt.Sprintf("- catalog 接线：%d / 85（base cordis.patch.yml 唯一名为分母）", wired),
+		fmt.Sprintf("- catalog 接线：%d / %d（base cordis.patch.yml 唯一名为分母）", wired, baseCatalogTotal),
 		fmt.Sprintf("- 生成时间：见 git log（由 `go run ./scripts/genstatus` 生成）"),
 	}, "\n")
 

@@ -187,8 +187,8 @@ workflow / typert / sdk / boot / jobs / interaction / guard 的 src 在 alpha.2 
 | B5b title O(1) 投影 | ⏳ 行为等价、纯性能内部项——与 deque 同类延后待 profiling |
 | B6 preset live-mount-first | ✅ 架构性 N/A 入账：Go 静态单运行时组合下，挂载后文件损坏不影响已组合运行时（无 HMR 多 fiber 面），上游场景不存在 |
 | dsh-command-goal | ✅ 包已在（r49），本轮补 catalog 行（真实缺口系漏接线） |
-| dsh-tool-ralph | ⏳ 唯一真未移植件（439 行工具插件，workflowEngine+subagents 均在位）——独立轮，下一批首项 |
-| catalog 精确账 | 82/85（base 名单 85 非 86；处置 7 + 受阻 4；真实缺口=tool-ralph 1 件）。genstatus 计数修正为全键形态 |
+| dsh-tool-ralph | ✅ 已落地（toolralph 包 + catalog 条目在位，门禁绿）——本行原为待办，账本修复时更正 |
+| catalog 精确账 | 权威计数以 `go run ./scripts/genstatus` 为准（r65 时点 93/85：base 85 中 6 键结构性处置不移植、llm-pi-ai 待外部 SDK 适配轮，余为超出 base 的接线） |
 ## 轮 7 执行状态（2026-08-31）
 
 | 项 | 结果 |

@@ -290,6 +290,15 @@ func TestChildEnvScrubAndTombstones(t *testing.T) {
 	if _, has := plain["MY_TOKEN"]; has {
 		t.Fatal("scrub must drop TOKEN-shaped names")
 	}
+	t.Setenv("DATABASE_URL", "postgres://u:pw@h/db")
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
+	plain = ScrubbedParentEnv()
+	if _, has := plain["DATABASE_URL"]; has {
+		t.Fatal("scrub must drop connection-string names")
+	}
+	if _, has := plain["SSH_AUTH_SOCK"]; has {
+		t.Fatal("scrub must drop the SSH agent socket")
+	}
 	if plain["AMBIENT_VAR"] != "keep" {
 		t.Fatalf("ambient: %v", plain["AMBIENT_VAR"])
 	}

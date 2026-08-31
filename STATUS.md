@@ -98,8 +98,8 @@
 
 <!-- BEGIN GENERATED: do not edit -->
 - 工具链：go1.26.5 / windows/amd64
-- 包：110（含测试 107，cmd 入口不计测试）
-- 行为测试函数：1367
-- catalog 接线：87 / 85（base cordis.patch.yml 唯一名为分母）
+- 包：115（含测试 111，cmd 入口不计测试）
+- 行为测试函数：1386
+- catalog 接线：93 / 85（base cordis.patch.yml 唯一名为分母）
 - 生成时间：见 git log（由 `go run ./scripts/genstatus` 生成）
 <!-- END GENERATED -->
