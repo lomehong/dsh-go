@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,9 +33,10 @@ const disposeGrace = 30 * time.Second
 
 // ChildDispatcher is the subagent seam the engine fans out to.
 type ChildDispatcher interface {
-	// Start dispatches one one-shot child run on behalf of the request's
-	// parent.
-	Start(request subagent.SubagentStartRequest) (subagent.SubagentRun, error)
+	// Start dispatches one one-shot child run for the named provider on
+	// behalf of the request's parent. The provider resolves per call: the
+	// agent() call's override wins, then the run's subagentProvider.
+	Start(provider string, request subagent.SubagentStartRequest) (subagent.SubagentRun, error)
 }
 
 // AgentCall is the closed option set of one agent() call. Unknown options
@@ -377,6 +379,15 @@ func (r *liveRun) settle(result WorkflowResult) {
 	})
 }
 
+// providerFor resolves one agent() call's provider: the call override
+// wins, then the run's subagentProvider (the official option merge).
+func (r *liveRun) providerFor(call AgentCall) string {
+	if call.Provider != "" {
+		return call.Provider
+	}
+	return r.provider
+}
+
 // agent mediates one agent() call: cap, dispatch, event pairing, outcome
 // mapping.
 func (r *liveRun) agent(prompt string, call AgentCall) (any, error) {
@@ -400,7 +411,7 @@ func (r *liveRun) agent(prompt string, call AgentCall) (any, error) {
 		Signal:       dispatchCtx,
 		OutputSchema: call.Schema,
 	}
-	child, err := r.engine.children.Start(start)
+	child, err := r.engine.children.Start(r.providerFor(call), start)
 	if err != nil {
 		// No published run: neither event of the pair fires.
 		return nil, NewWorkflowError(fmt.Sprintf("agent() dispatch failed: %s", err), CodeAgentStart, err, nil)
@@ -446,7 +457,16 @@ func (r *liveRun) agent(prompt string, call AgentCall) (any, error) {
 	switch {
 	case outcome.err == nil && outcome.result.StopReason == subagent.StopCompleted:
 		endInfo.Outcome = AgentCompleted
-		value = agentValue(outcome.result)
+		if call.Schema != nil && isUnsetStructured(outcome.result.Structured) {
+			// A schema call whose child finished without a valid capture
+			// yields null — the script's null-check is the failure path
+			// (the official agent() structured contract). The check is
+			// reflect-guarded: a provider can hand back a typed-nil inside
+			// the interface, which must read as unset, not as a value.
+			value = nil
+		} else {
+			value = agentValue(outcome.result)
+		}
 	default:
 		endInfo.Outcome = AgentFailed
 	}
@@ -465,6 +485,16 @@ func agentLabel(call AgentCall, prompt string) string {
 		snippet = snippet[:80]
 	}
 	return snippet
+}
+
+// isUnsetStructured reports a structured capture that is absent: an
+// untyped nil or any typed nil (a nil map/slice/pointer inside the
+// interface must read as unset, never as a value).
+func isUnsetStructured(value any) bool {
+	if value == nil {
+		return true
+	}
+	return reflect.ValueOf(value).IsNil()
 }
 
 // agentValue resolves the child's script value: the structured result when

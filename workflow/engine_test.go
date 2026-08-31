@@ -39,7 +39,7 @@ type fakeChildren struct {
 	blockCh chan struct{}
 }
 
-func (f *fakeChildren) Start(request subagent.SubagentStartRequest) (subagent.SubagentRun, error) {
+func (f *fakeChildren) Start(provider string, request subagent.SubagentStartRequest) (subagent.SubagentRun, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.starts = append(f.starts, request)

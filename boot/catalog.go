@@ -83,6 +83,7 @@ import (
 	"dshgo/tokenmeter"
 	"dshgo/toolfs"
 	"dshgo/toolgoal"
+	"dshgo/toolralph"
 	"dshgo/toolresultpruner"
 	"dshgo/tools"
 	"dshgo/toolsjobs"
@@ -95,6 +96,7 @@ import (
 	"dshgo/webfetchhttp"
 	"dshgo/webhook"
 	"dshgo/websearchdeepseek"
+	"dshgo/workflow"
 	"dshgo/workspace"
 )
 
@@ -167,6 +169,9 @@ const (
 	// ServiceWebhookRuntime is the fire-and-forget webhook rule registry
 	// (official 'webhookRuntime').
 	ServiceWebhookRuntime = "webhookRuntime"
+	// ServiceWorkflowEngine is the Go-realm workflow engine fanning child
+	// runs out through the subagent runtime (official 'workflowEngine').
+	ServiceWorkflowEngine = "workflowEngine"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -1765,6 +1770,56 @@ var builders = map[string]pluginBuilder{
 	// The in-process fork provider: the child is seeded with the parent's
 	// completed-turn prefix. Config.providerName overrides fork.
 	"@deepseek-ai/dsh-subagent-fork-in-process": inProcessProviderSpec("fork"),
+
+	// The Go-realm workflow engine: child runs fan out through the
+	// subagent runtime (the official workflowEngine inject; the official
+	// worker-thread realm has no Go counterpart — the engine executes
+	// native programs).
+	"@deepseek-ai/dsh-workflow": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSubagentRuntime},
+			Provide: []string{ServiceWorkflowEngine},
+			Apply: func(ctx *cordis.Context, config any) error {
+				engine, err := workflow.NewEngine(workflow.EngineOptions{
+					Sink:     workflow.NewEventSink(sessionLogger{logger: deps.Logger}),
+					Children: ctx.Get(ServiceSubagentRuntime).(*subagent.SubagentRuntime),
+				})
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceWorkflowEngine, engine)
+				return nil
+			},
+		}
+	},
+
+	// The ralph tool: the model-facing foreground fresh-agent loop over
+	// the workflow engine and the structured-output subagent seam.
+	"@deepseek-ai/dsh-tool-ralph": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceTools, ServiceWorkflowEngine, ServiceSubagentRuntime, ServiceSystemPrompt, ServiceAgents},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg toolralph.Config
+				if overridden, ok := config.(map[string]any); ok {
+					if err := decodeConfigJSON(overridden, &cfg); err != nil {
+						return err
+					}
+				}
+				undo, err := toolralph.Register(
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt),
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					ctx.Get(ServiceWorkflowEngine).(workflow.Engine),
+					ctx.Get(ServiceSubagentRuntime).(*subagent.SubagentRuntime),
+					cfg,
+				)
+				if err != nil {
+					return err
+				}
+				return ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(undo), nil })
+			},
+		}
+	},
 }
 
 // inProcessProviderSpec builds one in-process provider's spec: shared
