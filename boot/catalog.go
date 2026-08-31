@@ -45,6 +45,7 @@ import (
 	"dshgo/llm"
 	"dshgo/llm/deepseek"
 	"dshgo/llmretry"
+	"dshgo/messagefeedback"
 	"dshgo/planmode"
 	"dshgo/preset"
 	"dshgo/sandbox"
@@ -181,6 +182,9 @@ const (
 	// ServiceSandbox is the process-confinement provider seam (official
 	// 'sandbox'): confine returns enforcing argv or fails closed.
 	ServiceSandbox = "sandbox"
+	// ServiceMessageFeedback is the durable message-feedback sidecar
+	// (official 'messageFeedback'); one implementation per context.
+	ServiceMessageFeedback = "messageFeedback"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -2704,6 +2708,48 @@ var batchThreeBuilders = map[string]pluginBuilder{
 					Getenv: os.Getenv,
 				})
 				return err
+			},
+		}
+	},
+
+	// The durable message-feedback sidecar (official
+	// dsh-message-feedback): lifecycle-bound feedback for finalized
+	// assistant messages, inspected through the persistence coordinator and
+	// stored in the storage-domain sidecar.
+	"@deepseek-ai/dsh-message-feedback": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceStorageDomain, ServiceSessionPersist, ServiceSessions},
+			Provide: []string{ServiceMessageFeedback},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					MaxNoteBytes *int64 `json:"maxNoteBytes"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				maxNoteBytes := int64(2000)
+				if cfg.MaxNoteBytes != nil {
+					maxNoteBytes = *cfg.MaxNoteBytes
+				}
+				service, err := messagefeedback.New(messagefeedback.Config{MaxNoteBytes: maxNoteBytes})
+				if err != nil {
+					return err
+				}
+				facility := ctx.Get(ServiceStorageDomain).(*storagedomain.Facility)
+				domain, err := facility.Open(messagefeedback.Spec())
+				if err != nil {
+					return err
+				}
+				if err := service.Open(domain); err != nil {
+					domain.Close()
+					return err
+				}
+				service.SetDependencies(
+					ctx.Get(ServiceSessionPersist).(*persistence.Coordinator),
+					ctx.Get(ServiceSessions).(*session.Store),
+				)
+				ctx.Provide(ServiceMessageFeedback, service)
+				return ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(service.Close), nil })
 			},
 		}
 	},
