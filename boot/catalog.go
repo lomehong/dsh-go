@@ -51,6 +51,7 @@ import (
 	"dshgo/preset"
 	"dshgo/sandbox"
 	"dshgo/sandboxpolicy"
+	"dshgo/sandboxshell"
 	"dshgo/session"
 	"dshgo/session/persistence"
 	"dshgo/session/persistence/jsonl"
@@ -2518,6 +2519,59 @@ var batchThreeBuilders = map[string]pluginBuilder{
 			Provide: []string{ServiceSandbox},
 			Apply: func(ctx *cordis.Context, config any) error {
 				ctx.Provide(ServiceSandbox, sandbox.FailClosedProvider{})
+				return nil
+			},
+		}
+	},
+
+	// The sandbox-consuming bash executor (official dsh-bash-sandbox):
+	// composes INSTEAD of dsh-bash-local; requires the sandbox provider.
+	// With the fail-closed default provider every command fails with
+	// SANDBOX_UNAVAILABLE (the correct behavior when no native runner is
+	// available). The tool layer is unchanged.
+	"@deepseek-ai/dsh-bash-sandbox": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSubprocess, ServiceSandbox, ServiceShellEnv},
+			Provide: []string{ServiceShell},
+			Apply: func(ctx *cordis.Context, config any) error {
+				executorCfg, err := decodeShellLocalConfig(config, false)
+				if err != nil {
+					return err
+				}
+				local, err := shelllocal.NewBash(ctx.Get(ServiceSubprocess).(subprocess.Runtime), executorCfg)
+				if err != nil {
+					return err
+				}
+				executor, err := sandboxshell.NewBashSandbox(local, ctx.Get(ServiceSandbox).(sandbox.Provider))
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceShell, executor)
+				return nil
+			},
+		}
+	},
+
+	// The sandbox-consuming pwsh executor (official dsh-pwsh-sandbox):
+	// composes INSTEAD of dsh-pwsh-local; requires the sandbox provider.
+	"@deepseek-ai/dsh-pwsh-sandbox": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSubprocess, ServiceSandbox, ServiceShellEnv},
+			Provide: []string{ServiceShell},
+			Apply: func(ctx *cordis.Context, config any) error {
+				executorCfg, err := decodeShellLocalConfig(config, true)
+				if err != nil {
+					return err
+				}
+				local, err := shelllocal.NewPwsh(ctx.Get(ServiceSubprocess).(subprocess.Runtime), executorCfg)
+				if err != nil {
+					return err
+				}
+				executor, err := sandboxshell.NewPwshSandbox(local, ctx.Get(ServiceSandbox).(sandbox.Provider))
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceShell, executor)
 				return nil
 			},
 		}
