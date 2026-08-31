@@ -2,6 +2,7 @@ package fssearch
 
 import (
 	"dshgo/cordis"
+	"dshgo/subprocess"
 	"dshgo/systemprompt"
 	"dshgo/tools"
 )
@@ -11,6 +12,7 @@ import (
 func newHarness(t testingTB, rgPath string) (*tools.ToolRuntime, *systemprompt.SystemPrompt, *cordis.Context) {
 	t.Helper()
 	root := cordis.NewRoot(cordis.Discard{})
+	root.Provide("subprocess", subprocess.Local{})
 	runtime, err := tools.NewToolRuntime(cordis.Discard{}, tools.Config{})
 	if err != nil {
 		t.Fatal(err)

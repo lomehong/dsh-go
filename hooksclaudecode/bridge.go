@@ -20,13 +20,16 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"dshgo/agent"
+	"dshgo/agentloop"
 	"dshgo/cordis"
 	"dshgo/hookprotocol"
 	"dshgo/llm"
 	"dshgo/session"
+	"dshgo/session/projection"
 	"dshgo/subagent"
 	"dshgo/tools"
 )
@@ -87,6 +90,7 @@ type bridge struct {
 	logger                cordis.Logger
 	now                   func() int64
 	agents                *agent.AgentRegistry
+	projections           *projection.Registry
 
 	// subagentChildren retains each local child through its paired end so
 	// stop hooks keep the session workspace after the handle unregisters
@@ -96,9 +100,22 @@ type bridge struct {
 	subagentChildren   map[subagent.SubagentRunID]*agent.Agent
 }
 
+// runHookFunc is the execution seam signature; hookprotocol.RunHook is the
+// production value.
+type runHookFunc = func(hookprotocol.CommandHook, hookprotocol.RunHookOptions, func() int64) hookprotocol.RunHookResult
+
 // runHook indirection lets tests stub execution deterministically; the
-// production value is the protocol runner.
-var runHook = hookprotocol.RunHook
+// production value is the protocol runner. Access is atomic because
+// detached runs invoke it from tracking goroutines while tests replace the
+// seam.
+var runHook = func() *atomic.Pointer[runHookFunc] {
+	ref := &atomic.Pointer[runHookFunc]{}
+	production := runHookFunc(hookprotocol.RunHook)
+	ref.Store(&production)
+	return ref
+}()
+
+func currentRunHook() runHookFunc { return *runHook.Load() }
 
 // Apply validates the config, parses the hook config file, and registers
 // the bridge's listeners. It returns the disposer that unregisters every
@@ -108,12 +125,15 @@ var runHook = hookprotocol.RunHook
 //
 // Subagent lifecycle edges dispatch on the same registry subject bus the
 // composition hands the subagent runtime, so the bridge subscribes there.
-func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Config) (func(), error) {
+func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, projections *projection.Registry, config Config) (func(), error) {
 	if agents == nil {
 		return nil, fmt.Errorf("hooks-claude-code: agents registry is required")
 	}
 	if runtime == nil {
 		return nil, fmt.Errorf("hooks-claude-code: tool runtime is required")
+	}
+	if projections == nil {
+		return nil, fmt.Errorf("hooks-claude-code: session projection registry is required")
 	}
 	// Validate before config parsing so a bad value cannot be hidden by its
 	// early return.
@@ -238,7 +258,7 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 	// resolves the live agent from the registry first.
 	disposers = append(disposers, runtime.OnPreExecute(nil, func(exec *tools.ToolExecution, next func(*tools.ToolExecution) *tools.PreToolDecision) *tools.PreToolDecision {
 		execAgent := resolveByScope(agents, exec.Agent)
-		turn := lastTurn(execAgent)
+		turn := lastTurn(b.projections, execAgent)
 		outcome, runErr := b.runPoint(pointPreToolUse, exec.Name, b.preToolPayload(exec, execAgent), runPointOptions{agent: execAgent, turn: turn, hasTurn: execAgent != nil, signal: context.Background()})
 		merged := b.mergeOrWarn(pointPreToolUse, outcome, runErr)
 		if merged.Decision == hookprotocol.MergedDeny {
@@ -258,7 +278,7 @@ func Apply(agents *agent.AgentRegistry, runtime *tools.ToolRuntime, config Confi
 	// PostToolUse → PostToolDecision. Matcher subject is the tool name.
 	disposers = append(disposers, runtime.OnPostExecute(nil, func(exec *tools.ToolExecution, result *tools.ToolExecutionResult, next func(*tools.ToolExecutionResult) *tools.PostToolDecision) *tools.PostToolDecision {
 		execAgent := resolveByScope(agents, exec.Agent)
-		turn := lastTurn(execAgent)
+		turn := lastTurn(b.projections, execAgent)
 		outcome, runErr := b.runPoint(pointPostToolUse, exec.Name, b.postToolPayload(exec, result, execAgent), runPointOptions{agent: execAgent, turn: turn, hasTurn: execAgent != nil, signal: context.Background()})
 		merged := b.mergeOrWarn(pointPostToolUse, outcome, runErr)
 		contextMsg := contextFrom(b, merged)
@@ -434,7 +454,7 @@ func (b *bridge) runPoint(point string, matchQuery string, payload map[string]an
 			if projectDir != nil {
 				env["CLAUDE_PROJECT_DIR"] = *projectDir
 			}
-			run := runHook(hook, hookprotocol.RunHookOptions{
+			run := currentRunHook()(hook, hookprotocol.RunHookOptions{
 				Payload:           payload,
 				Env:               env,
 				CWD:               workdir,
@@ -516,23 +536,20 @@ func nextHandlerID() int64 {
 	return handlerIDCounter
 }
 
-// lastTurn reads the last open turn number in the agent's log, or 0
-// without an agent. The scan runs newest-first: one decode instead of one
-// per turn-start in a long log.
-func lastTurn(a *agent.Agent) int64 {
-	if a == nil {
+// lastTurn reads the turn number from the loop-owned turnBoundary
+// projection, or 0 without an agent/unit. The official bridge stopped
+// scanning the event log for turn/start: the loop is the authoritative
+// driver of the boundary facts and publishes them as a projection unit.
+func lastTurn(projections *projection.Registry, a *agent.Agent) int64 {
+	if a == nil || projections == nil {
 		return 0
 	}
-	events := a.Session.Events()
-	for index := len(events) - 1; index >= 0; index-- {
-		event := events[index]
-		if event.Type != session.EventTurnStart {
-			continue
-		}
-		var data session.TurnStartData
-		if json.Unmarshal(event.Data, &data) == nil {
-			return data.Turn
-		}
+	state, ok := projections.StateOf(a.Session, agentloop.TurnBoundaryProjectionKey)
+	if !ok {
+		return 0
+	}
+	if boundary, ok := state.(agentloop.TurnBoundaryProjection); ok {
+		return boundary.LastTurn
 	}
 	return 0
 }

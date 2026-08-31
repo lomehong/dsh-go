@@ -32,23 +32,23 @@ type GatewayErrorCode string
 
 // The official error taxonomy.
 const (
-	CodeAmbiguousEndpoint     GatewayErrorCode = "ambiguous-endpoint"
-	CodeArgumentsInvalid      GatewayErrorCode = "arguments-invalid"
-	CodeBindingInvalid        GatewayErrorCode = "binding-invalid"
-	CodeContextFailed         GatewayErrorCode = "context-failed"
-	CodeContextNotFound       GatewayErrorCode = "context-not-found"
-	CodeContextUnavailable    GatewayErrorCode = "context-unavailable"
-	CodeDefinitionUnavailable GatewayErrorCode = "definition-unavailable"
-	CodeInputInvalid          GatewayErrorCode = "input-invalid"
-	CodeInvocationUnavailable GatewayErrorCode = "invocation-unavailable"
-	CodeLookupFailed          GatewayErrorCode = "lookup-failed"
-	CodeLookupNotFound        GatewayErrorCode = "lookup-not-found"
-	CodeLookupUnavailable     GatewayErrorCode = "lookup-unavailable"
-	CodeMethodUnavailable     GatewayErrorCode = "method-unavailable"
-	CodeProviderMismatch      GatewayErrorCode = "provider-mismatch"
-	CodeResultInvalid         GatewayErrorCode = "result-invalid"
-	CodeServiceUnavailable    GatewayErrorCode = "service-unavailable"
-	CodeSignatureInvalid      GatewayErrorCode = "signature-invalid"
+	CodeAmbiguousEndpoint     GatewayErrorCode = "gateway/ambiguous-endpoint"
+	CodeArgumentsInvalid      GatewayErrorCode = "gateway/arguments-invalid"
+	CodeBindingInvalid        GatewayErrorCode = "gateway/binding-invalid"
+	CodeContextFailed         GatewayErrorCode = "gateway/context-failed"
+	CodeContextNotFound       GatewayErrorCode = "gateway/context-not-found"
+	CodeContextUnavailable    GatewayErrorCode = "gateway/context-unavailable"
+	CodeDefinitionUnavailable GatewayErrorCode = "gateway/definition-unavailable"
+	CodeInputInvalid          GatewayErrorCode = "gateway/input-invalid"
+	CodeInvocationUnavailable GatewayErrorCode = "gateway/invocation-unavailable"
+	CodeLookupFailed          GatewayErrorCode = "gateway/lookup-failed"
+	CodeLookupNotFound        GatewayErrorCode = "gateway/lookup-not-found"
+	CodeLookupUnavailable     GatewayErrorCode = "gateway/lookup-unavailable"
+	CodeMethodUnavailable     GatewayErrorCode = "gateway/method-unavailable"
+	CodeProviderMismatch      GatewayErrorCode = "gateway/provider-mismatch"
+	CodeResultInvalid         GatewayErrorCode = "gateway/result-invalid"
+	CodeServiceUnavailable    GatewayErrorCode = "gateway/service-unavailable"
+	CodeSignatureInvalid      GatewayErrorCode = "gateway/signature-invalid"
 )
 
 // GatewayError is one dispatch failure produced outside the invoked
@@ -163,6 +163,14 @@ func WireFailure(err error) typert.Failure {
 	var remote *typert.RemoteFailure
 	if errors.As(err, &remote) {
 		return remote.Failure
+	}
+	var gatewayErr *GatewayError
+	if errors.As(err, &gatewayErr) {
+		details := map[string]any{"endpoint": gatewayErr.Endpoint}
+		if gatewayErr.Field != "" {
+			details["field"] = gatewayErr.Field
+		}
+		return typert.Failure{Code: string(gatewayErr.Code), Message: gatewayErr.Error(), Details: details}
 	}
 	return typert.Failure{Code: "internal", Message: err.Error(), Details: map[string]any{}}
 }

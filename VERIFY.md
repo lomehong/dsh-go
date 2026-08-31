@@ -55,7 +55,10 @@
 | 2026-08-30 13:2x | 全部 80 包 | ✅ build/vet/gofmt/test 全绿 | 1146 测试；r28-r30（policy/skill/deepseek 扩展装配批 58/86 + toolsubagent 双 bundle 行 + model-selection 子面含死锁修复）；已推送 45b4b49 |
 | 2026-08-30 14:0x | 全部 81 包 | ✅ build/vet/gofmt/test 全绿 | 1159 测试；r31-r33（toolsubagentreport/session_projcache 域/read_image+attachment-local，63/86）；**R7 状态更新：桥仍未接线且条件已半满足**；已推送 69ffa61 |
 
-## 审查发现（对照 `_dsh-official` 官方源码）
+## 审查发现（已迁至 FINDINGS.md）
+
+> R 系列权威台账已迁入 [FINDINGS.md](FINDINGS.md)（含定谳状态与维护期 F 系列追加）。本文件保留双 Agent 协议与验证记录。
+
 
 | # | 严重度 | 位置 | 发现 | 建议 |
 |---|---|---|---|---|

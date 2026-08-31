@@ -281,8 +281,8 @@ func TestSubagentStartInjectsChildContextAndPairedEndRuns(t *testing.T) {
 	f.registry.Events().Emit(subagent.EventSubagentEnd, f.agent.Scope, subagent.SubagentRunEndInfo{
 		SubagentRunInfo: subagent.SubagentRunInfo{RunID: "run-1", ID: childSession.ID()},
 	})
-	waitFor(t, "subagent stop run", func() bool { return len(*observed) >= 2 })
-	if got := (*observed)[1].command; got != "observe" {
+	waitFor(t, "subagent stop run", func() bool { return observed.len() >= 2 })
+	if got := observed.at(1).command; got != "observe" {
 		t.Fatalf("second hook run = %q, want the SubagentStop hook", got)
 	}
 }
@@ -300,7 +300,7 @@ func TestSubstitutionAndProjectDirEnvAndWorkdir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime: %v", err)
 	}
-	dispose, err := Apply(registry, runtime, Config{
+	dispose, err := Apply(registry, runtime, testProjections(t), Config{
 		ConfigPath:       f.configPath,
 		PluginRoot:       &pluginRoot,
 		ProjectDir:       &projectDir,
@@ -317,18 +317,18 @@ func TestSubstitutionAndProjectDirEnvAndWorkdir(t *testing.T) {
 	f.startAgent()
 
 	f.registry.Events().Emit(agent.EventAgentSessionStart, f.agent.Scope, agent.AgentSessionStartPayload{Agent: f.agent, Source: agent.SessionStartStartup})
-	waitFor(t, "session-start hooks", func() bool { return len(*observed) == 3 })
+	waitFor(t, "session-start hooks", func() bool { return observed.len() == 3 })
 
 	// Commands were substituted at parse time.
-	if got := (*observed)[0].command; got != pluginRoot+"/probe.sh" {
+	if got := observed.at(0).command; got != pluginRoot+"/probe.sh" {
 		t.Fatalf("plugin-root command = %q, want %q", got, pluginRoot+"/probe.sh")
 	}
-	if got := (*observed)[1].command; got != projectDir+"/echo-env" {
+	if got := observed.at(1).command; got != projectDir+"/echo-env" {
 		t.Fatalf("project-dir command = %q, want %q", got, projectDir+"/echo-env")
 	}
 	// The explicit config ProjectDir overrides the session-cwd default for
 	// the exported env var; the hook still runs in the session workspace.
-	for _, seen := range (*observed)[:2] {
+	for _, seen := range observed.first(2) {
 		if seen.options.Env["CLAUDE_PROJECT_DIR"] != projectDir {
 			t.Fatalf("CLAUDE_PROJECT_DIR = %q, want the configured override %q", seen.options.Env["CLAUDE_PROJECT_DIR"], projectDir)
 		}
@@ -372,7 +372,7 @@ func TestConfigLoadFailureRegistersNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime: %v", err)
 	}
-	dispose, err := Apply(registry, runtime, Config{ConfigPath: f.configPath, Logger: f.logger})
+	dispose, err := Apply(registry, runtime, testProjections(t), Config{ConfigPath: f.configPath, Logger: f.logger})
 	if err != nil {
 		t.Fatalf("apply should not fail on a missing config: %v", err)
 	}
@@ -399,7 +399,7 @@ func TestInvalidMatcherFailsTheConfigLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime: %v", err)
 	}
-	dispose, err := Apply(registry, runtime, Config{ConfigPath: f.configPath, Logger: f.logger})
+	dispose, err := Apply(registry, runtime, testProjections(t), Config{ConfigPath: f.configPath, Logger: f.logger})
 	if err != nil {
 		t.Fatalf("an invalid regex matcher logs instead of failing apply: %v", err)
 	}
@@ -437,7 +437,7 @@ func TestStderrSummaryCapConfigurable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime: %v", err)
 	}
-	dispose, err := Apply(registry, runtime, Config{ConfigPath: f.configPath, StderrSummaryMaxChars: 10, DefaultTimeoutMs: 10_000, Logger: f.logger})
+	dispose, err := Apply(registry, runtime, testProjections(t), Config{ConfigPath: f.configPath, StderrSummaryMaxChars: 10, DefaultTimeoutMs: 10_000, Logger: f.logger})
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestStderrSummaryCapConfigurable(t *testing.T) {
 
 func TestNonPositiveStderrSummaryCapFailsApply(t *testing.T) {
 	f := newFixture(t)
-	if _, err := Apply(agent.NewAgentRegistry(nil, nil), mustRuntime(t), Config{ConfigPath: f.configPath, StderrSummaryMaxChars: -1}); err == nil {
+	if _, err := Apply(agent.NewAgentRegistry(nil, nil), mustRuntime(t), testProjections(t), Config{ConfigPath: f.configPath, StderrSummaryMaxChars: -1}); err == nil {
 		t.Fatal("a non-positive summary cap must fail the apply")
 	}
 }

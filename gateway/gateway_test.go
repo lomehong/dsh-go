@@ -596,4 +596,19 @@ func TestWireFailureMapping(t *testing.T) {
 	if business.Code != "domain" {
 		t.Fatalf("business mapping = %+v", business)
 	}
+	// A gateway infrastructure failure keeps its namespaced code and
+	// carries the typed { endpoint, field? } details on the wire.
+	withField := &GatewayError{Code: CodeInputInvalid, Endpoint: "a/b", Field: "text", message: "bad input"}
+	mapped := WireFailure(withField)
+	if mapped.Code != "gateway/input-invalid" || mapped.Details["endpoint"] != "a/b" || mapped.Details["field"] != "text" {
+		t.Fatalf("gateway field mapping = %+v", mapped)
+	}
+	withoutField := &GatewayError{Code: CodeDefinitionUnavailable, Endpoint: "a/c", message: "gone"}
+	mapped = WireFailure(withoutField)
+	if mapped.Code != "gateway/definition-unavailable" || mapped.Details["endpoint"] != "a/c" {
+		t.Fatalf("gateway mapping = %+v", mapped)
+	}
+	if _, has := mapped.Details["field"]; has {
+		t.Fatalf("absent field must stay off the wire: %+v", mapped.Details)
+	}
 }

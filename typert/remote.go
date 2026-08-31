@@ -2,6 +2,15 @@ package typert
 
 import "fmt"
 
+// Shared Remote failure codes beyond any single face: every layer that
+// resolves the named domain object may produce these, and the wire details
+// are typed per code (upstream RemoteErrorDetailsMap entries).
+const (
+	// CodeSessionNotFound reports the named Session does not exist;
+	// details carry { sessionId }.
+	CodeSessionNotFound = "session/not-found"
+)
+
 // Failure is one stable Remote failure envelope carried across the wire.
 type Failure struct {
 	Code    string         `json:"code"`

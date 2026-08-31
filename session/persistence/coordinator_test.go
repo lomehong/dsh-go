@@ -356,6 +356,22 @@ func TestCoordinatorLoadFormatRefusals(t *testing.T) {
 	if !errors.As(err, &unsupported) || !strings.Contains(unsupported.Error(), "unknown to this harness") {
 		t.Fatalf("unknown-type err = %v", err)
 	}
+
+	// An unknown type carrying the ignorable marker is informational: the
+	// reader skips it instead of refusing the log.
+	ignorable := mustEvent(t, "brand/future-notice", 0, map[string]any{"x": 1})
+	ignorable.Ignorable = true
+	backend3 := newMemoryBackend()
+	id3 := session.SessionID("future-notice")
+	backend3.logs[id3] = &memLog{
+		header:   testHeader(id3),
+		events:   []session.Event{ignorable},
+		revision: Revision("r1"),
+	}
+	coordinator3 := newTestCoordinator(t, backend3)
+	if _, err = coordinator3.Load(id3); err != nil {
+		t.Fatalf("ignorable unknown type must load, got %v", err)
+	}
 }
 
 func TestCoordinatorLoadCorruptionWrapsCause(t *testing.T) {

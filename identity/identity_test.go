@@ -118,10 +118,13 @@ func TestGetOrCreateConcurrentFirstLaunchConverges(t *testing.T) {
 	// refuses and the reread adopts it.
 	persisted := "99999999-9999-9999-9999-999999999999"
 	var once sync.Once
-	var ids []string
 	var mu sync.Mutex
+	var wg sync.WaitGroup
+	ids := make([]string, 0, 4)
 	for i := 0; i < 4; i++ {
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			once.Do(func() {
 				_ = os.WriteFile(filepath.Join(home, AnonymousUserIDFileName), []byte(persisted+"\n"), 0o644)
 			})
@@ -131,9 +134,7 @@ func TestGetOrCreateConcurrentFirstLaunchConverges(t *testing.T) {
 			mu.Unlock()
 		}()
 	}
-	for len(ids) < 4 {
-		continue
-	}
+	wg.Wait()
 	for _, id := range ids {
 		if id != persisted {
 			t.Fatalf("id = %q, want every racer to converge on %q", id, persisted)

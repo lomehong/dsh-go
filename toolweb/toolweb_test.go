@@ -3,6 +3,7 @@ package toolweb
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"dshgo/cordis"
@@ -75,13 +76,16 @@ type scriptedSearch struct {
 	id      string
 	results map[string]web.WebSearchResult
 	errs    map[string]error
+	mu      sync.Mutex
 	queries []string
 }
 
 func (s *scriptedSearch) ID() string      { return s.id }
 func (s *scriptedSearch) Available() bool { return true }
 func (s *scriptedSearch) Search(_ context.Context, request web.WebSearchRequest) (web.WebSearchResult, error) {
+	s.mu.Lock()
 	s.queries = append(s.queries, request.Query)
+	s.mu.Unlock()
 	if err, ok := s.errs[request.Query]; ok {
 		return web.WebSearchResult{}, err
 	}

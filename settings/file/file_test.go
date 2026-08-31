@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -75,10 +76,10 @@ func TestExternalEditPushesWithProviderSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register failed: %v", err)
 	}
-	var providerSource int
+	var providerSource atomic.Int32
 	store.OnUpdated(func(e *settings.UpdateEvent) {
 		if e.Source == settings.SourceProvider {
-			providerSource++
+			providerSource.Add(1)
 		}
 	})
 	provider, err := Open(path, store, cordis.Discard{})
@@ -94,7 +95,7 @@ func TestExternalEditPushesWithProviderSemantics(t *testing.T) {
 	waitFor(t, 3*time.Second, func() bool {
 		return scope.Get()["commandPrefix"] == "!"
 	})
-	if providerSource == 0 {
+	if providerSource.Load() == 0 {
 		t.Fatal("external edit must arrive with the provider source")
 	}
 }

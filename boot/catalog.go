@@ -1666,7 +1666,7 @@ var builders = map[string]pluginBuilder{
 	// registries. This is also the manager's child create/resume seam.
 	"@deepseek-ai/dsh-agent-loop": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
-			Inject:  []string{ServiceAgents, ServiceLlm, ServiceTools, ServiceSystemPrompt},
+			Inject:  []string{ServiceAgents, ServiceLlm, ServiceTools, ServiceSystemPrompt, ServiceProjections},
 			Provide: []string{ServiceAgentLoop},
 			Apply: func(ctx *cordis.Context, config any) error {
 				loop, err := agentloop.NewAgentLoop(
@@ -1676,6 +1676,7 @@ var builders = map[string]pluginBuilder{
 					ctx.Get(ServiceLlm).(*llm.Runtime),
 					ctx.Get(ServiceTools).(*tools.ToolRuntime),
 					ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt),
+					ctx.Get(ServiceProjections).(*projection.Registry),
 					agentloop.AgentLoopConfig{},
 				)
 				if err != nil {

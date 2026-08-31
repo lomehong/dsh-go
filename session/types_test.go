@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"dshgo/llm"
@@ -142,5 +143,40 @@ func TestDeepCopyIsolatesLoggedState(t *testing.T) {
 	eventCopy.SourceEventSeqs[0] = 99
 	if string(event.Data) != `{"turn":1}` || event.SourceEventSeqs[0] != 1 {
 		t.Fatal("event copy must detach payload and citations")
+	}
+}
+
+func TestIgnorableEnvelopeWire(t *testing.T) {
+	base := Event{Type: "brand/notice", Seq: 0, Time: 1, Data: json.RawMessage(`{"x":1}`)}
+	wire, err := json.Marshal(base)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(wire), "ignorable") {
+		t.Fatalf("absent ignorable must not render: %s", wire)
+	}
+	var back Event
+	if err := json.Unmarshal(wire, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.Ignorable {
+		t.Fatal("absent ignorable must decode as required")
+	}
+
+	marked := base
+	marked.Ignorable = true
+	wire, err = json.Marshal(marked)
+	if err != nil {
+		t.Fatalf("marshal marked: %v", err)
+	}
+	if !strings.Contains(string(wire), `"ignorable":true`) {
+		t.Fatalf("marked ignorable must render as true: %s", wire)
+	}
+	if err := json.Unmarshal(wire, &back); err != nil || !back.Ignorable {
+		t.Fatalf("marked round trip = %#v %v", back, err)
+	}
+
+	if err := json.Unmarshal([]byte(`{"type":"brand/notice","seq":0,"time":1,"data":{},"ignorable":false}`), &back); err == nil {
+		t.Fatal("ignorable:false must be rejected — the only valid value is true")
 	}
 }

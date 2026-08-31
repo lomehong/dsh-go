@@ -10,6 +10,7 @@ import (
 	"dshgo/llm"
 	"dshgo/session"
 	"dshgo/session/persistence"
+	"dshgo/session/projection"
 	"dshgo/systemprompt"
 	"dshgo/tools"
 )
@@ -210,16 +211,26 @@ type AgentLoop struct {
 }
 
 // NewAgentLoop validates the configuration, registers the factory on the
-// registry's owning context, and starts the configured agents.
-func NewAgentLoop(ctx *cordis.Context, registry *agent.AgentRegistry, logger cordis.Logger, llmRuntime *llm.Runtime, toolRuntime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt, config AgentLoopConfig) (*AgentLoop, error) {
+// registry's owning context, publishes the loop-owned turnBoundary
+// projection unit (the loop is the authoritative driver of turn/step
+// boundaries; consumers read turn numbers from it instead of scanning the
+// log), and starts the configured agents. The projection registry is
+// required: a composition without it cannot serve the loop's boundary facts.
+func NewAgentLoop(ctx *cordis.Context, registry *agent.AgentRegistry, logger cordis.Logger, llmRuntime *llm.Runtime, toolRuntime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt, projections *projection.Registry, config AgentLoopConfig) (*AgentLoop, error) {
 	if logger == nil {
 		logger = cordis.Discard{}
+	}
+	if projections == nil {
+		return nil, fmt.Errorf("agent loop requires the session projection registry (register the turnBoundary unit's owner)")
 	}
 	maxParallel, err := resolveMaxParallelToolCalls(config.MaxParallelToolCalls)
 	if err != nil {
 		return nil, err
 	}
 	if err := validateConfiguredAgents(config.Agents); err != nil {
+		return nil, err
+	}
+	if _, err := projections.Register(TurnBoundaryProjectionDefinition()); err != nil {
 		return nil, err
 	}
 	loop := &AgentLoop{

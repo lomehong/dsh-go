@@ -16,6 +16,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"dshgo/atomicwrite"
 	"dshgo/cordis"
 	"dshgo/settings"
 )
@@ -69,7 +70,9 @@ func Open(path string, store *settings.Store, logger cordis.Logger) (*Store, err
 // SetPollInterval adjusts the external-edit watch cadence; call before Open's
 // watcher matters (tests use this to keep runs fast).
 func (f *Store) SetPollInterval(interval time.Duration) {
+	f.mu.Lock()
 	f.interval = interval
+	f.mu.Unlock()
 }
 
 // Close stops the watcher.
@@ -113,7 +116,9 @@ func (f *Store) load() error {
 }
 
 // Save writes the current user document atomically: temp file plus rename,
-// retrying the rename while Windows file locks (EBUSY/EPERM-style) clear.
+// retrying the rename while Windows file locks (EACCES/EBUSY/EPERM-style)
+// clear — the upstream util/atomic-write cadence (20ms doubling to a 200ms
+// cap, at most 8 retries).
 func (f *Store) Save() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -127,24 +132,21 @@ func (f *Store) Save() error {
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return fmt.Errorf("settings/file: failed to write %s: %w", tmp, err)
 	}
-	var lastErr error
-	for attempt := 0; attempt < 10; attempt++ {
-		if err := os.Rename(tmp, f.path); err == nil {
-			if fi, statErr := os.Stat(f.path); statErr == nil {
-				f.lastMod = fi.ModTime()
-			}
-			return nil
-		} else {
-			lastErr = err
-		}
-		time.Sleep(50 * time.Millisecond)
+	if err := atomicwrite.RenameReplacing(tmp, f.path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("settings/file: failed to move %s into place: %w", tmp, err)
 	}
-	return fmt.Errorf("settings/file: failed to move %s into place: %w", tmp, lastErr)
+	if fi, statErr := os.Stat(f.path); statErr == nil {
+		f.lastMod = fi.ModTime()
+	}
+	return nil
 }
 
 func (f *Store) watch() {
 	defer close(f.stopped)
+	f.mu.Lock()
 	ticker := time.NewTicker(f.interval)
+	f.mu.Unlock()
 	defer ticker.Stop()
 	for {
 		select {

@@ -218,7 +218,12 @@ type LocalRegistry struct {
 	maxConcurrentJobsPerOwner int
 	logger                    Logger
 
-	mu              sync.Mutex
+	mu sync.Mutex
+	// dispatchMu serializes listener and observer dispatch so concurrent
+	// settlements cannot run listeners in parallel — the official host is
+	// single-threaded and listeners (including in-tree ones) are written
+	// against that serialization guarantee. Never held while acquiring mu.
+	dispatchMu      sync.Mutex
 	store           map[string]*tracked
 	counters        map[string]int
 	layers          map[scope.ScopeKey]*jobLayer
@@ -401,7 +406,9 @@ func (r *LocalRegistry) List(caller string) []Snapshot {
 // Get returns a non-consuming snapshot without changing the read cursor or
 // notice state. It fails loud for an unknown or foreign job.
 func (r *LocalRegistry) Get(id, caller string) (Snapshot, error) {
-	job, err := r.expect(id, caller)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	job, err := r.expectLocked(id, caller)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -409,18 +416,32 @@ func (r *LocalRegistry) Get(id, caller string) (Snapshot, error) {
 }
 
 // Read returns the next stream delta, or the idempotent final output after
-// settlement. A terminal read marks the job reported.
+// settlement. A terminal read marks the job reported. The producer read
+// callback runs outside mu (it may touch producer internals); the reported
+// mark and snapshot are committed under the lock, so a settlement racing
+// the read still lands first-wins.
 func (r *LocalRegistry) Read(id, caller string) (Read, error) {
-	job, err := r.expect(id, caller)
+	r.mu.Lock()
+	job, err := r.expectLocked(id, caller)
 	if err != nil {
+		r.mu.Unlock()
 		return Read{}, err
 	}
-	text := ""
-	if job.readOutput != nil {
-		text = job.readOutput()
-	} else if isTerminal(job.status) {
-		text = job.output
+	readOutput := job.readOutput
+	if readOutput == nil {
+		text := ""
+		if isTerminal(job.status) {
+			text = job.output
+			job.reported = true
+		}
+		read := Read{Text: text, Snapshot: project(job)}
+		r.mu.Unlock()
+		return read, nil
 	}
+	r.mu.Unlock()
+	text := readOutput()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if isTerminal(job.status) {
 		job.reported = true
 	}
@@ -428,26 +449,40 @@ func (r *LocalRegistry) Read(id, caller string) (Read, error) {
 }
 
 // Kill requests cancellation, then marks the job stopping and reported. A
-// producer cancel error propagates without changing job state.
+// producer cancel error propagates without changing job state. Cancel runs
+// outside mu; the stopping commit re-checks terminal status so a settlement
+// racing the cancel keeps first-wins.
 func (r *LocalRegistry) Kill(id, caller, reason string) (KillResult, error) {
-	job, err := r.expect(id, caller)
+	r.mu.Lock()
+	job, err := r.expectLocked(id, caller)
 	if err != nil {
+		r.mu.Unlock()
 		return "", err
 	}
 	if isTerminal(job.status) {
 		job.reported = true
+		r.mu.Unlock()
 		return KillAlreadyFinished, nil
 	}
-	// Cancel first so an error leaves both lifecycle and notice state
-	// unchanged.
-	if job.cancel != nil {
-		if err := job.cancel(reason); err != nil {
+	cancel := job.cancel
+	r.mu.Unlock()
+	if cancel != nil {
+		if err := cancel(reason); err != nil {
 			return "", err
 		}
 	}
-	job.status = StatusStopping
-	job.reported = true
-	r.notifyChanged(job.owner)
+	r.mu.Lock()
+	marked := false
+	if !isTerminal(job.status) {
+		job.status = StatusStopping
+		job.reported = true
+		marked = true
+	}
+	owner := job.owner
+	r.mu.Unlock()
+	if marked {
+		r.notifyChanged(owner)
+	}
 	return KillRequested, nil
 }
 
@@ -603,6 +638,11 @@ func (r *LocalRegistry) servesOwner(owner Owner) bool {
 func (r *LocalRegistry) expect(id, caller string) (*tracked, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.expectLocked(id, caller)
+}
+
+// expectLocked is expect without locking. Callers hold mu.
+func (r *LocalRegistry) expectLocked(id, caller string) (*tracked, error) {
 	job := r.store[id]
 	if job == nil {
 		return nil, fmt.Errorf("unknown job %s", id)
@@ -689,6 +729,8 @@ func (r *LocalRegistry) notifyChanged(owner Owner) {
 	r.mu.Lock()
 	observers := r.changedFor(owner)
 	r.mu.Unlock()
+	r.dispatchMu.Lock()
+	defer r.dispatchMu.Unlock()
 	for _, listener := range observers {
 		r.contain(func() { listener(owner) }, "jobs: onJobsChanged listener threw: %v")
 	}
@@ -741,6 +783,8 @@ func (r *LocalRegistry) settle(job *tracked, outcome Outcome) {
 		return
 	}
 	owner := job.owner
+	r.dispatchMu.Lock()
+	defer r.dispatchMu.Unlock()
 	for _, listener := range listeners {
 		r.contain(func() { listener(snapshot, owner) }, "jobs: onJobDone listener threw for "+job.id+": %v")
 	}

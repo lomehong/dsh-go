@@ -784,13 +784,19 @@ func (c *Coordinator) assertVersion(meta session.SessionHeader) error {
 }
 
 // assertEventsSupported refuses a log containing an event type this build
-// does not know: silently skipping an unknown event could reconstruct a
-// wrong session. Runs on NORMALIZED events, after legacy shapes this build
-// still reads were upgraded and the unreadable ones kept their specific
-// diagnostics.
+// does not know, unless the event carries the envelope's ignorable marker:
+// an unrecognized ignorable event is purely informational and its loss
+// cannot affect reconstruction, so the reader may skip it; an unrecognized
+// required event could change how the rest of the log is interpreted and is
+// refused (fail-closed). Runs on NORMALIZED events, after legacy shapes this
+// build still reads were upgraded and the unreadable ones kept their
+// specific diagnostics.
 func (c *Coordinator) assertEventsSupported(meta session.SessionHeader, events []session.Event) error {
 	for _, event := range events {
 		if session.KnownEventType(event.Type) {
+			continue
+		}
+		if event.Ignorable {
 			continue
 		}
 		return c.unsupported(meta, fmt.Sprintf("session %q contains event type %q (seq %d) unknown to this harness; refusing to interpret the log — it was likely written by a newer harness", meta.ID, event.Type, event.Seq))

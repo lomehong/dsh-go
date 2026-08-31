@@ -333,33 +333,60 @@ func TestScopedListenerDelivery(t *testing.T) {
 	registry := newRegistry(t, 10)
 	registry.AttachControllerIn(nil)
 
-	var globalSeen, aSeen, bSeen []string
-	registry.OnJobDoneIn(nil, func(snapshot Snapshot, owner Owner) { globalSeen = append(globalSeen, snapshot.ID) })
-	registry.OnJobDoneIn(presetA, func(snapshot Snapshot, owner Owner) { aSeen = append(aSeen, snapshot.ID) })
-	registry.OnJobDoneIn(presetB, func(snapshot Snapshot, owner Owner) { bSeen = append(bSeen, snapshot.ID) })
+	globalSeen := make(chan string, 8)
+	aSeen := make(chan string, 8)
+	bSeen := make(chan string, 8)
+	registry.OnJobDoneIn(nil, func(snapshot Snapshot, owner Owner) { globalSeen <- snapshot.ID })
+	registry.OnJobDoneIn(presetA, func(snapshot Snapshot, owner Owner) { aSeen <- snapshot.ID })
+	registry.OnJobDoneIn(presetB, func(snapshot Snapshot, owner Owner) { bSeen <- snapshot.ID })
 
 	ownerA := &stubOwner{id: "a", scope: presetA}
 	hooks := newHooks()
 	mustStart(t, registry, StartSpec{Kind: "bash", Label: "x", Owner: ownerA, Run: func() (Hooks, error) { return hooks.hooks(), nil }})
 	hooks.settle(Outcome{Status: OutcomeCompleted})
-	time.Sleep(20 * time.Millisecond)
 	// Global and the owner's own chain deliver; a sibling preset does not.
-	if len(globalSeen) != 1 || len(aSeen) != 1 || len(bSeen) != 0 {
-		t.Fatalf("delivery = %v %v %v", globalSeen, aSeen, bSeen)
+	waitDelivery(t, globalSeen, "global")
+	waitDelivery(t, aSeen, "owner chain")
+	if got := tryReceive(bSeen); got != "" {
+		t.Fatalf("sibling preset delivered: %s", got)
 	}
 	// A panicking listener is contained and does not block the rest.
-	var afterSeen bool
+	afterSeen := make(chan struct{}, 1)
 	registry.OnJobDoneIn(nil, func(Snapshot, Owner) { panic("listener bug") })
-	registry.OnJobDoneIn(nil, func(Snapshot, Owner) { afterSeen = true })
+	registry.OnJobDoneIn(nil, func(Snapshot, Owner) { afterSeen <- struct{}{} })
 	otherHooks := newHooks()
 	otherID := mustStart(t, registry, StartSpec{Kind: "bash", Label: "y", Run: func() (Hooks, error) { return otherHooks.hooks(), nil }})
 	otherHooks.settle(Outcome{Status: OutcomeCompleted})
-	time.Sleep(20 * time.Millisecond)
-	if !afterSeen {
+	select {
+	case <-afterSeen:
+	case <-time.After(2 * time.Second):
 		t.Fatal("panic blocked later listeners")
 	}
-	if len(globalSeen) != 2 || globalSeen[1] != otherID {
-		t.Fatalf("global after panic = %v", globalSeen)
+	if got := waitDelivery(t, globalSeen, "global after panic"); got != otherID {
+		t.Fatalf("global after panic = %s", got)
+	}
+}
+
+// waitDelivery awaits one completion-listener delivery or fails after a
+// generous bound (settlement dispatch is asynchronous).
+func waitDelivery(t *testing.T, seen chan string, what string) string {
+	t.Helper()
+	select {
+	case got := <-seen:
+		return got
+	case <-time.After(2 * time.Second):
+		t.Fatalf("%s delivery missing", what)
+		return ""
+	}
+}
+
+// tryReceive drains one queued delivery without blocking.
+func tryReceive(seen chan string) string {
+	select {
+	case got := <-seen:
+		return got
+	default:
+		return ""
 	}
 }
 
@@ -367,21 +394,28 @@ func TestJobsChangedNotification(t *testing.T) {
 	root := scope.NewScopeKey(nil)
 	registry := newRegistry(t, 10)
 	detachController := registry.AttachControllerIn(nil)
-	var unownedEvents, otherEvents int
+	unownedEvents := make(chan Owner, 16)
+	otherEvents := make(chan Owner, 16)
 	registry.OnJobsChangedIn(nil, func(owner Owner) {
 		if owner == nil {
-			unownedEvents++
+			unownedEvents <- owner
 		} else {
-			otherEvents++
+			otherEvents <- owner
 		}
 	})
 	hooks := newHooks()
 	id := mustStart(t, registry, StartSpec{Kind: "bash", Label: "x", Run: func() (Hooks, error) { return hooks.hooks(), nil }})
 	registry.Kill(id, "", "stop") // stopping transition notifies
 	hooks.settle(Outcome{Status: OutcomeKilled})
-	time.Sleep(20 * time.Millisecond)
-	if unownedEvents != 3 { // registration + stopping + settlement
-		t.Fatalf("unowned events = %d", unownedEvents)
+	for i := 0; i < 3; i++ { // registration + stopping + settlement
+		select {
+		case <-unownedEvents:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("unowned events = %d of 3", i)
+		}
+	}
+	if owner := tryReceiveOwner(unownedEvents); owner != nil || len(unownedEvents) != 0 {
+		t.Fatalf("extra unowned events: %v", owner)
 	}
 	// Owner-disposal removal notifies with the exact owner.
 	owner := &stubOwner{id: "a", scope: root}
@@ -389,11 +423,15 @@ func TestJobsChangedNotification(t *testing.T) {
 	ownedHooks.autoSettle = true // a compliant producer settles on cancel
 	ownedID := mustStart(t, registry, StartSpec{Kind: "bash", Label: "y", Owner: owner, Run: func() (Hooks, error) { return ownedHooks.hooks(), nil }})
 	registry.DisposeOwner(owner)
-	time.Sleep(20 * time.Millisecond)
-	// Owned events: registration + the teardown stopping transition + the
-	// producer settlement + the removal.
-	if otherEvents != 4 {
-		t.Fatalf("owner events = %d", otherEvents)
+	for i := 0; i < 4; i++ { // registration + the teardown stopping transition + the producer settlement + the removal
+		select {
+		case <-otherEvents:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("owner events = %d of 4", i)
+		}
+	}
+	if extra := tryReceiveOwner(otherEvents); extra != nil || len(otherEvents) != 0 {
+		t.Fatalf("extra owner events: %v", extra)
 	}
 	if _, err := registry.Get(ownedID, "a"); err == nil {
 		t.Fatal("disposed owner's job survived")
@@ -401,6 +439,16 @@ func TestJobsChangedNotification(t *testing.T) {
 	// A controller detached from a foreign scope still receives the
 	// disposal emptying (its layer is reachable from the global table).
 	detachController()
+}
+
+// tryReceiveOwner drains one queued changed-notification without blocking.
+func tryReceiveOwner(events chan Owner) Owner {
+	select {
+	case owner := <-events:
+		return owner
+	default:
+		return nil
+	}
 }
 
 func TestDisposeCancelsAndClosesListeners(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"dshgo/cordis"
 	"dshgo/llm"
 	"dshgo/session"
+	"dshgo/session/projection"
 	"dshgo/systemprompt"
 	"dshgo/tools"
 )
@@ -82,11 +83,11 @@ func TestNewAgentLoopRejectsBadConfig(t *testing.T) {
 	if toolErr != nil {
 		t.Fatalf("tools: %v", toolErr)
 	}
-	_, err = NewAgentLoop(cordis.NewRoot(cordis.Discard{}), registry, cordis.Discard{}, llm.NewRuntime(), toolRuntime, prompt, AgentLoopConfig{MaxParallelToolCalls: intPtr(0)})
+	_, err = NewAgentLoop(cordis.NewRoot(cordis.Discard{}), registry, cordis.Discard{}, llm.NewRuntime(), toolRuntime, prompt, projection.NewRegistry(), AgentLoopConfig{MaxParallelToolCalls: intPtr(0)})
 	if err == nil || err.Error() != "maxParallelToolCalls must be a positive integer" {
 		t.Fatalf("bad parallelism = %v", err)
 	}
-	_, err = NewAgentLoop(cordis.NewRoot(cordis.Discard{}), registry, cordis.Discard{}, llm.NewRuntime(), toolRuntime, prompt, AgentLoopConfig{
+	_, err = NewAgentLoop(cordis.NewRoot(cordis.Discard{}), registry, cordis.Discard{}, llm.NewRuntime(), toolRuntime, prompt, projection.NewRegistry(), AgentLoopConfig{
 		Agents: []ConfiguredAgent{{ID: "x", SessionID: "s", ResumeSessionID: "r"}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {

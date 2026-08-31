@@ -324,6 +324,13 @@ type Event struct {
 	SourceEventSeqs []int64 `json:"-"`
 	// SurfaceOp is how this event entered the surface; surface events only.
 	SurfaceOp *SurfaceOp `json:"surfaceOp,omitempty"`
+	// Ignorable marks an event a reader may safely skip when it does not
+	// recognize Type. Absent means required: an unrecognized required event
+	// refuses the log (fail-closed), because it may change how the rest of
+	// the log is interpreted. Writers set it only on purely informational
+	// records whose loss cannot affect reconstruction. Wire shape is
+	// `ignorable?: true` — only the value true exists (decode rejects false).
+	Ignorable bool `json:"-"`
 }
 
 // MarshalJSON renders the envelope, preserving a present-but-empty
@@ -336,8 +343,9 @@ func (e Event) MarshalJSON() ([]byte, error) {
 		Data            json.RawMessage `json:"data"`
 		SurfaceOp       *SurfaceOp      `json:"surfaceOp,omitempty"`
 		SourceEventSeqs *[]int64        `json:"sourceEventSeqs,omitempty"`
+		Ignorable       bool            `json:"ignorable,omitempty"`
 	}{
-		Type: e.Type, Seq: e.Seq, Time: e.Time, Data: e.Data, SurfaceOp: e.SurfaceOp,
+		Type: e.Type, Seq: e.Seq, Time: e.Time, Data: e.Data, SurfaceOp: e.SurfaceOp, Ignorable: e.Ignorable,
 	}
 	if e.SourceEventSeqs != nil {
 		wire.SourceEventSeqs = &e.SourceEventSeqs
@@ -346,7 +354,9 @@ func (e Event) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON reads the envelope, distinguishing an absent
-// sourceEventSeqs from a present empty array.
+// sourceEventSeqs from a present empty array. A present `ignorable` must be
+// exactly true — the wire type is `ignorable?: true` and a false value is
+// invalid, not an absence.
 func (e *Event) UnmarshalJSON(data []byte) error {
 	var wire struct {
 		Type            string          `json:"type"`
@@ -355,11 +365,18 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 		Data            json.RawMessage `json:"data"`
 		SurfaceOp       *SurfaceOp      `json:"surfaceOp"`
 		SourceEventSeqs *[]int64        `json:"sourceEventSeqs"`
+		Ignorable       *bool           `json:"ignorable"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
+	if wire.Ignorable != nil && !*wire.Ignorable {
+		return fmt.Errorf("event %q (seq %d) carries ignorable:false; the only valid value is true", wire.Type, wire.Seq)
+	}
 	e.Type, e.Seq, e.Time, e.Data, e.SurfaceOp = wire.Type, wire.Seq, wire.Time, wire.Data, wire.SurfaceOp
+	if wire.Ignorable != nil {
+		e.Ignorable = true
+	}
 	if wire.SourceEventSeqs != nil {
 		e.SourceEventSeqs = *wire.SourceEventSeqs
 		if e.SourceEventSeqs == nil {

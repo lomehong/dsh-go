@@ -349,6 +349,9 @@ func TestSearchToolsRealRipgrep(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "needle.txt"), []byte("find the needle here\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, ".git", "ignored.txt"), []byte("needle\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

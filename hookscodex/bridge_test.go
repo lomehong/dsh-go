@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"dshgo/agent"
+	"dshgo/agentloop"
 	"dshgo/hookprotocol"
 	"dshgo/llm"
 	"dshgo/session"
+	"dshgo/session/projection"
 	"dshgo/tools"
 )
 
@@ -74,7 +77,7 @@ func (f *fixture) start() {
 	if err != nil {
 		f.t.Fatalf("runtime: %v", err)
 	}
-	dispose, err := Apply(registry, runtime, Config{
+	dispose, err := Apply(registry, runtime, testProjections(f.t), Config{
 		ConfigPath:       f.configPath,
 		Model:            "gpt-5-codex",
 		DefaultTimeoutMs: 10_000,
@@ -116,23 +119,49 @@ func (f *fixture) writeConfig(body string) {
 	}
 }
 
+// observedLog records stubbed hook runs; detached runs append from tracking
+// goroutines while the test polls, so every access takes the mutex.
+type observedLog struct {
+	mu    sync.Mutex
+	items []observedHook
+}
+
+func (o *observedLog) record(h observedHook) {
+	o.mu.Lock()
+	o.items = append(o.items, h)
+	o.mu.Unlock()
+}
+
+func (o *observedLog) len() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.items)
+}
+
+func (o *observedLog) at(i int) observedHook {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.items[i]
+}
+
 // withStubHooks replaces the runHook seam: the handler value is the raw
 // process outcome, parsed exactly like the real runner. Every run is
 // recorded for payload/env assertions.
-func withStubHooks(t *testing.T, handlers map[string]hookprotocol.HookOutput) *[]observedHook {
+func withStubHooks(t *testing.T, handlers map[string]hookprotocol.HookOutput) *observedLog {
 	t.Helper()
-	observed := &[]observedHook{}
-	previous := runHook
-	runHook = func(hook hookprotocol.CommandHook, options hookprotocol.RunHookOptions, now func() int64) hookprotocol.RunHookResult {
-		*observed = append(*observed, observedHook{command: hook.Command, options: options})
+	observed := &observedLog{}
+	stub := runHookFunc(func(hook hookprotocol.CommandHook, options hookprotocol.RunHookOptions, now func() int64) hookprotocol.RunHookResult {
+		observed.record(observedHook{command: hook.Command, options: options})
 		raw, ok := handlers[hook.Command]
 		if !ok {
 			raw = hookprotocol.HookOutput{}
 		}
 		output := hookprotocol.ParseHookOutput(raw.ExitCode, raw.Stdout, raw.Stderr, options.ExpectedEventName)
 		return hookprotocol.RunHookResult{Output: output, DurationMs: 3}
-	}
-	t.Cleanup(func() { runHook = previous })
+	})
+	previous := currentRunHook()
+	runHook.Store(&stub)
+	t.Cleanup(func() { runHook.Store(&previous) })
 	return observed
 }
 
@@ -259,4 +288,15 @@ func hookEvents(t *testing.T, sess *session.Session) []map[string]any {
 func newRuntime(t *testing.T) (*tools.ToolRuntime, error) {
 	t.Helper()
 	return tools.NewToolRuntime(nil, tools.Config{})
+}
+
+// testProjections builds a projection registry carrying the loop-owned
+// turnBoundary unit, which the bridges read turn numbers from.
+func testProjections(t *testing.T) *projection.Registry {
+	t.Helper()
+	registry := projection.NewRegistry()
+	if _, err := registry.Register(agentloop.TurnBoundaryProjectionDefinition()); err != nil {
+		t.Fatalf("register turnBoundary: %v", err)
+	}
+	return registry
 }

@@ -50,7 +50,7 @@ func TestPreToolUseDenyBlocksAndLogsPair(t *testing.T) {
 
 	// The Codex payload shape: snake_case, model + permission_mode,
 	// turn_id, and tool_input { command }.
-	seen := (*observed)[0].options
+	seen := observed.at(0).options
 	payload, _ := seen.Payload.(map[string]any)
 	if payload == nil {
 		t.Fatal("payload is not a map")
@@ -228,11 +228,11 @@ func TestSessionPayloadCarriesStopFields(t *testing.T) {
 	f.start()
 
 	f.registry.Events().Serial(agent.EventTurnStopping, f.agent.Scope, agent.TurnStoppingPayload{Agent: f.agent, Turn: 2})
-	waitFor(t, "stop run", func() bool { return len(*observed) >= 1 })
+	waitFor(t, "stop run", func() bool { return observed.len() >= 1 })
 	f.registry.Events().Emit(agent.EventAgentSessionStart, f.agent.Scope, agent.AgentSessionStartPayload{Agent: f.agent, Source: agent.SessionStartStartup})
-	waitFor(t, "session-start run", func() bool { return len(*observed) >= 2 })
+	waitFor(t, "session-start run", func() bool { return observed.len() >= 2 })
 
-	stopPayload, _ := (*observed)[0].options.Payload.(map[string]any)
+	stopPayload, _ := observed.at(0).options.Payload.(map[string]any)
 	if _, ok := stopPayload["stop_hook_active"]; !ok {
 		t.Fatal("the Stop payload carries stop_hook_active")
 	}
@@ -243,7 +243,7 @@ func TestSessionPayloadCarriesStopFields(t *testing.T) {
 		t.Fatalf("turn_id = %v", stopPayload["turn_id"])
 	}
 
-	startPayload, _ := (*observed)[1].options.Payload.(map[string]any)
+	startPayload, _ := observed.at(1).options.Payload.(map[string]any)
 	if _, ok := startPayload["turn_id"]; ok {
 		t.Fatal("SessionStart has no turn_id (not a turn-scoped event)")
 	}
@@ -261,7 +261,7 @@ func TestConfigLoadFailureRegistersNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime: %v", err)
 	}
-	dispose, err := Apply(registry, runtime, Config{ConfigPath: f.configPath, Logger: f.logger})
+	dispose, err := Apply(registry, runtime, testProjections(t), Config{ConfigPath: f.configPath, Logger: f.logger})
 	if err != nil {
 		t.Fatalf("apply should not fail on a missing config: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestNonPositiveStderrSummaryCapFailsApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runtime: %v", err)
 	}
-	if _, err := Apply(agent.NewAgentRegistry(nil, nil), runtime, Config{ConfigPath: f.configPath, StderrSummaryMaxChars: -1}); err == nil {
+	if _, err := Apply(agent.NewAgentRegistry(nil, nil), runtime, testProjections(t), Config{ConfigPath: f.configPath, StderrSummaryMaxChars: -1}); err == nil {
 		t.Fatal("a non-positive summary cap must fail the apply")
 	}
 }

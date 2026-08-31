@@ -11,6 +11,7 @@ import (
 	"dshgo/cordis"
 	"dshgo/llm"
 	"dshgo/session"
+	"dshgo/session/projection"
 	"dshgo/systemprompt"
 	"dshgo/tools"
 )
@@ -167,7 +168,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("NewSystemPrompt: %v", err)
 	}
 	registry := agent.NewAgentRegistry(nil, cordis.Discard{})
-	loop, err := NewAgentLoop(cordis.NewRoot(cordis.Discard{}), registry, cordis.Discard{}, llmRuntime, toolRuntime, prompt, AgentLoopConfig{})
+	loop, err := NewAgentLoop(cordis.NewRoot(cordis.Discard{}), registry, cordis.Discard{}, llmRuntime, toolRuntime, prompt, projection.NewRegistry(), AgentLoopConfig{})
 	if err != nil {
 		t.Fatalf("NewAgentLoop: %v", err)
 	}

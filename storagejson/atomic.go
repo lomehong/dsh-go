@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"dshgo/atomicwrite"
 )
 
 // WriteAtomic durably replaces path with data: a same-directory temp file
@@ -41,7 +43,7 @@ func WriteAtomic(path string, data []byte) error {
 		os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := atomicwrite.RenameReplacing(tmp, path); err != nil {
 		os.Remove(tmp)
 		return err
 	}
