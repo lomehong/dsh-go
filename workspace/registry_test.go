@@ -156,8 +156,11 @@ func TestHeaderValidatedMembershipAndFiltering(t *testing.T) {
 		byPath[entity.Path()] = entity
 	}
 	alpha := byPath[dirA]
-	if alpha == nil || len(alpha.SessionIDs()) != 2 {
-		t.Fatalf("alpha = %v sessions %v", alpha, alpha.SessionIDs())
+	if alpha == nil {
+		t.Fatalf("alpha workspace not found for %s; got %d entities", dirA, len(entities))
+	}
+	if len(alpha.SessionIDs()) != 2 {
+		t.Fatalf("alpha sessions = %v, want 2", alpha.SessionIDs())
 	}
 	// Newest session first inside the group.
 	if alpha.SessionIDs()[0] != "s-a" || alpha.SessionIDs()[1] != "s-a2" {

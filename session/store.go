@@ -69,8 +69,8 @@ func (e *storeEntry) warnf(format string, args ...any) {
 	e.store.warnf(format, args...)
 }
 
-func (e *storeEntry) appendCommitted() {
-	e.store.onEventCommit(e.session)
+func (e *storeEntry) appendCommitted(event Event) {
+	e.store.onEventCommit(e.session, event)
 }
 
 // Store is the in-memory session store: creation, publication, and the
@@ -143,15 +143,15 @@ func (st *Store) OnFlush(fn func(*Session) error) {
 	st.mu.Unlock()
 }
 
-func (st *Store) onEventCommit(session *Session) {
+// onEventCommit feeds the sink the exact event that just committed. The
+// committed event is passed in rather than re-read from the log: the feed
+// runs outside the session lock, so a concurrent append landing between
+// commit and feed would otherwise lose one event and duplicate the next.
+func (st *Store) onEventCommit(session *Session, event Event) {
 	st.mu.Lock()
 	sink := st.eventSink
 	st.mu.Unlock()
 	if sink == nil {
-		return
-	}
-	events := session.Events()
-	if len(events) == 0 {
 		return
 	}
 	// Only live (announced) sessions feed the store stream; seed replay in
@@ -168,7 +168,7 @@ func (st *Store) onEventCommit(session *Session) {
 				st.warnf("session %q: session/event listener panicked: %v", session.ID(), rec)
 			}
 		}()
-		sink(session, events[len(events)-1])
+		sink(session, event)
 	}()
 }
 

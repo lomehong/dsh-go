@@ -24,9 +24,8 @@ type Session struct {
 	header       SessionHeader
 	firstLiveSeq int64
 
-	mu        sync.Mutex
-	appending bool
-	entry     *storeEntry
+	mu    sync.Mutex
+	entry *storeEntry
 
 	// Incremental folds, each advanced once per unseen event.
 	headerFold        *EpochHeader
@@ -147,10 +146,6 @@ func (s *Session) Append(eventType string, data any, intent *SurfaceIntent) (Eve
 	}
 
 	s.mu.Lock()
-	if s.appending {
-		s.mu.Unlock()
-		return Event{}, fmt.Errorf("session append cannot reenter while another append is being published")
-	}
 	event := Event{Type: eventType, Seq: int64(len(s.log)), Time: time.Now().UnixMilli(), Data: json.RawMessage(encoded)}
 	if intent != nil {
 		event.SurfaceOp = &intent.SurfaceOp
@@ -168,15 +163,15 @@ func (s *Session) Append(eventType string, data any, intent *SurfaceIntent) (Eve
 	// Publish with the same containment the store installs: the listener
 	// snapshot resolves before the log push, callbacks run after it — and
 	// after the session lock is released, so observers may read the session
-	// — and an observer failure never fails the committed append.
+	// — and an observer failure never fails the committed append. Observer
+	// reentry serializes on the session lock; recursion containment is the
+	// observer's own job.
 	var callbacks []func(Event)
-	s.appending = true
 	if s.entry != nil {
 		callbacks = s.entry.eventListeners()
 	}
 	s.log = append(s.log, event)
 	s.eventsSnapshot = nil
-	s.appending = false
 	entry := s.entry
 	s.mu.Unlock()
 
@@ -184,7 +179,7 @@ func (s *Session) Append(eventType string, data any, intent *SurfaceIntent) (Eve
 		s.runContainedObserver(callback, event)
 	}
 	if entry != nil {
-		entry.appendCommitted()
+		entry.appendCommitted(event)
 	}
 	return event, nil
 }

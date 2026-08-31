@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"dshgo/llm"
@@ -118,6 +119,51 @@ func TestAppendSeqContiguityAndEventFeed(t *testing.T) {
 	}
 	if got := session.DeriveMessages(); len(got) != 0 {
 		t.Fatalf("boundary events derive no messages, got %d", len(got))
+	}
+}
+
+func TestAppendFeedDeliversEveryConcurrentCommitExactlyOnce(t *testing.T) {
+	store := NewStore(nil)
+	var mu sync.Mutex
+	fed := map[int64]int{}
+	store.OnEvent(func(_ *Session, event Event) {
+		mu.Lock()
+		fed[event.Seq]++
+		mu.Unlock()
+	})
+	depth := int64(1)
+	session, err := store.Create("feed-race", CreateOptions{HeaderMetadata: SessionHeader{
+		CreatedAt: 1, DelegationDepth: &depth, Origin: "subagent",
+	}})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	const goroutines, perGoroutine = 8, 25
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for i := 0; i < perGoroutine; i++ {
+				if _, err := session.Append(EventTurnStart, map[string]any{"turn": g, "i": i}, nil); err != nil {
+					t.Errorf("append failed: %v", err)
+					return
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+	want := goroutines * perGoroutine
+	if len(fed) != want {
+		t.Fatalf("feed lost or duplicated deliveries: got %d distinct seqs, want %d", len(fed), want)
+	}
+	for seq, count := range fed {
+		if count != 1 {
+			t.Fatalf("seq %d delivered %d times, want exactly 1", seq, count)
+		}
+	}
+	if got := len(session.Events()); got != want {
+		t.Fatalf("log length = %d, want %d", got, want)
 	}
 }
 

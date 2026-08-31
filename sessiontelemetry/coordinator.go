@@ -256,7 +256,7 @@ func firstLiveSeq(sess *session.Session) int64 {
 func (c *Coordinator) track(sess *session.Session, event session.Event) {
 	if event.Type == session.EventAssistantChunk {
 		key := fmt.Sprintf("%d:%d", chunkTurn(event), chunkStep(event))
-		c.seen(sess)[key] = struct{}{}
+		c.markChunkSeen(sess, key)
 	}
 }
 
@@ -264,15 +264,13 @@ func (c *Coordinator) track(sess *session.Session, event session.Event) {
 func (c *Coordinator) captureEvent(sess *session.Session, event session.Event) {
 	if event.Type == session.EventAssistantChunk {
 		key := fmt.Sprintf("%d:%d", chunkTurn(event), chunkStep(event))
-		seen := c.seen(sess)
 		// Fixed chunk projection: only the first chunk of each (turn, step)
 		// ships — the stream-started signal; content is byte-complete in the
 		// step's assembled assistant/message. Dropped chunks do not advance
 		// the cursor, so re-adoption re-drops them deterministically.
-		if _, ok := seen[key]; ok {
+		if c.markChunkSeen(sess, key) {
 			return
 		}
-		seen[key] = struct{}{}
 	}
 	c.deliver(sess, projectedRecord{
 		record: c.redact(Record{
@@ -298,7 +296,11 @@ func (c *Coordinator) deliver(sess *session.Session, pending projectedRecord) {
 	c.backend.Emit(pending.record)
 	if pending.seq >= 0 {
 		c.mu.Lock()
-		c.cursor[sess] = pending.seq
+		// Feed callbacks for one session interleave outside the session
+		// lock, so the cursor only ever moves forward.
+		if pending.seq > c.cursor[sess] {
+			c.cursor[sess] = pending.seq
+		}
 		c.mu.Unlock()
 	}
 }
@@ -319,6 +321,7 @@ func (c *Coordinator) hintFlush(sess *session.Session) {
 func (c *Coordinator) relayAgentError(payload agent.AgentErrorPayload) {
 	sess := payload.Agent.Session
 	c.deliver(sess, projectedRecord{
+		seq: -1, // agent errors carry no ledger event to advance to
 		record: c.redact(Record{
 			Channel:  "ops",
 			Time:     time.Now().UnixMilli(),
@@ -336,8 +339,11 @@ func (c *Coordinator) relayAgentError(payload agent.AgentErrorPayload) {
 	})
 }
 
-// seen lazily creates the per-session first-chunk tracking set.
-func (c *Coordinator) seen(sess *session.Session) map[string]struct{} {
+// markChunkSeen records key in the session's first-chunk tracking set under
+// the coordinator lock and reports whether it was already recorded. The set
+// never leaks past c.mu: the whole read-modify-write is atomic here, so
+// interleaved feed callbacks cannot trip the runtime's concurrent-map guard.
+func (c *Coordinator) markChunkSeen(sess *session.Session, key string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	set, ok := c.chunkSeen[sess]
@@ -345,7 +351,11 @@ func (c *Coordinator) seen(sess *session.Session) map[string]struct{} {
 		set = map[string]struct{}{}
 		c.chunkSeen[sess] = set
 	}
-	return set
+	if _, ok := set[key]; ok {
+		return true
+	}
+	set[key] = struct{}{}
+	return false
 }
 
 // contain runs one capture-side step with its exception contained.
