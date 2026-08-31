@@ -57,6 +57,7 @@ import (
 	"dshgo/session/projection"
 	"dshgo/session/projectioncache"
 	"dshgo/sessionlog"
+	"dshgo/sessionquery"
 	"dshgo/sessionquerysqlite"
 	"dshgo/sessiontelemetry"
 	"dshgo/sessiontelemetryotel"
@@ -89,6 +90,7 @@ import (
 	"dshgo/toolralph"
 	"dshgo/toolresultpruner"
 	"dshgo/tools"
+	"dshgo/toolsessionquery"
 	"dshgo/toolsjobs"
 	"dshgo/toolskill"
 	"dshgo/toolsubagent"
@@ -185,6 +187,10 @@ const (
 	// ServiceMessageFeedback is the durable message-feedback sidecar
 	// (official 'messageFeedback'); one implementation per context.
 	ServiceMessageFeedback = "messageFeedback"
+	// ServiceSessionQuery is the live-preferred session query engine
+	// (official 'sessionQuery'); exact reads, filters, and traces are
+	// concrete; full-text search requires a mounted backend.
+	ServiceSessionQuery = "sessionQuery"
 )
 
 // CatalogDeps carries the ambient composition inputs plugins share: the
@@ -581,6 +587,66 @@ var builders = map[string]pluginBuilder{
 					}), nil
 				})
 				return nil
+			},
+		}
+	},
+
+	// The session-query engine (official dsh-session-query): the unified
+	// live-preferred query service. Exact reads, filters, and traces are
+	// concrete; full-text search is wired to the sqlite derived index when
+	// that backend composes (SEARCH_DISABLED otherwise — the honest
+	// backend-absent state).
+	"@deepseek-ai/dsh-session-query": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceSessions, ServiceSessionPersist, ServiceProjections},
+			Provide: []string{ServiceSessionQuery},
+			Apply: func(ctx *cordis.Context, config any) error {
+				store := ctx.Get(ServiceSessions).(*session.Store)
+				coordinator := ctx.Get(ServiceSessionPersist).(*persistence.Coordinator)
+				projections := sessionquery.RegistryProjectionSource{
+					Registry: ctx.Get(ServiceProjections).(*projection.Registry),
+				}
+				engine, err := sessionquery.NewEngine(
+					sessionquery.StoreSessions{Store: store},
+					coordinator,
+					projections,
+					nil, // search backend: sqlite adapter composes when mounted
+					&sessionquery.Config{},
+				)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceSessionQuery, engine)
+				return nil
+			},
+		}
+	},
+
+	// The model-facing session-history tools (official
+	// dsh-tool-session-query): workspace-authorized search and read over the
+	// session-query engine.
+	"@deepseek-ai/dsh-tool-session-query": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceTools, ServiceSystemPrompt, ServiceSessionQuery, ServiceAgents},
+			Apply: func(ctx *cordis.Context, config any) error {
+				var cfg struct {
+					MaxSearchResults *int `json:"maxSearchResults"`
+					SearchTimeoutMs  *int `json:"searchTimeoutMs"`
+				}
+				if err := decodeConfigJSON(config, &cfg); err != nil {
+					return err
+				}
+				undo, err := toolsessionquery.Register(
+					ctx.Get(ServiceTools).(*tools.ToolRuntime),
+					ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt),
+					ctx.Get(ServiceSessionQuery).(*sessionquery.Engine),
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
+					toolsessionquery.Config{MaxSearchResults: cfg.MaxSearchResults, SearchTimeoutMs: cfg.SearchTimeoutMs},
+				)
+				if err != nil {
+					return err
+				}
+				return ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(undo), nil })
 			},
 		}
 	},
