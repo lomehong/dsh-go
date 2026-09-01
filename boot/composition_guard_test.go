@@ -100,7 +100,6 @@ var guardDispositions = map[string]string{
 	// and loader-only machinery; the Go host has no JS/loader runtime).
 	"@deepseek-ai/dsh-subagent-codex":       "T2-disposition",
 	"@deepseek-ai/dsh-subagent-claude-code": "T2-disposition",
-	"@deepseek-ai/cordis-plugin-timer":      "T2-disposition",
 	"@deepseek-ai/dsh-typert-loader":        "T2-disposition",
 	"@deepseek-ai/dsh-llm-pi-ai":            "T2-disposition (external pi-ai SDK adapter; port on demand, ROADMAP record)",
 

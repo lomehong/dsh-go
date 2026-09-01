@@ -421,6 +421,18 @@ var builders = map[string]pluginBuilder{
 		}
 	},
 
+	// cordis-plugin-timer: the official base bundle ships an enabled timer
+	// row, but its only consumer is the patchReload live watcher — a
+	// launcher mechanism the Go host does not compose (recorded
+	// disposition). The row must still resolve for the shipped base bundle
+	// to compose; the no-op plugin satisfies the import without mounting
+	// anything.
+	"@deepseek-ai/cordis-plugin-timer": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Apply: func(*cordis.Context, any) error { return nil },
+		}
+	},
+
 	// The web access capability seam (official dsh-web): search/fetch
 	// provider registries with execution-time provider selection. The base
 	// bundle pins the shipped providers; omitting either field auto-selects

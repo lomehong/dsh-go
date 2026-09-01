@@ -142,3 +142,9 @@ Win32 代码且 x/sys 缺 CreateRestrictedToken 需手工桥接——草率移�
   jsonl 与 sqlite 后端产出日志格式同构）；③ 官方 storage-sqlite 包本体未删除，
   仅装配摘除——保留与上游代码现实不冲突，属部署面自由度。回退条件（如需对齐）：
   catalog 两行摘除即可，包与测试保留。
+
+## 轮 10 决策（2026-09-01，web profile 完整迁移）
+
+- **cordis-plugin-timer 处置（no-op stub，能力缺席入档）**：官方 base bundle 的 timer 行是 enabled，但其唯一消费者是 patchReload live 配置监视（launcher 机制）。Go 宿主**未实现 live config reload**——配置重载由 launcher watch-only 兜底（既有处置记录）。catalog stub（@deepseek-ai/cordis-plugin-timer）Apply 空操作，仅让官方 base bundle 组合可解析——**能力缺席非存在**：不提供任何定时器服务，未来若 Go 宿主实现 reload 监视再替换。行级精准：仅 timer 一行 stub，其余未移植行继续响亮 fail-loud（loud-miss 设计不破）。
+- **web profile 工具面保留完整能力（Owner 裁决）**：官方 web-app 层 disable 的 tool-jobs/tool-fs/tool-fs-search/tool-str-replace-editor 四行在 dsh-go web profile **保持启用**——有意分歧（官方 web client 自带浏览器侧工具面故禁用；Owner 要求 web 模式保留完整 harness 工具能力），组合后重启用该四行。
+- **前端技术栈保留 TypeScript 原栈（Owner 裁决）**：完整迁移≠全 Go——ui-* 等 client UI 包归前端 dist 服务域，Go catalog 不提供（守卫 frontend-domain 豁免），浏览器 UI 本体依赖官方 @deepseek-ai/dsh-frontend dist。
