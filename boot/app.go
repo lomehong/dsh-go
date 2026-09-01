@@ -45,6 +45,7 @@ type App struct {
 // with the stage and the entry identity.
 func Assemble(ctx *cordis.Context, entries []loader.Entry, resolver PluginResolver) (*App, error) {
 	RegisterVocabulary()
+	RegisterPlatformEvaluator()
 	app := &App{root: ctx}
 	if err := app.mount(ctx, entries, resolver, nil); err != nil {
 		return nil, err
