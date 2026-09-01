@@ -1628,7 +1628,7 @@ var builders = map[string]pluginBuilder{
 	// shipped base patch which names a single `user-interaction` entry.
 	"@deepseek-ai/dsh-user-interaction": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
-			Inject: []string{ServiceAgents},
+			Inject:  []string{ServiceAgents},
 			Provide: []string{ServiceUserQuestions, ServiceUserApproval},
 			Apply: func(ctx *cordis.Context, config any) error {
 				ctx.Provide(ServiceUserQuestions, userquestions.NewService(
@@ -3495,6 +3495,7 @@ func init() {
 		"@deepseek-ai/dsh-timeout-policy":                  "@deepseek-ai/dsh-tool-call-timeout-policy",
 		"@deepseek-ai/dsh-fs-policy":                       "@deepseek-ai/dsh-fs-observation-policy",
 		"@deepseek-ai/dsh-permission":                      "@deepseek-ai/dsh-permission-presets",
+		"@deepseek-ai/dsh-goal-session":                    "@deepseek-ai/dsh-goal-round-driver",
 	}
 	for alias, canonical := range officialNameAliases {
 		build, ok := builders[canonical]
