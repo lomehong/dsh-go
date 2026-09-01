@@ -123,11 +123,22 @@ SESSION_FORMAT_UNSUPPORTED 不与 CORRUPTION 混淆。真实日志积累前的�
 ## 轮 8 决策（2026-08-31）
 
 - **sandbox 进程执法层移植边界定谳**：seam 契约（ConfinedArgv/SandboxProvider/
-  SandboxUnavailableError/RunnerFailureRule/Policy/ExecutionPolicy + FailClosedProvider）
-  完整移植入 sandbox 包（可验证、下游依赖）；dsh-sandbox-local catalog 条目提供
-  fail-closed provider（无执法器时 confine 恒拒 SANDBOX_UNAVAILABLE = 上游 missing
-  confinement fails closed 语义）。**原生执法运行器本体（Windows ACL 限制令牌、
-  Linux bwrap+Landlock、macOS Seatbelt）不硬凑**：windows-acl 为 1738 行安全关键
-  Win32 代码且 x/sys 缺 CreateRestrictedToken 需手工桥接——草率移植安全边界比如实
-  保留缺口更危险，按项目"受阻如实记录"纪律入账为独立安全验证轮（bash/pwsh-sandbox
-  薄包装在其上，随执法器同轮）。
+SandboxUnavailableError/RunnerFailureRule/Policy/ExecutionPolicy + FailClosedProvider）
+完整移植入 sandbox 包（可验证、下游依赖）；dsh-sandbox-local catalog 条目提供
+fail-closed provider（无执法器时 confine 恒拒 SANDBOX_UNAVAILABLE = 上游 missing
+confinement fails closed 语义）。**原生执法运行器本体（Windows ACL 限制令牌、
+Linux bwrap+Landlock、macOS Seatbelt）不硬凑**：windows-acl 为 1738 行安全关键
+Win32 代码且 x/sys 缺 CreateRestrictedToken 需手工桥接——草率移植安全边界比如实
+保留缺口更危险，按项目"受阻如实记录"纪律入账为独立安全验证轮（bash/pwsh-sandbox
+薄包装在其上，随执法器同轮）。
+## 轮 9 决策（2026-09-01，Owner 裁决）
+
+- **SQLite 持久后端分歧：保留（Owner 拍板 A）**：官方 alpha.3（上游
+  0a53fb55be→dd6322d，提交 4553c9d957，破坏级标记）已将 SQLite 持久后端从装配解绑；
+  本仓 storagesqlite/session-persistence-sqlite **保留存续，作为文档化扩展**——
+  超越官方装配面。分歧点：官方装配摘除 vs 本仓已交付实现。理由三条：① modernc
+  纯 Go 驱动重投入资产在案（R24 决策，schema/契约/事务记账全量移植+测试），
+  弃用即沉没；② 无 wire 影响（W 系列=0，持久后端选择是装配事实非协议事实，
+  jsonl 与 sqlite 后端产出日志格式同构）；③ 官方 storage-sqlite 包本体未删除，
+  仅装配摘除——保留与上游代码现实不冲突，属部署面自由度。回退条件（如需对齐）：
+  catalog 两行摘除即可，包与测试保留。
