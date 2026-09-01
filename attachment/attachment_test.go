@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"dshgo/attachment"
+	"dshgo/llm"
 )
 
 func TestRequestImageDimensions(t *testing.T) {
@@ -137,5 +138,57 @@ func TestIsImageAdmissionError(t *testing.T) {
 	wrapped := attachment.WrappedAttachmentError("outer", attachment.CodeAttachmentWriteFailed, attachment.NewAttachmentError("inner", attachment.CodeImageTooLarge))
 	if !strings.Contains(wrapped.Error(), "IMAGE_TOO_LARGE") {
 		t.Fatalf("wrapped = %v", wrapped)
+	}
+}
+
+func TestAdmitPromptContent(t *testing.T) {
+	store := &fakeStore{}
+	// Text-only content never touches the store.
+	textOnly := []llm.ContentBlock{{Type: llm.BlockText, Text: "hello"}}
+	out, err := attachment.AdmitPromptContent(store, textOnly)
+	if err != nil {
+		t.Fatalf("text-only admit: %v", err)
+	}
+	if len(out) != 1 || out[0].Type != llm.BlockText || out[0].Text != "hello" {
+		t.Fatalf("text-only = %+v", out)
+	}
+	if len(store.batches) != 0 {
+		t.Fatalf("text-only touched the store: %d batches", len(store.batches))
+	}
+
+	// Image blocks admit as one batch and are replaced in place, order kept.
+	mixed := []llm.ContentBlock{
+		{Type: llm.BlockText, Text: "see:"},
+		{Type: llm.BlockImage, Attachment: attachment.EncodedImageAttachment{MediaType: attachment.MediaPNG, Data: "AAAA"}},
+		{Type: llm.BlockText, Text: "then"},
+		{Type: llm.BlockImage, Attachment: attachment.EncodedImageAttachment{MediaType: attachment.MediaJPEG, Data: "AAA="}},
+	}
+	out, err = attachment.AdmitPromptContent(store, mixed)
+	if err != nil {
+		t.Fatalf("mixed admit: %v", err)
+	}
+	if len(out) != 4 {
+		t.Fatalf("mixed = %d blocks, want 4", len(out))
+	}
+	if out[0].Type != llm.BlockText || out[2].Type != llm.BlockText {
+		t.Fatalf("text order lost: %+v", out)
+	}
+	ref0, ok0 := out[1].Attachment.(attachment.ImageAttachmentRef)
+	ref1, ok1 := out[3].Attachment.(attachment.ImageAttachmentRef)
+	if !ok0 || !ok1 || ref0.AttachmentID != "id-a" || ref1.AttachmentID != "id-b" {
+		t.Fatalf("refs = %+v / %+v", out[1].Attachment, out[3].Attachment)
+	}
+	// One batch of two images.
+	if len(store.batches) != 1 || len(store.batches[0]) != 2 {
+		t.Fatalf("batches = %+v", store.batches)
+	}
+}
+
+func TestAdmitPromptContentRejectsBadImageBlock(t *testing.T) {
+	store := &fakeStore{}
+	// An image block without an encoded payload is a wire violation.
+	bad := []llm.ContentBlock{{Type: llm.BlockImage, Attachment: "not-an-encoded"}}
+	if _, err := attachment.AdmitPromptContent(store, bad); err == nil {
+		t.Fatal("non-encoded image block must fail loud")
 	}
 }

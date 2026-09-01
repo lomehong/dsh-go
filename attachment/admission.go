@@ -3,6 +3,8 @@ package attachment
 import (
 	"encoding/base64"
 	"fmt"
+
+	"dshgo/llm"
 )
 
 // Store is the immutable binary attachment service. Implementations validate
@@ -109,4 +111,52 @@ func AdmitEncodedImages(attachments Store, images []EncodedImageAttachment) ([]I
 		inputs = append(inputs, input)
 	}
 	return attachments.SaveImages(inputs)
+}
+
+// AdmitPromptContent admits one browser prompt: text-only blocks pass
+// through without touching the store, and each image block's encoded payload
+// is batch-admitted to a durable reference that replaces it in place (the
+// upstream admitPromptContent). The store's batch policy — count,
+// aggregate-byte, media-type, per-image validation — applies to the image
+// members as one group; a refused batch admits nothing.
+func AdmitPromptContent(store Store, blocks []llm.ContentBlock) ([]llm.ContentBlock, error) {
+	hasImage := false
+	for _, block := range blocks {
+		if block.Type == llm.BlockImage {
+			hasImage = true
+			break
+		}
+	}
+	if !hasImage {
+		return blocks, nil
+	}
+	encoded := make([]EncodedImageAttachment, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Type != llm.BlockImage {
+			continue
+		}
+		image, ok := block.Attachment.(EncodedImageAttachment)
+		if !ok {
+			return nil, NewAttachmentError("Image prompt block must carry an encoded attachment payload.", CodeInvalidImageBase64)
+		}
+		encoded = append(encoded, image)
+	}
+	refs, err := AdmitEncodedImages(store, encoded)
+	if err != nil {
+		return nil, err
+	}
+	admitted := make([]llm.ContentBlock, 0, len(blocks))
+	next := 0
+	for _, block := range blocks {
+		if block.Type != llm.BlockImage {
+			admitted = append(admitted, block)
+			continue
+		}
+		admitted = append(admitted, llm.ContentBlock{
+			Type:       llm.BlockImage,
+			Attachment: refs[next],
+		})
+		next++
+	}
+	return admitted, nil
 }
