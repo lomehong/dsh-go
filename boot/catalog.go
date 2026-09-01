@@ -13,9 +13,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"dshgo/agent"
 	"dshgo/agentinstructions"
@@ -409,14 +413,22 @@ var builders = map[string]pluginBuilder{
 		}
 	},
 
-	// The web server: route registry served over HTTP (official
+	// The web server: route registry bound over HTTP (official
 	// @deepseek-ai/dsh-host-webserver; the dsh-web specifier belongs to the
-	// web capability seam below).
+	// web capability seam below). Config host/port follow the official
+	// shape; the bind starts immediately and the webServer service exposes
+	// the live host/port for web-runtime (official WebServer.port). Dist
+	// serving is the composing application's job (web-runtime's
+	// frontend-static), never this row's.
 	"@deepseek-ai/dsh-host-webserver": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
 			Provide: []string{ServiceWebServer},
 			Apply: func(ctx *cordis.Context, config any) error {
-				return webserver.AsPlugin(deps.Logger).Apply(ctx)
+				host, port, err := webserverBindConfig(config)
+				if err != nil {
+					return err
+				}
+				return bindWebServer(ctx, deps.Logger, host, port)
 			},
 		}
 	},
@@ -3605,6 +3617,63 @@ func dshHome() string {
 // official security rejection verbatim); --port must be numeric. The
 // service carries openBrowser (default true; --no-open clears it), the
 // conditionally-present host/port, and the accumulated trusted hosts.
+// repeatable --trusted-host. --host 0.0.0.0 is refused for safety (the
+// official security rejection verbatim); --port must be numeric. The
+// service carries openBrowser (default true; --no-open clears it), the
+// conditionally-present host/port, and the accumulated trusted hosts.
+
+// webserverBindConfig resolves the webserver row's host/port config with
+// the official WebServer.Config defaults (loopback host; zero port asks the
+// OS).
+func webserverBindConfig(config any) (string, string, error) {
+	host := "127.0.0.1"
+	port := "0"
+	if overridden, ok := config.(map[string]any); ok {
+		if raw, ok := overridden["host"].(string); ok && raw != "" {
+			host = raw
+		}
+		if raw, ok := overridden["port"].(float64); ok {
+			port = strconv.FormatInt(int64(raw), 10)
+		}
+	}
+	return host, port, nil
+}
+
+// bindWebServer creates the route registry, binds it over HTTP immediately
+// (official WebServer activation listens), and exposes the webServer service
+// carrying the live host/port for web-runtime. The disposer closes the
+// listener and the registry's upgraded sockets.
+func bindWebServer(ctx *cordis.Context, logger cordis.Logger, host, port string) error {
+	registry := webserver.New(logger)
+	server := &http.Server{Handler: registry, ReadHeaderTimeout: 10 * time.Second}
+	listener, err := net.Listen("tcp", net.JoinHostPort(host, port))
+	if err != nil {
+		return fmt.Errorf("web: bind %s: %w", net.JoinHostPort(host, port), err)
+	}
+	bound := listener.Addr().(*net.TCPAddr)
+	boundHost := host
+	if boundHost == "" {
+		boundHost = "127.0.0.1"
+	}
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			logger.Error(fmt.Sprintf("web: server failed: %v", err))
+		}
+	}()
+	ctx.Provide(ServiceWebServer, registry)
+	ctx.Provide("webServer", map[string]any{
+		"host": boundHost,
+		"port": float64(bound.Port),
+	})
+	return ctx.Effect(func() (cordis.Disposer, error) {
+		return cordis.Disposer(func() {
+			if err := server.Close(); err != nil {
+				logger.Warn(fmt.Sprintf("web: server close: %v", err))
+			}
+			registry.Close()
+		}), nil
+	})
+}
 func parseWebStartup(args []string) (map[string]any, error) {
 	values := map[string]any{
 		"openBrowser":  true,
