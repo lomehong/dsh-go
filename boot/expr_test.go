@@ -228,3 +228,34 @@ func TestParseWebStartup(t *testing.T) {
 		t.Fatalf("0.0.0.0 err = %v", err)
 	}
 }
+
+func TestWebRuntimeConfig(t *testing.T) {
+	// Defaults: openBrowser from webStartup, printUrl true, trusted from startup.
+	settings, err := webRuntimeConfig(map[string]any{"openBrowser": true, "trustedHosts": []any{"a"}}, nil)
+	if err != nil || !settings.openBrowser || !settings.printUrl || len(settings.trustedHosts) != 1 {
+		t.Fatalf("defaults = %+v %v", settings, err)
+	}
+	// --no-open clears openBrowser; config printUrl:false wins.
+	settings, err = webRuntimeConfig(map[string]any{"openBrowser": false}, map[string]any{"printUrl": false})
+	if err != nil || settings.openBrowser || settings.printUrl {
+		t.Fatalf("overrides = %+v %v", settings, err)
+	}
+}
+
+func TestResolveLanTrust(t *testing.T) {
+	// Loopback binds sample no LAN addresses.
+	loopback := resolveLanTrust("127.0.0.1", []string{"explicit"})
+	if len(loopback.lanAddresses) != 0 || len(loopback.trustedHosts) != 1 || loopback.trustedHosts[0] != "explicit" {
+		t.Fatalf("loopback = %+v", loopback)
+	}
+	// All-interfaces binds collect non-internal IPv4 + explicit authorities.
+	all := resolveLanTrust("0.0.0.0", []string{"explicit"})
+	if len(all.trustedHosts) < 1 {
+		t.Fatalf("all-interfaces = %+v", all)
+	}
+	for _, host := range all.lanAddresses {
+		if host == "127.0.0.1" {
+			t.Fatalf("loopback leaked into LAN: %v", all.lanAddresses)
+		}
+	}
+}

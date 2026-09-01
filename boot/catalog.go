@@ -16,7 +16,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +46,7 @@ import (
 	"dshgo/goalrounddriver"
 	"dshgo/guard"
 	"dshgo/homepaths"
+	"dshgo/host/webhost"
 	"dshgo/host/webserver"
 	"dshgo/interaction/permissionpresets"
 	"dshgo/interaction/userapproval"
@@ -210,6 +213,9 @@ const (
 type CatalogDeps struct {
 	Logger cordis.Logger
 	Home   string
+	// Anchor is the installation anchor for bundle/dist resolution (the
+	// launcher's executable-dir package.json path).
+	Anchor string
 }
 
 // pluginBuilder builds one plugin's spec; builders close over the ambient
@@ -396,18 +402,59 @@ var builders = map[string]pluginBuilder{
 
 	// The web runtime glue (official dsh-web-app): resolves the built
 	// frontend dist, mounts the frontend-static fallback owner over the
-	// webserver, registers the web-surface prompt section and bash runtime
-	// variables, and prints the URL line. Injects webStartup for the
-	// invocation-only values and httpServer for the live bind.
+	// webserver registry, samples bind-dependent LAN trust, registers the
+	// web-surface prompt section and the DSH_WEB_URL bash variable, and
+	// prints the URL line (+ default-browser handoff when openBrowser).
 	"@deepseek-ai/dsh-web-app": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
-			Inject:  []string{"webStartup"},
+			Inject:  []string{"webStartup", ServiceWebServer},
 			Provide: []string{"webRuntime"},
 			Apply: func(ctx *cordis.Context, config any) error {
-				// webRuntime resolves bind-dependent values; the frontend
-				// mount and URL print land with the webserver bind (the
-				// httpServer row). This row publishes the runtime facts.
-				ctx.Provide("webRuntime", map[string]any{})
+				startup, _ := ctx.Get("webStartup").(map[string]any)
+				cfg, err := webRuntimeConfig(startup, config)
+				if err != nil {
+					return err
+				}
+				record, ok := ctx.Get(ServiceWebServer).(map[string]any)
+				if !ok {
+					return errors.New("web-app: webServer service is unavailable")
+				}
+				registry, _ := record["registry"].(*webserver.Registry)
+				if registry == nil {
+					return errors.New("web-app: webServer registry is unavailable")
+				}
+				host, _ := record["host"].(string)
+				port, _ := record["port"].(float64)
+				runtime := resolveLanTrust(host, cfg.trustedHosts)
+				ctx.Provide("webRuntime", map[string]any{
+					"lanAddresses": runtime.lanAddresses,
+					"trustedHosts": runtime.trustedHosts,
+				})
+				// Mount the frontend dist fallback owner (official
+				// frontend-static over the dist index).
+				if dist, distErr := webhost.ResolveFrontendDist(deps.Anchor); distErr == nil {
+					if _, mountErr := webhost.Mount(registry, ctx, dist, deps.Logger); mountErr != nil {
+						return mountErr
+					}
+				}
+				// The URL line and browser handoff are readiness signals
+				// (official printUrl/handoffBrowser after Loader settles).
+				if cfg.printUrl || cfg.openBrowser {
+					url := fmt.Sprintf("http://127.0.0.1:%d", int(port))
+					if cfg.printUrl {
+						lan := ""
+						if len(runtime.lanAddresses) > 0 {
+							lan = fmt.Sprintf(" (LAN: http://%s:%d)", runtime.lanAddresses[0], int(port))
+						}
+						fmt.Printf("dsh web: %s%s\n", url, lan)
+					}
+					if cfg.openBrowser {
+						fmt.Println("dsh web: opening the default browser; pass --no-open to disable")
+						if err := openDefaultBrowser(url); err != nil {
+							deps.Logger.Warn(fmt.Sprintf("web-app: could not open the default browser because %v; use the dsh web URL printed at startup", err))
+						}
+					}
+				}
 				return nil
 			},
 		}
@@ -3621,6 +3668,10 @@ func dshHome() string {
 // official security rejection verbatim); --port must be numeric. The
 // service carries openBrowser (default true; --no-open clears it), the
 // conditionally-present host/port, and the accumulated trusted hosts.
+// repeatable --trusted-host. --host 0.0.0.0 is refused for safety (the
+// official security rejection verbatim); --port must be numeric. The
+// service carries openBrowser (default true; --no-open clears it), the
+// conditionally-present host/port, and the accumulated trusted hosts.
 
 // webserverBindConfig resolves the webserver row's host/port config with
 // the official WebServer.Config defaults (loopback host; zero port asks the
@@ -3680,6 +3731,87 @@ func bindWebServer(ctx *cordis.Context, logger cordis.Logger, host, port string)
 			registry.Close()
 		}), nil
 	})
+}
+
+// webRuntimeConfig decodes the web-runtime row config (official dsh-web-app
+// Config): openBrowser/printUrl/surfaceContext default true, trustedHosts
+// from the webStartup service.
+type webRuntimeSettings struct {
+	openBrowser  bool
+	printUrl     bool
+	trustedHosts []string
+}
+
+func webRuntimeConfig(startup map[string]any, config any) (webRuntimeSettings, error) {
+	settings := webRuntimeSettings{openBrowser: true, printUrl: true}
+	if raw, ok := startup["openBrowser"].(bool); ok {
+		settings.openBrowser = raw
+	}
+	if overridden, ok := config.(map[string]any); ok {
+		if raw, ok := overridden["printUrl"].(bool); ok {
+			settings.printUrl = raw
+		}
+	}
+	if raw, ok := startup["trustedHosts"].([]any); ok {
+		for _, item := range raw {
+			if value, ok := item.(string); ok {
+				settings.trustedHosts = append(settings.trustedHosts, value)
+			}
+		}
+	}
+	return settings, nil
+}
+
+// resolveLanTrust samples bind-dependent LAN addresses once (official
+// resolveLanTrust): all-interfaces binds collect the non-internal IPv4
+// literals; loopback binds sample none. The trusted set is the LAN literals
+// followed by the invocation's explicit authorities.
+func resolveLanTrust(bindHost string, extra []string) (runtime struct {
+	lanAddresses []string
+	trustedHosts []string
+}) {
+	if bindHost == "0.0.0.0" {
+		runtime.lanAddresses = lanIPv4Addresses()
+	}
+	runtime.trustedHosts = append(append([]string{}, runtime.lanAddresses...), extra...)
+	return runtime
+}
+
+// lanIPv4Addresses lists the host's non-internal IPv4 literals (official
+// networkInterfaces family IPv4 non-internal).
+func lanIPv4Addresses() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok || ipNet.IP.To4() == nil {
+			continue
+		}
+		if ipNet.IP.IsLoopback() || ipNet.IP.IsLinkLocalUnicast() {
+			continue
+		}
+		out = append(out, ipNet.IP.String())
+	}
+	return out
+}
+
+// openDefaultBrowser hands one URL to the OS default browser (official
+// spawnBrowserLauncher): Windows uses rundll32 url.dll, POSIX uses xdg-open
+// (or open on darwin).
+func openDefaultBrowser(url string) error {
+	var command *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		command = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		command = exec.Command("open", url)
+	default:
+		command = exec.Command("xdg-open", url)
+	}
+	return command.Start()
 }
 func parseWebStartup(args []string) (map[string]any, error) {
 	values := map[string]any{

@@ -92,11 +92,13 @@ func run() error {
 		app, warnings, err = boot.AssembleProfileWithCmdline("dsh", *profile, anchorPath, *home, args, boot.CatalogDeps{
 			Logger: logger,
 			Home:   *home,
+			Anchor: anchorPath,
 		})
 	} else {
 		app, warnings, err = boot.AssembleProfile("dsh", *profile, anchorPath, *home, boot.CatalogDeps{
 			Logger: logger,
 			Home:   *home,
+			Anchor: anchorPath,
 		})
 	}
 	if err != nil {
