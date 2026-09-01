@@ -86,6 +86,15 @@ func (a *App) mount(ctx *cordis.Context, entries []loader.Entry, resolver Plugin
 		if disabled {
 			continue
 		}
+		// Dispositioned rows are skipped at import with a warn — the
+		// official bundles name rows the Go host intentionally does not
+		// mount (no-port decisions, frontend-domain rows), all recorded in
+		// the shared Dispositions table. The loud-miss design stays for
+		// unknown rows: an unlisted name still fails hard.
+		if category := Dispositions[entry.Name]; category != "" {
+			ctx.Logger().Warn(fmt.Sprintf("loader entry %s (%s): skipped, disposition %s (see DECISIONS)", entry.ID, entry.Name, category))
+			continue
+		}
 		spec, err := resolver(entry.Name)
 		if err != nil {
 			return fmt.Errorf("failed to import loader entry %s (%s): %v", entry.ID, entry.Name, err)

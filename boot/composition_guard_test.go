@@ -62,56 +62,13 @@ type unresolvedOfficialRow struct {
 	Category string
 }
 
-// guardDispositions declares every known exempt row: categories are
-// frontend-domain (browser dist owns the row), T2-disposition (recorded
-// no-port decision), and T3-planned (Go port scheduled this round; the note
-// names the package status where a Go implementation already exists). A row
-// absent here is genuine drift and fails the guard.
-var guardDispositions = map[string]string{
-	// Frontend dist domain: the browser UI owns these rows; the Go host
-	// catalog does not provide them (Owner ruling: frontend stays TS).
-	"@deepseek-ai/dsh-client-runtime":             "frontend-domain",
-	"@deepseek-ai/dsh-client-modules":             "frontend-domain",
-	"@deepseek-ai/dsh-client-connection":          "frontend-domain",
-	"@deepseek-ai/dsh-client-locale":              "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-theme":            "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-layout":           "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-sidebar":          "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-settings":         "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-settings-general": "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-models":           "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-model":            "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-conversation":     "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-tool":             "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-deliverables":     "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-workspace":        "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-slash":            "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-command":          "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-skill":            "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-subagent":         "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-goal":             "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-permission":       "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-agent-preset":     "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-plan":             "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-question":         "frontend-domain",
-	"@deepseek-ai/dsh-client-ui-trajectory":       "frontend-domain",
-
-	// T2 disposition: recorded no-port decisions (external CLI adapters
-	// and loader-only machinery; the Go host has no JS/loader runtime).
-	"@deepseek-ai/dsh-subagent-codex":       "T2-disposition",
-	"@deepseek-ai/dsh-subagent-claude-code": "T2-disposition",
-	"@deepseek-ai/dsh-typert-loader":        "T2-disposition",
-	"@deepseek-ai/dsh-llm-pi-ai":            "T2-disposition (external pi-ai SDK adapter; port on demand, ROADMAP record)",
-
-	// T3 planned: Go port scheduled this migration round; the note names
-	// the package status where a Go implementation already exists.
-	"@deepseek-ai/dsh-api-remotes":                "T3-planned (apiremotes ported, wiring row pending)",
-	"@deepseek-ai/dsh-host-apiproxy":              "T3-planned (api gateway /api transport)",
-	"@deepseek-ai/dsh-web-app":                    "T3-planned (web-runtime row)",
-	"@deepseek-ai/dsh-web-app/startup":            "T3-planned (web-startup row)",
-	"@deepseek-ai/dsh-host-directory-picker-auto": "T3-planned (directory picker)",
-	"@deepseek-ai/dsh-code-runtime-worker":        "T3-planned (code runtime; coderuntime seam ported)",
-}
+// guardDispositions is the guard's view of the shared disposition table
+// (boot.Dispositions) — the single source of truth both the guard and the
+// assembly mount loop read. Categories are frontend-domain (browser dist
+// owns the row), T2-disposition (recorded no-port decision), and
+// T3-planned (Go port scheduled; note the package status). A row absent
+// here is genuine drift and fails the guard.
+var guardDispositions = Dispositions
 
 // TestOfficialBundleCompositionGuard is the drift guard (v2): every enabled
 // official row must either resolve through the Go catalog (direct key or
