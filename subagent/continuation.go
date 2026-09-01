@@ -157,6 +157,10 @@ const (
 	CodeNotResumable             = "NOT_RESUMABLE"
 	CodePersistenceUnavailable   = "PERSISTENCE_UNAVAILABLE"
 	CodeActivationTeardownFailed = "ACTIVATION_TEARDOWN_FAILED"
+	// CodeModelDoesNotSupportImages refuses image follow-up content to a
+	// child whose resolved model accepts text only (alpha.3, upstream
+	// MODEL_DOES_NOT_SUPPORT_IMAGES).
+	CodeModelDoesNotSupportImages = "MODEL_DOES_NOT_SUPPORT_IMAGES"
 )
 
 // ChildRuntime is the activation-owner's create/resume seam (the official

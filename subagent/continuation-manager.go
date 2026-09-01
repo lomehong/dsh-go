@@ -61,6 +61,10 @@ type ManagerExt struct {
 	Sandbox SandboxOverrideService
 	// HasApproval pins the approval policy to `never` when composed.
 	HasApproval bool
+	// LLM is the model registry the image-capability gate reads (the
+	// official ctx.get('llm') seam); nil skips the gate and defers to the
+	// text-only projection, exactly like an LLM-less composition upstream.
+	LLM *llm.Runtime
 }
 
 // SetManagerExt installs the extension services once composed.
@@ -540,10 +544,67 @@ func (m *SubagentContinuationManager) submitAdmitted(activation *Activation, con
 			fmt.Sprintf("subagent %q activation is being disposed; the message was not accepted", activation.ChildID),
 			CodeActivationClosing, nil)
 	}
+	// Image admission (alpha.3, upstream ba810b3539): an image-bearing
+	// follow-up to a child whose resolved model accepts text only is refused
+	// loud before the message exists. The check is synchronous, so it shares
+	// the disposal-cutoff window above — no await gap to re-check.
+	if err := m.assertImageCapable(activation, content); err != nil {
+		return "", err
+	}
 	if err := m.authorizeLineage(parent, activation.ChildID, activation.Handle.Agent.Session.Header().ParentSession); err != nil {
 		return "", err
 	}
 	return m.submit(activation, content, source, parent)
+}
+
+// contentHasImage reports whether a follow-up payload carries an inline
+// image block (the upstream contentHasImage).
+func contentHasImage(content []llm.ContentBlock) bool {
+	for _, block := range content {
+		if block.Type == llm.BlockImage {
+			return true
+		}
+	}
+	return false
+}
+
+// assertImageCapable refuses image content addressed to a child whose
+// resolved model accepts text only (upstream assertImageCapable). A child
+// without a fixed provider/model route, or a composition without the LLM
+// registry, proceeds — the LLM layer's text-only projection replaces each
+// image with its stable placeholder, exactly like the upstream deferral.
+func (m *SubagentContinuationManager) assertImageCapable(activation *Activation, content []llm.ContentBlock) error {
+	if !contentHasImage(content) {
+		return nil
+	}
+	ext := m.extSnapshot()
+	if ext.LLM == nil {
+		return nil
+	}
+	agent := activation.Handle.Agent
+	provider, model := agent.Options.Provider, agent.Options.Model
+	if provider == "" || model == "" {
+		return nil
+	}
+	info, err := ext.LLM.ResolveModelInfo(provider, model)
+	if err != nil {
+		return err
+	}
+	if info.InputModalities != nil && !containsString(info.InputModalities, "image") {
+		return newSubagentError(
+			fmt.Sprintf("Model %q does not support image input.", model),
+			CodeModelDoesNotSupportImages, nil)
+	}
+	return nil
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 // Followup delivers one later message to a known continuable child as its

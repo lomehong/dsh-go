@@ -1839,6 +1839,11 @@ var builders = map[string]pluginBuilder{
 					// The approval service is in the inject list: a
 					// profile composing subagents composes approval.
 					HasApproval: true,
+					// The LLM registry backs the image-capability gate as an
+					// optional read (official ctx.get('llm')): an LLM-less
+					// composition leaves it nil and the gate defers to the
+					// text-only projection.
+					LLM: optionalLLM(ctx),
 				})
 				runtime.SetContinuations(manager)
 				ctx.Provide(ServiceSubagentRuntime, runtime)
@@ -3420,6 +3425,16 @@ func (a liveSessionsAdapter) List() []session.SessionHeader {
 		}
 	}
 	return headers
+}
+
+// optionalLLM reads the llm service without requiring it: an absent or
+// non-llm service yields nil (the official ctx.get('llm') optional seam).
+func optionalLLM(ctx *cordis.Context) *llm.Runtime {
+	runtime, ok := ctx.Get(ServiceLlm).(*llm.Runtime)
+	if !ok || runtime == nil {
+		return nil
+	}
+	return runtime
 }
 
 func init() {
