@@ -20,21 +20,41 @@ import (
 // request; each yielded value is one server frame payload.
 type RemoteStreamOpener func(endpoint string, payload any) (<-chan any, <-chan error, func())
 
+// maxMissedHeartbeats is the stalled-host tolerance before termination:
+// two consecutive unanswered pings (upstream MAX_MISSED_HEARTBEATS).
+const maxMissedHeartbeats = 2
+
+// defaultHeartbeatInterval is the ping cadence when the caller passes zero.
+const defaultHeartbeatInterval = 20 * time.Second
+
 // MuxServer owns the no-server WebSocket acceptor and every active logical
-// stream, mounted as one upgrade route on the host webserver.
+// stream, mounted as one upgrade route on the host webserver. It runs one
+// shared heartbeat timer (started on the first upgrade, spanning empty-client
+// periods) that pings every open socket and terminates sockets that miss
+// maxMissedHeartbeats consecutive pings — with the upstream stalled-host
+// tolerance: a socket is only terminated when the missed count still exceeds
+// the cap at a deferred recheck, so a delayed pong can clear it first.
 type MuxServer struct {
 	upgrader websocket.Upgrader
 	open     RemoteStreamOpener
 	logger   cordis.Logger
+	interval time.Duration
 
 	mu          sync.Mutex
 	connections map[*websocket.Conn]struct{}
+	missed      map[*websocket.Conn]int
 	closed      bool
+	hbStarted   bool
+	hbStop      chan struct{}
 }
 
 // NewMuxServer builds the mux owner. The opener is the Gateway stream
-// dispatcher.
-func NewMuxServer(open RemoteStreamOpener, logger cordis.Logger) *MuxServer {
+// dispatcher. heartbeatInterval is the ping cadence; zero selects the
+// default (20s, matching the upstream default argument).
+func NewMuxServer(open RemoteStreamOpener, logger cordis.Logger, heartbeatInterval time.Duration) *MuxServer {
+	if heartbeatInterval <= 0 {
+		heartbeatInterval = defaultHeartbeatInterval
+	}
 	return &MuxServer{
 		upgrader: websocket.Upgrader{
 			HandshakeTimeout: 10 * time.Second,
@@ -44,7 +64,9 @@ func NewMuxServer(open RemoteStreamOpener, logger cordis.Logger) *MuxServer {
 		},
 		open:        open,
 		logger:      logger,
+		interval:    heartbeatInterval,
 		connections: map[*websocket.Conn]struct{}{},
+		missed:      map[*websocket.Conn]int{},
 	}
 }
 
@@ -67,6 +89,12 @@ func (s *MuxServer) handleUpgrade(conn net.Conn, rw *bufio.ReadWriter, r *http.R
 	if err != nil {
 		return fmt.Errorf("remote mux upgrade: %w", err)
 	}
+	ws.SetPongHandler(func(string) error {
+		s.mu.Lock()
+		s.missed[ws] = 0
+		s.mu.Unlock()
+		return nil
+	})
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -74,9 +102,100 @@ func (s *MuxServer) handleUpgrade(conn net.Conn, rw *bufio.ReadWriter, r *http.R
 		return nil
 	}
 	s.connections[ws] = struct{}{}
+	s.missed[ws] = 0
+	s.startHeartbeatLocked()
 	s.mu.Unlock()
-	go s.runConnection(ws)
+	// Run the connection synchronously: the webserver registry closes the
+	// hijacked socket when the upgrade handler returns, so returning here
+	// while runConnection still reads would kill the socket under it. The
+	// registry's deferred Close then fires after the connection ends —
+	// idempotent and harmless.
+	s.runConnection(ws)
 	return nil
+}
+
+// startHeartbeatLocked starts the single shared heartbeat timer on the first
+// upgrade; it spans empty-client periods until Close (upstream startHeartbeat).
+func (s *MuxServer) startHeartbeatLocked() {
+	if s.hbStarted {
+		return
+	}
+	s.hbStarted = true
+	s.hbStop = make(chan struct{})
+	go s.heartbeatLoop()
+}
+
+// heartbeatLoop pings every open socket on the cadence and terminates
+// stalled ones with the upstream tolerance.
+func (s *MuxServer) heartbeatLoop() {
+	ticker := time.NewTicker(s.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			s.heartbeatTick()
+		case <-s.hbStop:
+			return
+		}
+	}
+}
+
+// heartbeatTick advances the missed counter for every open socket and
+// terminates sockets over the cap — through a deferred recheck so a delayed
+// pong arriving before the final check clears the count (upstream
+// setImmediate recheck). Network I/O (ping write) happens outside the lock:
+// a stalled peer's full TCP buffer must not stall the whole mux.
+func (s *MuxServer) heartbeatTick() {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	type stalled struct {
+		ws     *websocket.Conn
+		missed int
+	}
+	targets := make([]stalled, 0, len(s.connections))
+	pings := make([]*websocket.Conn, 0, len(s.connections))
+	for ws := range s.connections {
+		if s.missed[ws] >= maxMissedHeartbeats {
+			targets = append(targets, stalled{ws: ws, missed: s.missed[ws]})
+			continue
+		}
+		s.missed[ws]++
+		pings = append(pings, ws)
+	}
+	s.mu.Unlock()
+
+	for _, ws := range pings {
+		_ = ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
+	}
+	for _, target := range targets {
+		go s.terminateIfStillStalled(target.ws, target.missed)
+	}
+}
+
+// finalCheckDelay is the grace window between the missed-cap check and the
+// termination itself — the Go equivalent of the upstream setImmediate
+// recheck. It gives a pong that is already in flight time to arrive and
+// reset the counter before the socket is killed.
+const finalCheckDelay = 5 * time.Millisecond
+
+// terminateIfStillStalled rechecks the missed count before terminating: the
+// deferred recheck (finalCheckDelay) gives a just-arrived pong the chance to
+// reset the counter, so a host that merely stalls one beat longer than the
+// cadence survives.
+func (s *MuxServer) terminateIfStillStalled(ws *websocket.Conn, observed int) {
+	time.Sleep(finalCheckDelay)
+	s.mu.Lock()
+	if s.closed || s.missed[ws] != observed || s.missed[ws] < maxMissedHeartbeats {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.missed, ws)
+	delete(s.connections, ws)
+	s.mu.Unlock()
+	_ = ws.Close()
 }
 
 // runConnection reads client messages (open/close frames) and multiplexes
@@ -85,6 +204,7 @@ func (s *MuxServer) runConnection(ws *websocket.Conn) {
 	defer func() {
 		s.mu.Lock()
 		delete(s.connections, ws)
+		delete(s.missed, ws)
 		s.mu.Unlock()
 		_ = ws.Close()
 	}()
@@ -140,15 +260,24 @@ func (s *MuxServer) openStream(ws *websocket.Conn, msg clientMessage) {
 	}()
 }
 
-// Close terminates all sockets and waits until every iterator has returned.
+// Close terminates all sockets and stops the shared heartbeat timer, then
+// waits until every iterator has returned.
 func (s *MuxServer) Close() error {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
 	s.closed = true
+	if s.hbStarted {
+		close(s.hbStop)
+	}
 	conns := make([]*websocket.Conn, 0, len(s.connections))
 	for conn := range s.connections {
 		conns = append(conns, conn)
 	}
 	s.connections = map[*websocket.Conn]struct{}{}
+	s.missed = map[*websocket.Conn]int{}
 	s.mu.Unlock()
 	for _, conn := range conns {
 		_ = conn.Close()
