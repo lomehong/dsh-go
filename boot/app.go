@@ -97,7 +97,14 @@ func (a *App) mount(ctx *cordis.Context, entries []loader.Entry, resolver Plugin
 		config := entry.Config
 		applied := spec.Apply
 		if err := ctx.Inject(inject, func(injected *cordis.Context) error {
-			return applied(injected, config)
+			// The official loader evaluates `!!js` config expressions
+			// against the activation context right before Apply — injected
+			// services (e.g. webStartup) must be resolvable here.
+			evaluated, evalErr := evaluateConfig(injected, config)
+			if evalErr != nil {
+				return fmt.Errorf("failed to evaluate loader entry %s (%s) config: %v", entry.ID, entry.Name, evalErr)
+			}
+			return applied(injected, evaluated)
 		}); err != nil {
 			return fmt.Errorf("failed to apply loader entry %s (%s): %v", entry.ID, entry.Name, err)
 		}
