@@ -70,11 +70,17 @@ func run() error {
 	flag.Parse()
 
 	args := flag.Args()
-	// The web-startup row parses --no-open from the inner arguments; Go's
-	// flag package consumes the launcher-level declaration above, so it is
-	// re-injected into the inner args for the composition to see.
+	// Launcher-level flags the web-startup row parses from the inner
+	// arguments are re-injected so the composition sees them (Go's flag
+	// package consumes the launcher declarations).
 	if *noOpen {
 		args = append(args, "--no-open")
+	}
+	if *port != defaultWebPort {
+		args = append(args, "--port", *port)
+	}
+	if *host != defaultWebHost {
+		args = append(args, "--host", *host)
 	}
 	if aliasProfile, web := webAlias(args); web {
 		*profile = aliasProfile
@@ -164,21 +170,15 @@ func serveWeb(app *boot.App, anchor string, host string, port string, logger cor
 	if err != nil {
 		return err
 	}
-	web, err := webhost.Mount(registry, app.Root(), dist, logger)
-	if err != nil {
+	// The catalog webserver row owns the bind (r85); the launcher only
+	// mounts the dist fallback over the same registry — never re-listens.
+	if _, err := webhost.Mount(registry, app.Root(), dist, logger); err != nil {
 		return err
 	}
-	if err := web.Listen(host, port); err != nil {
-		return err
-	}
-	fmt.Printf("dsh web: http://%s\n", web.Addr().String())
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 	fmt.Println("dsh: shutting down")
-	if err := web.Close(); err != nil {
-		logger.Warn(fmt.Sprintf("web: close: %v", err))
-	}
 	return app.Shutdown()
 }
