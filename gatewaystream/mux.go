@@ -46,6 +46,7 @@ type MuxServer struct {
 	closed      bool
 	hbStarted   bool
 	hbStop      chan struct{}
+	schedule    finalizeScheduler
 }
 
 // NewMuxServer builds the mux owner. The opener is the Gateway stream
@@ -175,27 +176,52 @@ func (s *MuxServer) heartbeatTick() {
 	}
 }
 
+// scheduleFinalize schedules the deferred missed-count recheck; production
+// uses a real goroutine delay, tests substitute a deterministic driver via
+// SetFinalizeScheduler.
+type finalizeScheduler func(func())
+
 // finalCheckDelay is the grace window between the missed-cap check and the
 // termination itself — the Go equivalent of the upstream setImmediate
 // recheck. It gives a pong that is already in flight time to arrive and
 // reset the counter before the socket is killed.
 const finalCheckDelay = 5 * time.Millisecond
 
+// finalize schedules the final recheck through the configured scheduler.
+func (s *MuxServer) finalize(fn func()) {
+	if s.schedule != nil {
+		s.schedule(fn)
+		return
+	}
+	time.Sleep(finalCheckDelay)
+	fn()
+}
+
+// SetFinalizeScheduler installs a deterministic scheduler for the deferred
+// missed-count recheck (test seam; the upstream setImmediate mock analogue).
+// nil restores the production goroutine+delay path.
+func (s *MuxServer) SetFinalizeScheduler(schedule finalizeScheduler) {
+	s.mu.Lock()
+	s.schedule = schedule
+	s.mu.Unlock()
+}
+
 // terminateIfStillStalled rechecks the missed count before terminating: the
 // deferred recheck (finalCheckDelay) gives a just-arrived pong the chance to
 // reset the counter, so a host that merely stalls one beat longer than the
 // cadence survives.
 func (s *MuxServer) terminateIfStillStalled(ws *websocket.Conn, observed int) {
-	time.Sleep(finalCheckDelay)
-	s.mu.Lock()
-	if s.closed || s.missed[ws] != observed || s.missed[ws] < maxMissedHeartbeats {
+	s.finalize(func() {
+		s.mu.Lock()
+		if s.closed || s.missed[ws] != observed || s.missed[ws] < maxMissedHeartbeats {
+			s.mu.Unlock()
+			return
+		}
+		delete(s.missed, ws)
+		delete(s.connections, ws)
 		s.mu.Unlock()
-		return
-	}
-	delete(s.missed, ws)
-	delete(s.connections, ws)
-	s.mu.Unlock()
-	_ = ws.Close()
+		_ = ws.Close()
+	})
 }
 
 // runConnection reads client messages (open/close frames) and multiplexes

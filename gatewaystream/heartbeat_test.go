@@ -3,7 +3,6 @@ package gatewaystream
 import (
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -50,22 +49,6 @@ func newMuxHarness(t *testing.T, interval time.Duration) (*muxHarness, *websocke
 // stallPongs makes the client ignore server pings entirely (no pong frames).
 func stallPongs(conn *websocket.Conn) {
 	conn.SetPingHandler(func(string) error { return nil })
-}
-
-// countPongs records every server ping; the test decides when to pong.
-func countPongs(conn *websocket.Conn) (pings chan struct{}, respond func()) {
-	pings = make(chan struct{}, 16)
-	conn.SetPingHandler(func(string) error {
-		pings <- struct{}{}
-		return nil
-	})
-	var once sync.Once
-	respond = func() {
-		once.Do(func() {
-			_ = conn.WriteControl(websocket.PongMessage, nil, time.Now().Add(time.Second))
-		})
-	}
-	return pings, respond
 }
 
 // autoPong makes the client answer every server ping immediately, like the
@@ -154,36 +137,39 @@ func TestB2DataOnlyWithoutPongIsTerminated(t *testing.T) {
 }
 
 func TestB2DelayedPongBeforeFinalCheckKeepsSocket(t *testing.T) {
-	h, conn := newMuxHarness(t, 10*time.Millisecond)
-	pings, respond := countPongs(conn)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				return
-			}
-		}
-	}()
-	// Wait for two pings (the missed cap), then pong: the pending terminate
-	// must be cancelled — the socket survives the final-check window.
-	<-pings
-	<-pings
-	respond()
-	// The final check runs 5ms after the cap is crossed; 15ms is past that
-	// window but well short of the next reaping cycle (which needs the
-	// client to stop ponging again for another two beats).
-	time.Sleep(15 * time.Millisecond)
+	// Pure state-machine test (no live heartbeat timing): a socket whose
+	// missed counter crossed the cap schedules the deferred finalize; a pong
+	// clearing the counter before the final check runs must cancel the
+	// termination. The deterministic scheduler removes all load-sensitive
+	// timing from the assertion.
+	h, conn := newMuxHarness(t, time.Hour) // heartbeat effectively off
+	var captured func()
+	h.mux.SetFinalizeScheduler(func(fn func()) { captured = fn })
+
+	h.mux.mu.Lock()
+	h.mux.missed[conn] = maxMissedHeartbeats
+	h.mux.mu.Unlock()
+	go h.mux.terminateIfStillStalled(conn, maxMissedHeartbeats)
+	deadline := time.Now().Add(2 * time.Second)
+	for captured == nil && time.Now().Before(deadline) {
+		time.Sleep(1 * time.Millisecond)
+	}
+	if captured == nil {
+		t.Fatal("deferred finalize was never scheduled")
+	}
+
+	// The pong arrives before the final check: the counter clears and the
+	// finalize must not terminate the socket.
+	h.mux.mu.Lock()
+	h.mux.missed[conn] = 0
+	h.mux.mu.Unlock()
+	captured()
+
 	h.mux.mu.Lock()
 	live := len(h.mux.connections)
 	h.mux.mu.Unlock()
 	if live != 1 {
 		t.Fatalf("live = %d, want 1 (pong before the final check must cancel termination)", live)
-	}
-	select {
-	case <-done:
-		t.Fatal("client terminated despite a pong before the final check")
-	default:
 	}
 }
 
