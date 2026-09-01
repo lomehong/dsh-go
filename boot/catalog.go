@@ -3588,12 +3588,14 @@ func dshHome() string {
 }
 
 // parseWebStartup parses the `dsh web` flag family from the launcher inner
-// args (official web-startup planWebStartup): --host/--port/--dev and
-// repeatable --trusted-host, with the web-app bundle's deployment
-// fallbacks. --port must be a positive integer.
+// args (official web-app startup.ts apply): --host/--port/--no-open and
+// repeatable --trusted-host. --host 0.0.0.0 is refused for safety (the
+// official security rejection verbatim); --port must be numeric. The
+// service carries openBrowser (default true; --no-open clears it), the
+// conditionally-present host/port, and the accumulated trusted hosts.
 func parseWebStartup(args []string) (map[string]any, error) {
 	values := map[string]any{
-		"mode":         "production",
+		"openBrowser":  true,
 		"trustedHosts": []any{},
 	}
 	for index := 0; index < len(args); index++ {
@@ -3607,9 +3609,16 @@ func parseWebStartup(args []string) (map[string]any, error) {
 		}
 		switch {
 		case arg == "--host":
-			if value, ok := next(); ok {
-				values["host"] = value
+			value, ok := next()
+			if !ok {
+				return nil, fmt.Errorf("error: --host needs a value")
 			}
+			if value == "0.0.0.0" {
+				return nil, fmt.Errorf("error: --host 0.0.0.0 is intentionally not supported yet for safety: it would expose remote code execution to the network; use 127.0.0.1 instead")
+			}
+			values["host"] = value
+		case arg == "--no-open":
+			values["openBrowser"] = false
 		case arg == "--port":
 			value, ok := next()
 			if !ok {
@@ -3623,8 +3632,6 @@ func parseWebStartup(args []string) (map[string]any, error) {
 				port = port*10 + int(digit-'0')
 			}
 			values["port"] = float64(port)
-		case arg == "--dev":
-			values["mode"] = "development"
 		case arg == "--trusted-host":
 			value, ok := next()
 			if !ok {

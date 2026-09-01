@@ -192,26 +192,39 @@ func TestEvaluateConfigWalksNestedMaps(t *testing.T) {
 
 func TestParseWebStartup(t *testing.T) {
 	values, err := parseWebStartup(nil)
-	if err != nil || values["mode"] != "production" {
+	if err != nil || values["openBrowser"] != true {
 		t.Fatalf("empty = %+v %v", values, err)
 	}
 	hosts, _ := values["trustedHosts"].([]any)
 	if len(hosts) != 0 {
 		t.Fatalf("empty trustedHosts = %v", hosts)
 	}
-	values, err = parseWebStartup([]string{"--host", "0.0.0.0", "--port", "8080", "--dev", "--trusted-host", "a.internal", "--trusted-host", "b:443"})
+	values, err = parseWebStartup([]string{"--host", "127.0.0.1", "--port", "8080", "--no-open", "--trusted-host", "a.internal", "--trusted-host", "b:443"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if values["host"] != "0.0.0.0" || values["port"] != float64(8080) || values["mode"] != "development" {
+	if values["host"] != "127.0.0.1" || values["port"] != float64(8080) || values["openBrowser"] != false {
 		t.Fatalf("values = %+v", values)
 	}
 	hosts, _ = values["trustedHosts"].([]any)
 	if len(hosts) != 2 || hosts[0] != "a.internal" || hosts[1] != "b:443" {
 		t.Fatalf("trustedHosts = %v", hosts)
 	}
+	// openBrowser defaults true and --host is conditionally present.
+	values, err = parseWebStartup([]string{"--port", "0"})
+	if err != nil || values["openBrowser"] != true || values["port"] != float64(0) {
+		t.Fatalf("defaults = %+v %v", values, err)
+	}
+	if _, ok := values["host"]; ok {
+		t.Fatal("host must be absent when --host is not named")
+	}
 	if _, err := parseWebStartup([]string{"--port", "abc"}); err == nil ||
 		!strings.Contains(err.Error(), "must be a number") {
 		t.Fatalf("bad port err = %v", err)
+	}
+	// The safety rejection: 0.0.0.0 must be refused verbatim.
+	if _, err := parseWebStartup([]string{"--host", "0.0.0.0"}); err == nil ||
+		!strings.Contains(err.Error(), "is intentionally not supported yet for safety") {
+		t.Fatalf("0.0.0.0 err = %v", err)
 	}
 }
