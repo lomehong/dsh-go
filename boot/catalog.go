@@ -3672,7 +3672,9 @@ func bindWebServer(ctx *cordis.Context, logger cordis.Logger, host, port string)
 	})
 	return ctx.Effect(func() (cordis.Disposer, error) {
 		return cordis.Disposer(func() {
-			if err := server.Close(); err != nil {
+			// A closed server reports http.ErrServerClosed; that is the
+			// normal shutdown outcome, never a failure to propagate.
+			if err := server.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Warn(fmt.Sprintf("web: server close: %v", err))
 			}
 			registry.Close()
