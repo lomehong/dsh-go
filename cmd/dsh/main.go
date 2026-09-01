@@ -65,10 +65,17 @@ func run() error {
 	list := flag.Bool("list", false, "print the composed services and exit")
 	host := flag.String("host", defaultWebHost, "web bind host (0.0.0.0 reaches it from another machine)")
 	port := flag.String("port", defaultWebPort, "web listen port (0 lets the OS pick a free one)")
+	noOpen := flag.Bool("no-open", false, "web: do not open the Web UI in the default browser")
 	os.Args = append([]string{os.Args[0]}, normalizeWebAlias(os.Args[1:])...)
 	flag.Parse()
 
 	args := flag.Args()
+	// The web-startup row parses --no-open from the inner arguments; Go's
+	// flag package consumes the launcher-level declaration above, so it is
+	// re-injected into the inner args for the composition to see.
+	if *noOpen {
+		args = append(args, "--no-open")
+	}
 	if aliasProfile, web := webAlias(args); web {
 		*profile = aliasProfile
 	}

@@ -407,7 +407,7 @@ var builders = map[string]pluginBuilder{
 	// prints the URL line (+ default-browser handoff when openBrowser).
 	"@deepseek-ai/dsh-web-app": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
-			Inject:  []string{"webStartup", ServiceWebServer},
+			Inject:  []string{"webStartup", ServiceWebServer, ServiceShellEnv},
 			Provide: []string{"webRuntime"},
 			Apply: func(ctx *cordis.Context, config any) error {
 				startup, _ := ctx.Get("webStartup").(map[string]any)
@@ -430,6 +430,22 @@ var builders = map[string]pluginBuilder{
 					"lanAddresses": runtime.lanAddresses,
 					"trustedHosts": runtime.trustedHosts,
 				})
+				// Surface context (official surfaceContext): the
+				// DSH_WEB_URL bash variable names the canonical GUI URL for
+				// the session's shell.
+				if shellEnv := ctx.Get(ServiceShellEnv).(*shell.ShellEnvRegistry); shellEnv != nil {
+					url := fmt.Sprintf("http://127.0.0.1:%d", int(port))
+					_, regErr := shellEnv.Register(shell.BashEnvContributor{
+						Name:      "web-runtime",
+						Variables: map[string]shell.BashEnvVariable{shell.DshEnvPrefix + "WEB_URL": {Description: "Canonical local URL of the DeepSeek Harness Web GUI serving this session."}},
+						Resolve: func(*tools.ToolExecution) map[string]string {
+							return map[string]string{shell.DshEnvPrefix + "WEB_URL": url}
+						},
+					})
+					if regErr != nil {
+						return regErr
+					}
+				}
 				// Mount the frontend dist fallback owner (official
 				// frontend-static over the dist index).
 				if dist, distErr := webhost.ResolveFrontendDist(deps.Anchor); distErr == nil {
