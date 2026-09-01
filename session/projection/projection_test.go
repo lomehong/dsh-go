@@ -2,6 +2,7 @@ package projection
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -412,4 +413,347 @@ func TestViewCheckpointFiltersUnusableRows(t *testing.T) {
 	if len(values) != 1 || values["count"].(map[string]any)["count"] != 9 {
 		t.Fatalf("values = %+v", values)
 	}
+}
+
+// --- B1: identity-gated change feed (upstream alpha.3) --------------------
+
+// stableViewState carries a working draft field beside the wire marks slice;
+// the view projects only marks, whose identity survives draft-only applies.
+type stableViewState struct {
+	revision int
+	marks    []string
+}
+
+// stableViewDef builds a unit whose view returns the state's marks slice
+// directly (identity-stable across draft-only applies).
+func stableViewDef(key string, stateVersion int) Definition {
+	return Definition{
+		Key:          key,
+		StateVersion: stateVersion,
+		Init:         func(session.SessionHeader) any { return &stableViewState{marks: []string{}} },
+		Apply: func(state any, event session.Event) any {
+			current := state.(*stableViewState)
+			switch event.Type {
+			case session.EventTurnStart:
+				return &stableViewState{revision: current.revision + 1, marks: current.marks}
+			case "test/mark":
+				var data struct {
+					Marks []string `json:"marks"`
+				}
+				if err := json.Unmarshal(event.Data, &data); err != nil {
+					return state
+				}
+				return &stableViewState{revision: current.revision + 1, marks: data.Marks}
+			default:
+				return state
+			}
+		},
+		Wire: &WireView{View: func(state any) any {
+			return state.(*stableViewState).marks
+		}},
+		DecodeState: decodeStableViewState,
+	}
+}
+
+func decodeStableViewState(raw json.RawMessage) (any, error) {
+	var state stableViewState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// appendMark folds one test/mark event (B1 fixtures use the upstream mark
+// vocabulary).
+func appendMark(t *testing.T, sess *session.Session, marks []string) {
+	t.Helper()
+	if _, err := sess.Append("test/mark", map[string]any{"marks": marks}, nil); err != nil {
+		t.Fatalf("test/mark: %v", err)
+	}
+}
+
+// collectKeys gathers change-feed notifications by key.
+func collectKeys(t *testing.T, registry *Registry, sess *session.Session, keys []string) []string {
+	t.Helper()
+	var out []string
+	registry.OnChanged(func(_ *session.Session, key string, _ any, _ int64) {
+		for _, want := range keys {
+			if key == want {
+				out = append(out, key)
+			}
+		}
+	})
+	for _, event := range sess.Events() {
+		registry.Drive(sess, event)
+	}
+	return out
+}
+
+// drivePending folds every not-yet-observed event through the registry (the
+// eager drive the cordis session/event subscription performs in production).
+func drivePending(t *testing.T, registry *Registry, sess *session.Session) {
+	t.Helper()
+	for _, event := range sess.Events() {
+		registry.Drive(sess, event)
+	}
+}
+
+func TestB1IdentityGatedFeedSuppressesStableDraftViews(t *testing.T) {
+	registry := NewRegistry()
+	if _, err := registry.Register(stableViewDef("stable", 1)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	sess := newTestSession(t, "s1")
+	appendTurn(t, sess, 1) // draft-only: state changes, view (marks slice) identical
+	drivePending(t, registry, sess)
+	var notified []int64
+	registry.OnChanged(func(_ *session.Session, key string, _ any, seq int64) {
+		if key == "stable" {
+			notified = append(notified, seq)
+		}
+	})
+	appendMark(t, sess, []string{"a"}) // view changes: fire
+	drivePending(t, registry, sess)
+	appendTurn(t, sess, 2) // draft-only: silent
+	appendTurn(t, sess, 3) // draft-only: silent
+	drivePending(t, registry, sess)
+	appendMark(t, sess, []string{"a", "b"}) // view changes: fire
+	drivePending(t, registry, sess)
+	if len(notified) != 2 {
+		t.Fatalf("notifications = %v, want 2 (draft-only applies stay quiet)", notified)
+	}
+}
+
+func TestB1UnobservedChangeInvalidatesBaseline(t *testing.T) {
+	registry := NewRegistry()
+	if _, err := registry.Register(stableViewDef("stable", 1)); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	sess := newTestSession(t, "s1")
+	// Heard change establishes the baseline.
+	var first []int64
+	stop := registry.OnChanged(func(_ *session.Session, key string, _ any, seq int64) {
+		if key == "stable" {
+			first = append(first, seq)
+		}
+	})
+	appendTurn(t, sess, 1)
+	drivePending(t, registry, sess)
+	stop()
+	// Unobserved change must invalidate the comparison baseline.
+	appendTurn(t, sess, 2)
+	drivePending(t, registry, sess)
+	var resumed []int64
+	registry.OnChanged(func(_ *session.Session, key string, _ any, seq int64) {
+		if key == "stable" {
+			resumed = append(resumed, seq)
+		}
+	})
+	appendTurn(t, sess, 3)
+	drivePending(t, registry, sess)
+	if len(first) != 1 || len(resumed) != 1 {
+		t.Fatalf("first = %v resumed = %v, want both to fire once", first, resumed)
+	}
+}
+
+func TestB1NoListenerSkipsViewComputation(t *testing.T) {
+	registry := NewRegistry()
+	calls := 0
+	def := stableViewDef("stable", 1)
+	def.Wire.View = func(state any) any {
+		calls++
+		return state.(*stableViewState).marks
+	}
+	if _, err := registry.Register(def); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	sess := newTestSession(t, "s1")
+	appendMark(t, sess, []string{"a"})
+	drivePending(t, registry, sess)
+	if calls != 0 {
+		t.Fatalf("view computed %d times without a listener, want 0", calls)
+	}
+	registry.OnChanged(func(*session.Session, string, any, int64) {})
+	appendMark(t, sess, []string{"a", "b"})
+	drivePending(t, registry, sess)
+	if calls != 1 {
+		t.Fatalf("view computed %d times with a listener, want 1", calls)
+	}
+}
+
+// identitySequences enumerates every view-identity assignment for a state
+// sequence: value i means the i-th state's raw view shares the reference
+// group `i`. Mirrors the upstream exhaustive generator (registry.spec.ts).
+func identitySequences(length int) [][]int {
+	var sequences [][]int
+	var visit func(sequence []int, highest int)
+	visit = func(sequence []int, highest int) {
+		if len(sequence) == length {
+			seq := make([]int, len(sequence))
+			copy(seq, sequence)
+			sequences = append(sequences, seq)
+			return
+		}
+		for value := 0; value <= highest+1; value++ {
+			visit(append(sequence, value), max(highest, value))
+		}
+	}
+	visit([]int{0}, 0)
+	return sequences
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// TestB1ExhaustiveIdentitySequences replicates the upstream exhaustive
+// property test: every four-state identity sequence across listener gaps and
+// raw-view identities must match the reference model. 15 state sequences x
+// identity assignments x 2 baselines x 8 listener masks.
+func TestB1ExhaustiveIdentitySequences(t *testing.T) {
+	stateSequences := [][]int{
+		{0, 0, 0, 0}, {0, 0, 0, 1}, {0, 0, 1, 0}, {0, 0, 1, 1}, {0, 0, 1, 2},
+		{0, 1, 0, 0}, {0, 1, 0, 1}, {0, 1, 0, 2}, {0, 1, 1, 0}, {0, 1, 1, 1},
+		{0, 1, 1, 2}, {0, 1, 2, 0}, {0, 1, 2, 1}, {0, 1, 2, 2}, {0, 1, 2, 3},
+	}
+	mismatches := 0
+	checked := 0
+	for _, stateSequence := range stateSequences {
+		stateCount := 0
+		for _, v := range stateSequence {
+			if v+1 > stateCount {
+				stateCount = v + 1
+			}
+		}
+		for _, viewSequence := range identitySequences(stateCount) {
+			for _, baselineKnown := range []bool{false, true} {
+				for listenerMask := 0; listenerMask < 8; listenerMask++ {
+					checked++
+					// Build distinct states; each state's raw view is the
+					// stable slice of its identity group (states sharing a
+					// viewSequence index share one backing array — the
+					// reference identity the gate compares).
+					states := make([]any, stateCount)
+					groupCount := 0
+					for _, v := range viewSequence {
+						if v+1 > groupCount {
+							groupCount = v + 1
+						}
+					}
+					viewGroups := make([][]string, groupCount)
+					for group := 0; group < groupCount; group++ {
+						// A non-empty distinct backing array per group: empty
+						// slices alias the runtime zerobase address in Go, so
+						// two empty groups would compare pointer-equal and
+						// defeat the identity gate the test exercises.
+						viewGroups[group] = []string{fmt.Sprintf("g%d", group)}
+					}
+					for index := 0; index < stateCount; index++ {
+						states[index] = &stableViewState{marks: []string{fmt.Sprintf("s%d", index)}}
+					}
+					registry := NewRegistry()
+					_, _ = registry.Register(Definition{
+						Key:          "marks",
+						StateVersion: 1,
+						Init:         func(session.SessionHeader) any { return &stableViewState{marks: []string{"initial"}} },
+						Apply: func(state any, event session.Event) any {
+							var data struct {
+								Token string `json:"token"`
+							}
+							if err := json.Unmarshal(event.Data, &data); err != nil || data.Token == "" {
+								return state
+							}
+							for index := 0; index < len(stateSequence); index++ {
+								if data.Token == fmt.Sprintf("t%d", index) {
+									return states[stateSequence[index]]
+								}
+							}
+							return state
+						},
+						Wire: &WireView{View: func(state any) any {
+							st := state.(*stableViewState)
+							index := groupIndexOf(states, st)
+							return viewGroups[viewSequence[index]]
+						}},
+					})
+					sess := newTestSession(t, fmt.Sprintf("sess-%d", checked))
+					var notifications []int64
+					var stop func()
+					setListening := func(listening bool) {
+						if listening && stop == nil {
+							stop = registry.OnChanged(func(_ *session.Session, key string, _ any, seq int64) {
+								if key == "marks" {
+									notifications = append(notifications, seq)
+								}
+							})
+						} else if !listening && stop != nil {
+							stop()
+							stop = nil
+						}
+					}
+					setListening(baselineKnown)
+					if _, err := sess.Append("test/mark", map[string]any{"token": "t0"}, nil); err != nil {
+						t.Fatal(err)
+					}
+					drivePending(t, registry, sess)
+					notifications = nil
+
+					var expectedNotifications []int64
+					var comparable any
+					if baselineKnown {
+						comparable = viewGroups[viewSequence[stateSequence[0]]]
+					}
+					for index := 1; index < len(stateSequence); index++ {
+						listening := (listenerMask & (1 << (index - 1))) != 0
+						setListening(listening)
+						changed := stateSequence[index] != stateSequence[index-1]
+						if changed {
+							if listening {
+								current := viewGroups[viewSequence[stateSequence[index]]]
+								if comparable == nil || !sameView(comparable, current) {
+									expectedNotifications = append(expectedNotifications, int64(index))
+								}
+								comparable = current
+							} else {
+								comparable = nil
+							}
+						}
+						if _, err := sess.Append("test/mark", map[string]any{"token": fmt.Sprintf("t%d", index)}, nil); err != nil {
+							t.Fatal(err)
+						}
+						drivePending(t, registry, sess)
+					}
+					setListening(false)
+					if len(notifications) != len(expectedNotifications) {
+						mismatches++
+						t.Logf("seq %v view %v baseline %v mask %b: got %v want %v", stateSequence, viewSequence, baselineKnown, listenerMask, notifications, expectedNotifications)
+					} else {
+						for i := range notifications {
+							if notifications[i] != expectedNotifications[i] {
+								mismatches++
+								t.Logf("seq %v view %v baseline %v mask %b: notif %d = %d want %d", stateSequence, viewSequence, baselineKnown, listenerMask, i, notifications[i], expectedNotifications[i])
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if mismatches > 0 {
+		t.Fatalf("%d mismatches across %d scenarios", mismatches, checked)
+	}
+}
+
+// groupIndexOf finds a state's index in the states slice.
+func groupIndexOf(states []any, target *stableViewState) int {
+	for i, st := range states {
+		if st.(*stableViewState) == target {
+			return i
+		}
+	}
+	return 0
 }

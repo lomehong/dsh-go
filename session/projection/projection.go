@@ -173,6 +173,12 @@ type unitCell struct {
 	// observedSeq is the seq of the last event passed through Apply
 	// (regardless of change).
 	observedSeq int64
+	// views is the change-feed comparison buffer: [previousView,
+	// currentView]. A nil slot means no cached comparison. A changed state
+	// whose raw view is identical to the previous cached one does not fire
+	// the feed, so a unit can buffer working fields in state behind an
+	// identity-stable projection.
+	views [2]any
 }
 
 // registration is one live unit plus its per-session cells, ref-counted
@@ -619,8 +625,22 @@ func (r *Registry) Drive(sess *session.Session, event session.Event) {
 		changed := !sameReference(next, cell.state)
 		cell.state = next
 		cell.observedSeq = event.Seq
-		if changed && reg.def.Wire != nil && len(r.listeners) > 0 {
-			notifications = append(notifications, notification{reg: reg, value: reg.viewCell(cell), seq: event.Seq})
+		if changed && reg.def.Wire != nil {
+			// The view gate (upstream alpha.3, ceadd90e71+8322f804cb):
+			// baseline advances on every changed state, heard or not;
+			// without listeners the comparison is invalidated so the next
+			// heard change always fires. A changed state whose raw view is
+			// identical to the last delivered one stays quiet.
+			cell.views[0] = cell.views[1]
+			if len(r.listeners) > 0 {
+				raw := reg.def.Wire.View(cell.state)
+				cell.views[1] = raw
+				if !sameView(cell.views[0], cell.views[1]) {
+					notifications = append(notifications, notification{reg: reg, value: raw, seq: event.Seq})
+				}
+			} else {
+				cell.views[1] = nil
+			}
 		}
 	}
 	if len(notifications) == 0 {
@@ -733,6 +753,27 @@ func sameReference(a, b any) bool {
 		return va.Pointer() == vb.Pointer()
 	default:
 		return false
+	}
+}
+
+// sameView is the Object.is analogue for raw view outputs: reference kinds
+// compare by runtime pointer, comparable kinds by value. An identity-stable
+// view (the unit returns the same backing slice/map/pointer) reports equal;
+// a fresh-but-equal value reports unequal for reference kinds, matching the
+// upstream gate where only Object.is-identical projections stay quiet.
+func sameView(a, b any) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
+	if va.Kind() != vb.Kind() {
+		return false
+	}
+	switch va.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.UnsafePointer:
+		return va.Pointer() == vb.Pointer()
+	default:
+		return va.Comparable() && vb.Comparable() && va.Equal(vb)
 	}
 }
 
