@@ -15,11 +15,26 @@ import (
 )
 
 // recorderDriver stands in for the loop-owned driver: Followup and Inject
-// are recorded, everything else is inert.
+// are recorded, everything else is inert. A notify channel wakes waiters on
+// every recorded notice, so tests converge on delivery events instead of
+// polling a fixed interval (load-insensitive).
 type recorderDriver struct {
 	mu       sync.Mutex
 	followup []llm.Message
 	inject   []llm.Message
+	notify   chan struct{}
+}
+
+func newRecorderDriver() *recorderDriver {
+	return &recorderDriver{notify: make(chan struct{}, 1)}
+}
+
+// signal wakes one waiter; callers hold r.mu.
+func (r *recorderDriver) signal() {
+	select {
+	case r.notify <- struct{}{}:
+	default:
+	}
 }
 
 func (r *recorderDriver) Cancel(cause session.TurnEndCancelCause, options agent.CancelOptions) {}
@@ -35,12 +50,14 @@ func (r *recorderDriver) Send(message llm.Message, target agent.InboxTarget, wak
 func (r *recorderDriver) Followup(message llm.Message) {
 	r.mu.Lock()
 	r.followup = append(r.followup, message)
+	r.signal()
 	r.mu.Unlock()
 }
 func (r *recorderDriver) Steer(message llm.Message) {}
 func (r *recorderDriver) Inject(message llm.Message) {
 	r.mu.Lock()
 	r.inject = append(r.inject, message)
+	r.signal()
 	r.mu.Unlock()
 }
 
@@ -58,12 +75,13 @@ func (r *recorderDriver) Injects() []llm.Message {
 	return append([]llm.Message(nil), r.inject...)
 }
 
-// awaitNotices polls until the driver records the wanted counts. Settlement
+// awaitNotices waits until the driver records the wanted counts, waking on
+// every recorded notice instead of polling a fixed interval. Settlement
 // dispatch runs the delivery listener after the settled channel closes, so
 // the status-poll in settle() is not sufficient synchronization on its own.
 func awaitNotices(t *testing.T, driver *recorderDriver, wantFollowup, wantInject int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		followups, injects := driver.Followups(), driver.Injects()
 		if len(followups) == wantFollowup && len(injects) == wantInject {
@@ -72,7 +90,10 @@ func awaitNotices(t *testing.T, driver *recorderDriver, wantFollowup, wantInject
 		if time.Now().After(deadline) {
 			t.Fatalf("notices: followup=%d (want %d) inject=%d (want %d)", len(followups), wantFollowup, len(injects), wantInject)
 		}
-		time.Sleep(2 * time.Millisecond)
+		select {
+		case <-driver.notify:
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 }
 
@@ -108,7 +129,7 @@ func newLiveAgent(t *testing.T, id string) *liveAgent {
 	if _, err := registry.Enter(built, nil); err != nil {
 		t.Fatalf("Enter: %v", err)
 	}
-	driver := &recorderDriver{}
+	driver := newRecorderDriver()
 	built.SetDriver(driver)
 	return &liveAgent{Agent: built, driver: driver}
 }
