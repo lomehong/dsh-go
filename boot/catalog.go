@@ -370,6 +370,45 @@ var builders = map[string]pluginBuilder{
 		}
 	},
 
+	// The web app's command-line provider (official dsh-web-app/startup):
+	// parses the `dsh web` flag family (--host/--port/--dev/--trusted-host)
+	// from the launcher-provided inner args and publishes the immutable
+	// `webStartup` service rows inject.
+	"@deepseek-ai/dsh-web-app/startup": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{"cmdlineArgs"},
+			Provide: []string{"webStartup"},
+			Apply: func(ctx *cordis.Context, config any) error {
+				args, _ := ctx.Get("cmdlineArgs").([]string)
+				values, err := parseWebStartup(args)
+				if err != nil {
+					return err
+				}
+				ctx.Provide("webStartup", values)
+				return nil
+			},
+		}
+	},
+
+	// The web runtime glue (official dsh-web-app): resolves the built
+	// frontend dist, mounts the frontend-static fallback owner over the
+	// webserver, registers the web-surface prompt section and bash runtime
+	// variables, and prints the URL line. Injects webStartup for the
+	// invocation-only values and httpServer for the live bind.
+	"@deepseek-ai/dsh-web-app": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{"webStartup"},
+			Provide: []string{"webRuntime"},
+			Apply: func(ctx *cordis.Context, config any) error {
+				// webRuntime resolves bind-dependent values; the frontend
+				// mount and URL print land with the webserver bind (the
+				// httpServer row). This row publishes the runtime facts.
+				ctx.Provide("webRuntime", map[string]any{})
+				return nil
+			},
+		}
+	},
+
 	// The web server: route registry served over HTTP (official
 	// @deepseek-ai/dsh-host-webserver; the dsh-web specifier belongs to the
 	// web capability seam below).
@@ -3546,6 +3585,56 @@ func agentScopeKey(registry *agent.AgentRegistry) func(scope.ScopeKey) string {
 // dshHome resolves the harness home for the $events ready frame.
 func dshHome() string {
 	return homepaths.ResolveDshHome("", nil)
+}
+
+// parseWebStartup parses the `dsh web` flag family from the launcher inner
+// args (official web-startup planWebStartup): --host/--port/--dev and
+// repeatable --trusted-host, with the web-app bundle's deployment
+// fallbacks. --port must be a positive integer.
+func parseWebStartup(args []string) (map[string]any, error) {
+	values := map[string]any{
+		"mode":         "production",
+		"trustedHosts": []any{},
+	}
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		next := func() (string, bool) {
+			if index+1 < len(args) {
+				index++
+				return args[index], true
+			}
+			return "", false
+		}
+		switch {
+		case arg == "--host":
+			if value, ok := next(); ok {
+				values["host"] = value
+			}
+		case arg == "--port":
+			value, ok := next()
+			if !ok {
+				return nil, fmt.Errorf("error: --port needs a value")
+			}
+			port := 0
+			for _, digit := range value {
+				if digit < '0' || digit > '9' {
+					return nil, fmt.Errorf("error: --port must be a number, got %q", value)
+				}
+				port = port*10 + int(digit-'0')
+			}
+			values["port"] = float64(port)
+		case arg == "--dev":
+			values["mode"] = "development"
+		case arg == "--trusted-host":
+			value, ok := next()
+			if !ok {
+				return nil, fmt.Errorf("error: --trusted-host needs a value")
+			}
+			hosts, _ := values["trustedHosts"].([]any)
+			values["trustedHosts"] = append(hosts, value)
+		}
+	}
+	return values, nil
 }
 
 func init() {

@@ -72,7 +72,6 @@ func run() error {
 	if aliasProfile, web := webAlias(args); web {
 		*profile = aliasProfile
 	}
-
 	logger := cordis.StdLogger{}
 	anchorPath := *anchor
 	if anchorPath == "" {
@@ -83,10 +82,23 @@ func run() error {
 		anchorPath = filepath.Join(filepath.Dir(exe), "package.json")
 	}
 
-	app, warnings, err := boot.AssembleProfile("dsh", *profile, anchorPath, *home, boot.CatalogDeps{
-		Logger: logger,
-		Home:   *home,
-	})
+	var app *boot.App
+	var warnings []string
+	var err error
+	if *profile == "web" {
+		// The web profile's web-startup row parses its own flag family
+		// (--host/--port/--dev/--trusted-host) from the launcher's inner
+		// arguments, so they reach the composition via cmdlineArgs.
+		app, warnings, err = boot.AssembleProfileWithCmdline("dsh", *profile, anchorPath, *home, args, boot.CatalogDeps{
+			Logger: logger,
+			Home:   *home,
+		})
+	} else {
+		app, warnings, err = boot.AssembleProfile("dsh", *profile, anchorPath, *home, boot.CatalogDeps{
+			Logger: logger,
+			Home:   *home,
+		})
+	}
 	if err != nil {
 		return err
 	}

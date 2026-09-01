@@ -25,15 +25,47 @@ func AssembleProfile(binName, name, installAnchor, home string, deps CatalogDeps
 	if err != nil {
 		return nil, nil, err
 	}
+	return assembleLoaded(profile, deps, nil)
+}
+
+// AssembleProfileWithCmdline composes one profile like AssembleProfile but
+// provides the launcher's inner arguments as the `cmdlineArgs` service
+// before any entry mounts (official dsh-cmdline provideCmdline): an app
+// plugin injects cmdlineArgs and parses its own flag family.
+func AssembleProfileWithCmdline(binName, name, installAnchor, home string, args []string, deps CatalogDeps) (*App, []string, error) {
+	profile, err := LoadProfile(binName, name, installAnchor, home, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	return assembleLoaded(profile, deps, func(ctx *cordis.Context) {
+		ProvideCmdline(ctx, args)
+	})
+}
+
+// assembleLoaded shares the compose+mount tail between the cmdline and
+// plain entry points; the preMount hook runs on the root before Assemble.
+func assembleLoaded(profile *Profile, deps CatalogDeps, preMount func(*cordis.Context)) (*App, []string, error) {
 	layers := make([][]loader.Patch, 0, len(profile.Layers)+1)
 	for _, layer := range profile.Layers {
 		layers = append(layers, layer.Patches)
 	}
 	layers = append(layers, profile.Patches)
 	entries, warnings := ComposeEntries(layers...)
-	app, err := Assemble(cordis.NewRoot(deps.Logger), entries, NewCatalog(deps))
+	root := cordis.NewRoot(deps.Logger)
+	if preMount != nil {
+		preMount(root)
+	}
+	app, err := Assemble(root, entries, NewCatalog(deps))
 	if err != nil {
 		return nil, warnings, err
 	}
 	return app, warnings, nil
+}
+
+// ProvideCmdline provides the launcher's inner arguments as the
+// `cmdlineArgs` service (official dsh-cmdline provideCmdline). The args
+// snapshot is frozen; absent args provide an empty list.
+func ProvideCmdline(ctx *cordis.Context, args []string) {
+	snapshot := append([]string(nil), args...)
+	ctx.Provide("cmdlineArgs", snapshot)
 }

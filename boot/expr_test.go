@@ -189,3 +189,29 @@ func TestEvaluateConfigWalksNestedMaps(t *testing.T) {
 		t.Fatalf("plain = %v", evaled.(map[string]any)["plain"])
 	}
 }
+
+func TestParseWebStartup(t *testing.T) {
+	values, err := parseWebStartup(nil)
+	if err != nil || values["mode"] != "production" {
+		t.Fatalf("empty = %+v %v", values, err)
+	}
+	hosts, _ := values["trustedHosts"].([]any)
+	if len(hosts) != 0 {
+		t.Fatalf("empty trustedHosts = %v", hosts)
+	}
+	values, err = parseWebStartup([]string{"--host", "0.0.0.0", "--port", "8080", "--dev", "--trusted-host", "a.internal", "--trusted-host", "b:443"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["host"] != "0.0.0.0" || values["port"] != float64(8080) || values["mode"] != "development" {
+		t.Fatalf("values = %+v", values)
+	}
+	hosts, _ = values["trustedHosts"].([]any)
+	if len(hosts) != 2 || hosts[0] != "a.internal" || hosts[1] != "b:443" {
+		t.Fatalf("trustedHosts = %v", hosts)
+	}
+	if _, err := parseWebStartup([]string{"--port", "abc"}); err == nil ||
+		!strings.Contains(err.Error(), "must be a number") {
+		t.Fatalf("bad port err = %v", err)
+	}
+}
