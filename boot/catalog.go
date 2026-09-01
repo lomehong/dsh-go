@@ -1859,6 +1859,11 @@ var builders = map[string]pluginBuilder{
 	// The in-process fork provider: the child is seeded with the parent's
 	// completed-turn prefix. Config.providerName overrides fork.
 	"@deepseek-ai/dsh-subagent-fork-in-process": inProcessProviderSpec("fork"),
+	// The shipped base bundle names the in-process delegation providers by
+	// their upstream package names; both spellings resolve to the same
+	// provider builder (official config providerName overrides).
+	"@deepseek-ai/dsh-subagent-spawn": inProcessProviderSpec("spawn"),
+	"@deepseek-ai/dsh-subagent-fork":  inProcessProviderSpec("fork"),
 
 	// The Go-realm workflow engine: child runs fan out through the
 	// subagent runtime (the official workflowEngine inject; the official
@@ -3443,5 +3448,28 @@ func init() {
 			panic(fmt.Sprintf("boot: duplicate catalog builder for %s", name))
 		}
 		builders[name] = build
+	}
+	// Official-name aliases: the shipped bundles name some Go-portable rows
+	// by their upstream npm package names, while the Go port wired those
+	// implementations under the names its remote-line rounds used. Both
+	// spellings must resolve to the same spec — a composition never mixes
+	// them, so the alias shares the canonical builder verbatim.
+	officialNameAliases := map[string]string{
+		"@deepseek-ai/dsh-tasks-local":                     "@deepseek-ai/dsh-jobs-local",
+		"@deepseek-ai/dsh-settings-local":                  "@deepseek-ai/dsh-settings-file",
+		"@deepseek-ai/dsh-session-title-first-message-llm": "@deepseek-ai/dsh-session-title-first-prompt-llm",
+		"@deepseek-ai/dsh-repeat-tool-guard":               "@deepseek-ai/dsh-repeat-tool-reminder",
+		"@deepseek-ai/dsh-bash-env":                        "@deepseek-ai/dsh-shell-env",
+		"@deepseek-ai/dsh-skill-local":                     "@deepseek-ai/dsh-skill-filesystem",
+	}
+	for alias, canonical := range officialNameAliases {
+		build, ok := builders[canonical]
+		if !ok {
+			panic(fmt.Sprintf("boot: official-name alias %s points at missing canonical %s", alias, canonical))
+		}
+		if _, dup := builders[alias]; dup {
+			panic(fmt.Sprintf("boot: duplicate catalog builder for %s", alias))
+		}
+		builders[alias] = build
 	}
 }
