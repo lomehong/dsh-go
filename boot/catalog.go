@@ -46,7 +46,6 @@ import (
 	"dshgo/goalrounddriver"
 	"dshgo/guard"
 	"dshgo/homepaths"
-	"dshgo/host/webhost"
 	"dshgo/host/webserver"
 	"dshgo/interaction/permissionpresets"
 	"dshgo/interaction/userapproval"
@@ -446,13 +445,10 @@ var builders = map[string]pluginBuilder{
 						return regErr
 					}
 				}
-				// Mount the frontend dist fallback owner (official
-				// frontend-static over the dist index).
-				if dist, distErr := webhost.ResolveFrontendDist(deps.Anchor); distErr == nil {
-					if _, mountErr := webhost.Mount(registry, ctx, dist, deps.Logger); mountErr != nil {
-						return mountErr
-					}
-				}
+				// The frontend dist fallback owner is mounted once by the
+				// launcher (serveWeb, webhost.Mount) — a second registration
+				// here would collide on the registry's single fallback seat
+				// (official frontend-static is the composing owner's job).
 				// The URL line and browser handoff are readiness signals
 				// (official printUrl/handoffBrowser after Loader settles).
 				if cfg.printUrl || cfg.openBrowser {
