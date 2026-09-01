@@ -1623,6 +1623,37 @@ var builders = map[string]pluginBuilder{
 
 	// The user-questions waterfall: ask-user questions resolve through the
 	// typed request seam.
+	// The user-interaction bundle row (official dsh-user-interaction):
+	// composes the question and approval services in one row, matching the
+	// shipped base patch which names a single `user-interaction` entry.
+	"@deepseek-ai/dsh-user-interaction": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceAgents},
+			Provide: []string{ServiceUserQuestions, ServiceUserApproval},
+			Apply: func(ctx *cordis.Context, config any) error {
+				ctx.Provide(ServiceUserQuestions, userquestions.NewService(
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry)))
+				policy := userapproval.PolicyAsk
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["policy"].(string); ok && raw != "" {
+						policy = userapproval.ApprovalPolicy(raw)
+					}
+				}
+				cfg, err := userapproval.NewConfig(policy)
+				if err != nil {
+					return err
+				}
+				service, err := userapproval.NewService(
+					ctx.Get(ServiceAgents).(*agent.AgentRegistry), cfg)
+				if err != nil {
+					return err
+				}
+				ctx.Provide(ServiceUserApproval, service)
+				return nil
+			},
+		}
+	},
+
 	"@deepseek-ai/dsh-user-questions": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
 			Inject:  []string{ServiceAgents},
@@ -3461,6 +3492,9 @@ func init() {
 		"@deepseek-ai/dsh-repeat-tool-guard":               "@deepseek-ai/dsh-repeat-tool-reminder",
 		"@deepseek-ai/dsh-bash-env":                        "@deepseek-ai/dsh-shell-env",
 		"@deepseek-ai/dsh-skill-local":                     "@deepseek-ai/dsh-skill-filesystem",
+		"@deepseek-ai/dsh-timeout-policy":                  "@deepseek-ai/dsh-tool-call-timeout-policy",
+		"@deepseek-ai/dsh-fs-policy":                       "@deepseek-ai/dsh-fs-observation-policy",
+		"@deepseek-ai/dsh-permission":                      "@deepseek-ai/dsh-permission-presets",
 	}
 	for alias, canonical := range officialNameAliases {
 		build, ok := builders[canonical]

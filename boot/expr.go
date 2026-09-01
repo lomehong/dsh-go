@@ -113,21 +113,32 @@ func (p *exprParser) parseTernary(ec evalContext) (any, error) {
 	return whenFalse, nil
 }
 
-// parseNullish: equality ('??' nullish)?
+// parseNullish: equality (('??' | '||') nullish)?
 func (p *exprParser) parseNullish(ec evalContext) (any, error) {
 	left, err := p.parseEquality(ec)
 	if err != nil {
 		return nil, err
 	}
 	p.skipSpace()
-	if !p.consume("??") {
+	if p.consume("??") {
+		right, err := p.parseNullish(ec)
+		if err != nil {
+			return nil, err
+		}
+		if left == nil {
+			return right, nil
+		}
 		return left, nil
 	}
-	right, err := p.parseNullish(ec)
-	if err != nil {
-		return nil, err
-	}
-	if left == nil {
+	if p.consume("||") {
+		right, err := p.parseNullish(ec)
+		if err != nil {
+			return nil, err
+		}
+		// JS logical-or: the left operand when truthy, otherwise the right.
+		if isTruthy(left) {
+			return left, nil
+		}
 		return right, nil
 	}
 	return left, nil

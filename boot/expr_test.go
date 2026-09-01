@@ -134,6 +134,36 @@ func TestExprUnknownRootFailsLoud(t *testing.T) {
 	}
 }
 
+func TestExprLogicalOrOperator(t *testing.T) {
+	root := cordis.NewRoot(cordis.Discard{})
+	// The telemetry mode row uses `||` (not `??`): a set env wins, an empty
+	// one falls back — the exact base-bundle expression.
+	t.Setenv("DSH_TELEMETRY_MODE", "FULL")
+	value, err := evalOne(t, `process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY'`, root)
+	if err != nil || value != "FULL" {
+		t.Fatalf("set = %v %v", value, err)
+	}
+	t.Setenv("DSH_TELEMETRY_MODE", "")
+	value, err = evalOne(t, `process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY'`, root)
+	if err != nil || value != "FEEDBACK_ONLY" {
+		t.Fatalf("empty = %v %v", value, err)
+	}
+}
+
+func TestExprWebStartupOpenBrowser(t *testing.T) {
+	root := cordis.NewRoot(cordis.Discard{})
+	root.Provide("webStartup", map[string]any{"openBrowser": true})
+	value, err := evalOne(t, `ctx.webStartup.openBrowser`, root)
+	if err != nil || value != true {
+		t.Fatalf("openBrowser = %v %v", value, err)
+	}
+	// Absent field reads undefined (nil).
+	value, err = evalOne(t, `ctx.webStartup.openBrowser`, cordis.NewRoot(cordis.Discard{}))
+	if err != nil || value != nil {
+		t.Fatalf("absent = %v %v", value, err)
+	}
+}
+
 func TestEvaluateConfigWalksNestedMaps(t *testing.T) {
 	root := cordis.NewRoot(cordis.Discard{})
 	t.Setenv("DSH_EXPR_PROBE", "nested")
