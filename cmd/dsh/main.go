@@ -143,9 +143,13 @@ func serveWeb(app *boot.App, anchor string, host string, port string, logger cor
 	if registryValue == nil {
 		return fmt.Errorf("web: webServer service absent from profile %q", "web")
 	}
-	registry, ok := registryValue.(*webserver.Registry)
+	record, ok := registryValue.(map[string]any)
 	if !ok {
 		return fmt.Errorf("web: webServer service has type %T", registryValue)
+	}
+	registry, ok := record["registry"].(*webserver.Registry)
+	if !ok || registry == nil {
+		return fmt.Errorf("web: webServer registry missing from service record")
 	}
 	dist, err := webhost.ResolveFrontendDist(anchor)
 	if err != nil {

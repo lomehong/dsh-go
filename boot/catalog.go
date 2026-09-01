@@ -3660,10 +3660,15 @@ func bindWebServer(ctx *cordis.Context, logger cordis.Logger, host, port string)
 			logger.Error(fmt.Sprintf("web: server failed: %v", err))
 		}
 	}()
-	ctx.Provide(ServiceWebServer, registry)
-	ctx.Provide("webServer", map[string]any{
-		"host": boundHost,
-		"port": float64(bound.Port),
+	// The webServer service is one map carrying the registry and the live
+	// bind facts — the official single-object dual-consumer shape: the
+	// expression evaluator reads host/port via ctx.webServer.*, and the
+	// launcher takes the registry from the same map (no key collision from
+	// a second Provide).
+	ctx.Provide(ServiceWebServer, map[string]any{
+		"registry": registry,
+		"host":     boundHost,
+		"port":     float64(bound.Port),
 	})
 	return ctx.Effect(func() (cordis.Disposer, error) {
 		return cordis.Disposer(func() {
