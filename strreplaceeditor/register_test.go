@@ -15,7 +15,11 @@ import (
 
 func newHarness(t *testing.T) (*tools.ToolRuntime, *cordis.Context, string, func()) {
 	t.Helper()
-	backend, err := fslocal.New(fslocal.Config{Cwd: t.TempDir()})
+	cwd, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, err := fslocal.New(fslocal.Config{Cwd: cwd})
 	if err != nil {
 		t.Fatal(err)
 	}

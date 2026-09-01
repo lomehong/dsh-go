@@ -55,7 +55,10 @@ func TestResolutionPrecedenceApprovedOverOverrideOverDefault(t *testing.T) {
 		t.Fatalf("approved outranks override: %q", got)
 	}
 	// A session cwd replaces the workspace boundary.
-	sessionRoot := t.TempDir()
+	sessionRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := service.Resolve(sessionRoot, "", "").WorkspaceRoot; got != sessionRoot {
 		t.Fatalf("session cwd boundary: %q", got)
 	}

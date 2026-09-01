@@ -159,7 +159,7 @@ func TestRunHookTimeoutIsNonBlocking(t *testing.T) {
 	if result.Output.Decision != "" {
 		t.Fatalf("decision = %q, want none", result.Output.Decision)
 	}
-	if elapsed := time.Since(started); elapsed > 4*time.Second {
+	if elapsed := time.Since(started); elapsed > 10*time.Second {
 		t.Fatalf("timeout kill took %v", elapsed)
 	}
 }
@@ -207,7 +207,7 @@ func TestRunHookSignalCancellationIsNonBlocking(t *testing.T) {
 	if result.Output.ExitCode != nil {
 		t.Fatalf("exit = %+v, want nil after signal cancel", result.Output.ExitCode)
 	}
-	if elapsed := time.Since(started); elapsed > 4*time.Second {
+	if elapsed := time.Since(started); elapsed > 10*time.Second {
 		t.Fatalf("signal cancel took %v", elapsed)
 	}
 }

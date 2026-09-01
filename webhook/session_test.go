@@ -218,6 +218,10 @@ func newSessionFixture(t *testing.T) *sessionFixture {
 	bus := agent.NewAgentRegistry(host, nil)
 	factory := &fakeFactory{host: host, store: store, bus: bus, persistence: persistence}
 	logger := &recordingLogger{}
+	workspaceRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("canonicalize workspace root: %v", err)
+	}
 	fx := &sessionFixture{
 		t:         t,
 		host:      host,
@@ -226,7 +230,7 @@ func newSessionFixture(t *testing.T) *sessionFixture {
 		logger:    logger,
 		perms:     perms,
 		titles:    titles,
-		workspace: t.TempDir(),
+		workspace: workspaceRoot,
 	}
 	fx.deps = SessionDeps{
 		Logger: logger,

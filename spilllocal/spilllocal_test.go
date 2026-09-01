@@ -206,7 +206,10 @@ func TestSweepPrunesEmptySessionDirsAndDiscoveredRoots(t *testing.T) {
 }
 
 func TestDiscoveryMatchesExactShapeOnly(t *testing.T) {
-	base := t.TempDir()
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("canonicalize temp dir: %v", err)
+	}
 	real := filepath.Join(base, "dsh-spill-Zz9AbC")
 	fixture := filepath.Join(base, "dsh-spill-test-fixture")
 	file := filepath.Join(base, "dsh-spill-plainname")

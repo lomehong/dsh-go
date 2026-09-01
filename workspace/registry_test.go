@@ -56,13 +56,15 @@ var _ cordis.Logger = (*recordingLogger)(nil)
 
 // newRegistry builds a registry over a fresh json-backed facility. The
 // persistence root is shared with the cwd roots so the same directory the
-// headers name also exists.
+// headers name also exists. The root is canonicalized (the registry stores
+// realpath-normalized paths) so short-form temp dirs — e.g. Windows 8.3
+// TEMP — do not break path equality assertions.
 func newRegistry(t *testing.T, host RegistryHost) (*Registry, string) {
 	t.Helper()
 	if host.Logger == nil {
 		host.Logger = &recordingLogger{}
 	}
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	facility := storagedomain.NewFacility(
 		storagedomain.Config{Backend: "json"},
 		map[string]storagedomain.Backend{"json": storagejson.NewJsonStorageBackend(root)},
@@ -73,6 +75,19 @@ func newRegistry(t *testing.T, host RegistryHost) (*Registry, string) {
 	}
 	t.Cleanup(dispose)
 	return registry, root
+}
+
+// canonicalTempDir returns a realpath-normalized temp dir: the registry
+// stores EvalSymlinks-expanded paths, so fixtures built from raw
+// t.TempDir() paths break when TEMP is an 8.3 short form (Windows expands
+// short names to long ones).
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("canonicalize temp dir: %v", err)
+	}
+	return root
 }
 
 func TestCreateReusesCanonicalPathAndPrepends(t *testing.T) {
@@ -131,7 +146,7 @@ func TestCreateReusesCanonicalPathAndPrepends(t *testing.T) {
 }
 
 func TestHeaderValidatedMembershipAndFiltering(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	dirA := filepath.Join(root, "alpha")
 	dirB := filepath.Join(root, "beta")
 	for _, dir := range []string{dirA, dirB} {
@@ -179,7 +194,7 @@ func TestHeaderValidatedMembershipAndFiltering(t *testing.T) {
 }
 
 func TestBootstrapRanksByNewestThenPriorOrder(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	dirs := map[string]string{}
 	for _, name := range []string{"old", "new"} {
 		dir := filepath.Join(root, name)
