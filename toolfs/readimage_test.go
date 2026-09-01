@@ -230,7 +230,7 @@ func TestReadImageRefusalsBeforeAnyIO(t *testing.T) {
 		t.Fatalf("blank path: %v", err)
 	}
 	if err := run(map[string]any{"file_path": file + ".txt"}); err == nil ||
-		!strings.Contains(err.Error(), "read_image only accepts PNG/JPEG/WebP/GIF paths") {
+		!strings.Contains(err.Error(), "extension does not declare a supported image format") {
 		t.Fatalf("bad extension: %v", err)
 	}
 	if err := run(map[string]any{"file_path": file}); err == nil ||
@@ -306,3 +306,88 @@ func TestReadImageRefusalMapping(t *testing.T) {
 }
 
 var _ = fs.CodeNotFound
+
+func TestSniffImageMediaType(t *testing.T) {
+	cases := []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{"png", []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00}, attachment.MediaPNG},
+		{"jpeg", []byte{0xff, 0xd8, 0xff, 0xe0, 0x00}, attachment.MediaJPEG},
+		{"gif87", []byte("GIF87a..."), attachment.MediaGIF},
+		{"gif89", []byte("GIF89a..."), attachment.MediaGIF},
+		{"webp", append([]byte("RIFF"), append(make([]byte, 4), []byte("WEBP")...)...), attachment.MediaWebP},
+		{"empty", nil, ""},
+		{"garbage", []byte("not an image"), ""},
+		{"truncated-png", []byte{0x89, 0x50, 0x4e}, ""},
+	}
+	for _, tc := range cases {
+		if got := sniffImageMediaType(tc.data); got != tc.want {
+			t.Fatalf("%s: sniff = %q want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestReadImageExtensionlessPathSniffs(t *testing.T) {
+	backend, err := fslocal.New(fslocal.Config{Cwd: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := cordis.NewRoot(cordis.Discard{})
+	runtime, err := tools.NewToolRuntime(cordis.Discard{}, tools.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := agent.NewAgentRegistry(root, cordis.Discard{})
+	store := &fakeAttachmentStore{limits: testImageLimits()}
+	undo, err := Register(runtime, RegisterDeps{
+		Backend: backend, Ctx: root,
+		Agents:      RegistryAgentSource{Registry: registry},
+		Attachments: store,
+		Llm:         fakeLlmRoutes{modalities: []string{"text", "image"}},
+	}, DefaultCaps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer undo()
+	definition, ok := runtime.Get("read_image", nil)
+	if !ok {
+		t.Fatal("read_image not registered with a store")
+	}
+	agent1 := newRoutedAgent(t, registry, "deepseek", "vision-model")
+	// An extension-less file is accepted and identified from its signature.
+	extless := filepath.Join(backend.Cwd(), "attachment-object")
+	pngBytes, err := os.ReadFile(writeTinyPNG(t, backend.Cwd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(extless, pngBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := definition.Execute(map[string]any{"file_path": extless}, &tools.ToolRunContext{ToolExecution: tools.ToolExecution{Agent: agent1.Scope}, Signal: context.Background()})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	value, ok := outcome.(map[string]any)
+	if !ok {
+		t.Fatalf("outcome: %+v", outcome)
+	}
+	ref, ok := value["image"].(attachment.ImageAttachmentRef)
+	if !ok || ref.MediaType != attachment.MediaPNG {
+		t.Fatalf("ref: %+v", ref)
+	}
+	if store.lastSave.MediaType != attachment.MediaPNG {
+		t.Fatalf("save: %+v", store.lastSave)
+	}
+
+	// An extension-less file with unrecognized bytes is refused.
+	junk := filepath.Join(backend.Cwd(), "not-an-image")
+	if err := os.WriteFile(junk, []byte("definitely not an image signature"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := definition.Execute(map[string]any{"file_path": junk}, &tools.ToolRunContext{ToolExecution: tools.ToolExecution{Agent: agent1.Scope}, Signal: context.Background()}); err == nil ||
+		!strings.Contains(err.Error(), "file content is not a supported image format") {
+		t.Fatalf("junk extension-less: %v", err)
+	}
+}

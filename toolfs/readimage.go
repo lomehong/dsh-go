@@ -32,7 +32,8 @@ type LlmRouteSource interface {
 
 // imageMediaTypeForPath maps a model-supplied path to its declared image
 // media type by extension; magic-byte validation at the attachment service
-// stays authoritative.
+// stays authoritative. An extension-less path returns "" — the caller then
+// sniffs the file bytes.
 func imageMediaTypeForPath(filePath string) string {
 	switch strings.ToLower(path.Ext(filePath)) {
 	case ".png":
@@ -46,6 +47,28 @@ func imageMediaTypeForPath(filePath string) string {
 	default:
 		return ""
 	}
+}
+
+// sniffImageMediaType identifies a supported image container from its file
+// signature — the extension-less attachment-path path (upstream
+// sniffImageMediaType). The result names the container the leading bytes
+// claim; the attachment service's full decode stays authoritative.
+func sniffImageMediaType(data []byte) string {
+	if len(data) >= 8 &&
+		data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4e && data[3] == 0x47 &&
+		data[4] == 0x0d && data[5] == 0x0a && data[6] == 0x1a && data[7] == 0x0a {
+		return attachment.MediaPNG
+	}
+	if len(data) >= 3 && data[0] == 0xff && data[1] == 0xd8 && data[2] == 0xff {
+		return attachment.MediaJPEG
+	}
+	if len(data) >= 6 && (string(data[0:6]) == "GIF87a" || string(data[0:6]) == "GIF89a") {
+		return attachment.MediaGIF
+	}
+	if len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		return attachment.MediaWebP
+	}
+	return ""
 }
 
 // assertImageCapableRoute enforces the strict image-capability gate for the
@@ -160,25 +183,18 @@ func registerReadImage(runtime *tools.ToolRuntime, controller *controller, deps 
 			return nil, fmt.Errorf("file_path must be a non-empty string")
 		}
 		// Every gate runs before any filesystem I/O so a refusal never
-		// leaks partial reads or attachment writes.
-		mediaType := imageMediaTypeForPath(filePath)
-		if mediaType == "" {
-			return nil, fmt.Errorf("cannot read %q: read_image only accepts PNG/JPEG/WebP/GIF paths", filePath)
+		// leaks partial reads or attachment writes. The declared media type
+		// comes from the extension when one declares it; an extension-less
+		// path is accepted and identified from its file signature after the
+		// read (upstream read-image extensionless attachment paths).
+		declared := imageMediaTypeForPath(filePath)
+		if declared == "" && path.Ext(filePath) != "" {
+			return nil, fmt.Errorf("cannot read %q: the %s extension does not declare a supported image format; read_image accepts PNG/JPEG/WebP/GIF files, including extension-less files in those formats", filePath, strings.ToLower(path.Ext(filePath)))
 		}
 		if store == nil {
 			return nil, fmt.Errorf("cannot read %q as an image: no attachment service is mounted", filePath)
 		}
 		limits := store.ImageLimits()
-		accepted := false
-		for _, acceptedType := range limits.MediaTypes {
-			if acceptedType == mediaType {
-				accepted = true
-				break
-			}
-		}
-		if !accepted {
-			return nil, fmt.Errorf("cannot read %q: %s images are not accepted by this deployment", filePath, mediaType)
-		}
 		caller := deps.Agents.ResolveAgent(execScope(exec))
 		if err := assertImageCapableRoute(deps.Llm, caller, filePath); err != nil {
 			return nil, err
@@ -197,6 +213,23 @@ func registerReadImage(runtime *tools.ToolRuntime, controller *controller, deps 
 		data, err := deps.Backend.ReadBytes(ctx, target, byteCap)
 		if err != nil {
 			return nil, err
+		}
+		mediaType := declared
+		if mediaType == "" {
+			mediaType = sniffImageMediaType(data)
+		}
+		if mediaType == "" {
+			return nil, fmt.Errorf("cannot read %q: the file content is not a supported image format; read_image accepts PNG/JPEG/WebP/GIF", target.DisplayPath)
+		}
+		accepted := false
+		for _, acceptedType := range limits.MediaTypes {
+			if acceptedType == mediaType {
+				accepted = true
+				break
+			}
+		}
+		if !accepted {
+			return nil, fmt.Errorf("cannot read %q: %s images are not accepted by this deployment", target.DisplayPath, mediaType)
 		}
 		// Persist before returning: the image block must reference a
 		// durably committed object by the time the tool/result event is
