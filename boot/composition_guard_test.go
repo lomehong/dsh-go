@@ -141,3 +141,28 @@ func catalogKeys(t *testing.T) map[string]bool {
 	}
 	return keys
 }
+
+// TestWebserverRowOwnsBind is the v3 guard's catalog half (single listen
+// holder): the webserver catalog row must own net.Listen so the launcher
+// serveWeb never binds a second listener (r92 root cause: serveWeb's own
+// Listen collided with this row). The pair with cmd/dsh's
+// TestServeWebDoesNotListen locks the single-listener invariant.
+func TestWebserverRowOwnsBind(t *testing.T) {
+	raw, err := os.ReadFile("catalog.go")
+	if err != nil {
+		t.Fatalf("read catalog.go: %v", err)
+	}
+	src := string(raw)
+	start := strings.Index(src, "func bindWebServer(")
+	if start < 0 {
+		t.Fatal("bindWebServer not found in catalog.go")
+	}
+	next := strings.Index(src[start:], "\nfunc ")
+	if next < 0 {
+		next = len(src) - start
+	}
+	body := src[start : start+next]
+	if !strings.Contains(body, "net.Listen(") {
+		t.Fatal("bindWebServer must own net.Listen (catalog row is the single listen holder)")
+	}
+}
