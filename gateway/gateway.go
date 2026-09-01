@@ -110,11 +110,19 @@ type InvokeRequest struct {
 type Gateway struct {
 	ctx      *cordis.Context
 	registry *typert.Registry
+	remote   remoteEventsState
 }
 
 // New binds the dispatcher to one Host context and its Typert registry.
 func New(ctx *cordis.Context, registry *typert.Registry) *Gateway {
-	return &Gateway{ctx: ctx, registry: registry}
+	return &Gateway{
+		ctx:      ctx,
+		registry: registry,
+		remote: remoteEventsState{
+			clients: map[string]*RemoteEventClient{},
+			pending: map[string]*pendingRemoteEvent{},
+		},
+	}
 }
 
 // Invoke resolves the current descriptor and Cordis Service for the call,

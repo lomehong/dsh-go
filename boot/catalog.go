@@ -35,9 +35,11 @@ import (
 	"dshgo/fssandbox"
 	"dshgo/fssearch"
 	"dshgo/gateway"
+	"dshgo/gatewaystream"
 	"dshgo/goal"
 	"dshgo/goalrounddriver"
 	"dshgo/guard"
+	"dshgo/homepaths"
 	"dshgo/host/webserver"
 	"dshgo/interaction/permissionpresets"
 	"dshgo/interaction/userapproval"
@@ -52,6 +54,7 @@ import (
 	"dshgo/sandbox"
 	"dshgo/sandboxpolicy"
 	"dshgo/sandboxshell"
+	"dshgo/scope"
 	"dshgo/session"
 	"dshgo/session/persistence"
 	"dshgo/session/persistence/jsonl"
@@ -777,6 +780,30 @@ var builders = map[string]pluginBuilder{
 				}
 				ctx.Provide(ServiceTypertGateway, gateway.New(ctx, registry))
 				return nil
+			},
+		}
+	},
+
+	// The forwarded Remote event source (official dsh-api-remotes): bridges
+	// every allowlisted Host event into the gateway's $events stream. Each
+	// stream signal creates a fresh queue + listener set, detached on the
+	// signal end (official remoteEventSource).
+	"@deepseek-ai/dsh-api-remotes": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceTypertGateway, ServiceAgents},
+			Apply: func(ctx *cordis.Context, config any) error {
+				value, ok := ctx.Get(ServiceTypertGateway).(*gateway.Gateway)
+				if !ok {
+					return errors.New("api-remotes: typertGateway service is unavailable")
+				}
+				agents := ctx.Get(ServiceAgents).(*agent.AgentRegistry)
+				bus := agents.Events()
+				_, err := value.RegisterRemoteEvents(func(signal context.Context) gateway.RemoteEventDispatchIter {
+					queue := gatewaystream.NewRemoteEventQueue()
+					detach := gatewaystream.AttachForwardedEvents(queue, bus, agentScopeKey(agents))
+					return &remoteEventBridgeIter{queue: queue, detach: detach, signal: signal}
+				}, gatewaystream.RemoteEventHostInfo{Home: dshHome()})
+				return err
 			},
 		}
 	},
@@ -3473,6 +3500,54 @@ func optionalLLM(ctx *cordis.Context) *llm.Runtime {
 	return runtime
 }
 
+// remoteEventBridgeIter adapts a forwarding queue into the gateway's
+// dispatch iterator: every queue frame becomes a broadcast dispatch; the
+// iterator ends (and detaches the bridge) when the queue closes or the
+// signal aborts (official remoteEventSource per-signal lifecycle).
+type remoteEventBridgeIter struct {
+	queue  *gatewaystream.RemoteEventQueue
+	detach func()
+	signal context.Context
+}
+
+func (b *remoteEventBridgeIter) Next() (gateway.RemoteEventDispatch, bool) {
+	for {
+		if b.signal.Err() != nil {
+			return gateway.RemoteEventDispatch{}, false
+		}
+		frame, done := b.queue.Next()
+		if done {
+			return gateway.RemoteEventDispatch{}, false
+		}
+		return gateway.RemoteEventDispatch{Frame: frame}, true
+	}
+}
+
+func (b *remoteEventBridgeIter) Dispose() {
+	b.detach()
+}
+
+// agentScopeKey maps a scope key to the agent id the waterfall dispatch
+// needs (the bridge's ScopeKeys seam, via the registry's ByScope reverse
+// index).
+func agentScopeKey(registry *agent.AgentRegistry) func(scope.ScopeKey) string {
+	return func(key scope.ScopeKey) string {
+		if key == nil {
+			return ""
+		}
+		owner := registry.ByScope(key)
+		if owner == nil {
+			return ""
+		}
+		return string(owner.ID)
+	}
+}
+
+// dshHome resolves the harness home for the $events ready frame.
+func dshHome() string {
+	return homepaths.ResolveDshHome("", nil)
+}
+
 func init() {
 	for name, build := range batchThreeBuilders {
 		if _, dup := builders[name]; dup {
@@ -3496,6 +3571,7 @@ func init() {
 		"@deepseek-ai/dsh-fs-policy":                       "@deepseek-ai/dsh-fs-observation-policy",
 		"@deepseek-ai/dsh-permission":                      "@deepseek-ai/dsh-permission-presets",
 		"@deepseek-ai/dsh-goal-session":                    "@deepseek-ai/dsh-goal-round-driver",
+		"@deepseek-ai/dsh-host-apiproxy":                   "@deepseek-ai/dsh-api-gateway",
 	}
 	for alias, canonical := range officialNameAliases {
 		build, ok := builders[canonical]
