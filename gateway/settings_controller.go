@@ -37,18 +37,20 @@ func (c *SettingsController) CanOpenAgentPresetDirectory(ctx context.Context) (a
 	return false, nil
 }
 
-// Update merges a patch into one namespace's stored user section.
-func (c *SettingsController) Update(ctx context.Context, ns string, patch map[string]any, expectedRevision *float64) (any, error) {
+// Update merges a patch into one namespace's stored user section. The
+// optional expectedRevision rides as a decoded JSON number (any — a typed
+// pointer would panic under the reflection dispatcher when present).
+func (c *SettingsController) Update(ctx context.Context, ns string, patch map[string]any, expectedRevision any) (any, error) {
 	return absentProvider()
 }
 
 // Replace overwrites one namespace's stored user section wholesale.
-func (c *SettingsController) Replace(ctx context.Context, ns string, section map[string]any, expectedRevision *float64) (any, error) {
+func (c *SettingsController) Replace(ctx context.Context, ns string, section map[string]any, expectedRevision any) (any, error) {
 	return absentProvider()
 }
 
 // Mutate applies path-addressed edits to one namespace's user section.
-func (c *SettingsController) Mutate(ctx context.Context, ns string, ops []any, expectedRevision *float64) (any, error) {
+func (c *SettingsController) Mutate(ctx context.Context, ns string, ops []any, expectedRevision any) (any, error) {
 	return absentProvider()
 }
 

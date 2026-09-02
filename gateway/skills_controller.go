@@ -28,22 +28,18 @@ func NewSkillsController(engine *sessionquery.Engine) *SkillsController {
 	return &SkillsController{engine: engine}
 }
 
-// skillsListRequest is the wire request (official SkillListRequest).
-type skillsListRequest struct {
-	SessionID string `json:"sessionId"`
-}
-
 // List answers the user-invocable skills visible to one Session composition.
-func (c *SkillsController) List(ctx context.Context, request skillsListRequest) (any, error) {
+func (c *SkillsController) List(ctx context.Context, request map[string]any) (any, error) {
 	if c.engine == nil {
 		return nil, wrapGatewayError("gateway/internal", "skills/list", "", nil, "%s", skillsQueryUnavailable)
 	}
-	snapshot, err := c.engine.ReadSession(ctx, session.SessionID(request.SessionID))
+	sessionID, _ := request["sessionId"].(string)
+	snapshot, err := c.engine.ReadSession(ctx, session.SessionID(sessionID))
 	if err != nil {
-		return nil, wrapGatewayError("session/not-found", "skills/list", "", nil, "session %q not found", request.SessionID)
+		return nil, wrapGatewayError("session/not-found", "skills/list", "", nil, "session %q not found", sessionID)
 	}
 	if snapshot.Session.CWD == "" {
-		return nil, wrapGatewayError("gateway/internal", "skills/list", "", nil, "session %q has no project cwd", request.SessionID)
+		return nil, wrapGatewayError("gateway/internal", "skills/list", "", nil, "session %q has no project cwd", sessionID)
 	}
 	return map[string]any{"skills": []any{}}, nil
 }

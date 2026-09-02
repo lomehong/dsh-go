@@ -924,6 +924,22 @@ var builders = map[string]pluginBuilder{
 						return fmt.Errorf("api-gateway: directory picker controller: %w", err)
 					}
 				}
+				// The workspace Remote namespace wires only when the composition
+				// provides the workspace registry — minimal profiles (headless,
+				// test fixtures) skip it instead of failing the assembly.
+				if workspaceRegistryValue := ctx.Get(ServiceWorkspace); workspaceRegistryValue != nil {
+					if workspaceRegistry, ok := workspaceRegistryValue.(*workspace.Registry); ok && workspaceRegistry != nil {
+						workspaces := gateway.NewWorkspaceController(workspaceRegistry)
+						ctx.Provide("workspaceController", workspaces)
+						if _, exists := registry.GetPackage("workspace-controller", typert.FaceHost); !exists {
+							if _, err := registry.Register(workspaces.Contribution()); err != nil {
+								return fmt.Errorf("api-gateway: workspace controller: %w", err)
+							}
+						}
+					} else {
+						deps.Logger.Warn("api-gateway: workspace registry service has an unexpected type; workspace Remote namespace not registered")
+					}
+				}
 				return nil
 			},
 		}
