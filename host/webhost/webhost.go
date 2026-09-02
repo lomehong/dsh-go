@@ -62,11 +62,16 @@ type Host struct {
 	logger    cordis.Logger
 	graph     *bootGraph
 	responses map[string]servedResponse
+	unary     http.HandlerFunc
 
 	server *http.Server
 	addr   net.Addr
 	closed bool
 }
+
+// SetUnaryHandler installs the /api/ prefix carrier (the browser unary RPC
+// POST route). A nil handler leaves /api/ unserved (the fallback 404s it).
+func (h *Host) SetUnaryHandler(handler http.HandlerFunc) { h.unary = handler }
 
 // Mount registers the frontend fallback owner on the registry. The dist dir
 // must already be resolved; a missing index.html fails loud at mount. The
@@ -140,6 +145,10 @@ func (h *Host) Close() error {
 // their MIME type; any other path falls back to the rendered index (the SPA
 // entry). Path traversal outside the dist tree is rejected.
 func (h *Host) serve(w http.ResponseWriter, r *http.Request) error {
+	if strings.HasPrefix(r.URL.Path, "/api/") && h.unary != nil {
+		h.unary(w, r)
+		return nil
+	}
 	if strings.HasPrefix(r.URL.Path, "/plugins/") {
 		if r.URL.Path == "/plugins/events" {
 			return h.servePluginsEvents(w, r)

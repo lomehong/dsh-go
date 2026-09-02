@@ -11,9 +11,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"dshgo/boot"
 	"dshgo/cordis"
+	"dshgo/gateway"
+	"dshgo/gatewaystream"
 	"dshgo/host/webhost"
 	"dshgo/host/webserver"
 )
@@ -170,11 +173,20 @@ func serveWeb(app *boot.App, anchor string, host string, port string, logger cor
 	if err != nil {
 		return err
 	}
-	// The catalog webserver row owns the bind (r85); the launcher only
-	// mounts the dist fallback over the same registry — never re-listens.
-	if _, err := webhost.Mount(registry, app.Root(), dist, logger); err != nil {
+	mounted, err := webhost.Mount(registry, app.Root(), dist, logger)
+	if err != nil {
 		return err
 	}
+	gatewayValue := app.Root().Get(boot.ServiceTypertGateway)
+	gateway, ok := gatewayValue.(*gateway.Gateway)
+	if !ok || gateway == nil {
+		return fmt.Errorf("web: typert gateway service has type %T", gatewayValue)
+	}
+	mux := gatewaystream.NewMuxServer(gateway.OpenWireStream, logger, 2*time.Second)
+	if err := mux.Register(registry); err != nil {
+		return err
+	}
+	mounted.SetUnaryHandler(gateway.UnaryHandler())
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
