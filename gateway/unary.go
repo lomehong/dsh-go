@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"dshgo/gatewaystream"
@@ -54,6 +55,40 @@ func (g *Gateway) OpenWireStream(endpoint string, payload any) (<-chan any, <-ch
 	return out, errCh, cancel
 }
 
+// legacyHostDescription answers the apiproxy-era bootstrap call with the
+// host facts the old browser readiness gate consumes (official
+// hostDescribeValueSchema): version/cwd/provider?/model?/attachedSessions/
+// home/canOpenPath. provider/model stay absent (optional in the schema);
+// no secret value is ever included.
+func legacyHostDescription() map[string]any {
+	cwd, _ := os.Getwd()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	return map[string]any{
+		"version":          "0.0.1",
+		"cwd":              cwd,
+		"attachedSessions": 0,
+		"home":             home,
+		"canOpenPath":      true,
+	}
+}
+
+// splitEndpoint splits one RPC endpoint into namespace and method. The
+// browser writes `namespace.method` (POST /api/host.describe); the
+// gateway-internal and Go-test callers write `namespace/method`. Both forms
+// parse; a missing separator fails.
+func splitEndpoint(endpoint string) (namespace string, method string, ok bool) {
+	if i := strings.Index(endpoint, "."); i > 0 {
+		return endpoint[:i], endpoint[i+1:], endpoint[i+1:] != ""
+	}
+	if i := strings.Index(endpoint, "/"); i > 0 {
+		return endpoint[:i], endpoint[i+1:], endpoint[i+1:] != ""
+	}
+	return "", "", false
+}
+
 // unaryRequest is the wire envelope of one unary Remote call (official
 // ClientRequest): POST /api/<namespace>/<method> with this JSON body.
 type unaryRequest struct {
@@ -63,15 +98,19 @@ type unaryRequest struct {
 	Payload map[string]any `json:"payload"`
 }
 
-// UnaryHandler serves the browser unary carrier: POST /api/<namespace>/<method>
+// UnaryHandler serves the browser unary carrier: POST /api/<namespace>.<method>
 // with the client-request envelope, answered with the server-response
-// envelope. Status semantics follow the official rpc-host: 404 non-POST or
-// unclaimed endpoint, 415 wrong content type, 400 bad body/envelope, 500
-// handler crash; business failures ride a 200 body with ok:false.
+// envelope. The browser composes the endpoint as `namespace.method`
+// (empirically: POST /api/host.describe), while the gateway-internal and
+// Go-test callers use `namespace/method`; both separators are accepted.
+// Status semantics follow the official rpc-host: 404 non-POST or unclaimed
+// endpoint, 415 wrong content type, 400 bad body/envelope, 500 handler
+// crash; business failures ride a 200 body with ok:false.
 func (g *Gateway) UnaryHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		endpoint := strings.TrimPrefix(r.URL.Path, "/api/")
-		if r.Method != http.MethodPost || endpoint == "" || !strings.Contains(endpoint, "/") {
+		namespace, method, ok := splitEndpoint(endpoint)
+		if r.Method != http.MethodPost || !ok {
 			http.NotFound(w, r)
 			return
 		}
@@ -100,12 +139,21 @@ func (g *Gateway) UnaryHandler() http.HandlerFunc {
 				args = inner
 			}
 		}
-		value, err := g.Invoke(r.Context(), InvokeRequest{
-			Namespace: endpoint[:strings.Index(endpoint, "/")],
-			Method:    endpoint[strings.Index(endpoint, "/")+1:],
-			Args:      args,
-			Signal:    r.Context(),
-		})
+		var value any
+		var err error
+		if namespace == "host" && method == "describe" {
+			// The legacy bootstrap method (apiproxy-era wire): the browser
+			// readiness gate consumes these host facts before any typert
+			// namespace resolves (official hostDescribeValueSchema).
+			value = legacyHostDescription()
+		} else {
+			value, err = g.Invoke(r.Context(), InvokeRequest{
+				Namespace: namespace,
+				Method:    method,
+				Args:      args,
+				Signal:    r.Context(),
+			})
+		}
 		w.Header().Set("Content-Type", "application/json")
 		result := map[string]any{}
 		if err == nil {

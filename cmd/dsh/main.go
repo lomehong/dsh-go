@@ -98,6 +98,27 @@ func run() error {
 	logger := cordis.StdLogger{}
 	anchorPath := *anchor
 	if anchorPath == "" {
+		// Default to the repo-bundled webassets — the frontend built from
+		// the official source and staged alongside the Go backend — by
+		// walking up from the working directory. The --anchor flag still
+		// overrides for official-artifact layouts.
+		dir, err := os.Getwd()
+		if err == nil {
+			for {
+				candidate := filepath.Join(dir, "webassets", "package.json")
+				if _, err := os.Stat(candidate); err == nil {
+					anchorPath = candidate
+					break
+				}
+				parent := filepath.Dir(dir)
+				if parent == dir {
+					break
+				}
+				dir = parent
+			}
+		}
+	}
+	if anchorPath == "" {
 		exe, err := os.Executable()
 		if err != nil {
 			return fmt.Errorf("resolve executable: %w", err)
@@ -191,6 +212,10 @@ func serveWeb(app *boot.App, anchor string, host string, port string, logger cor
 	}
 	mux := gatewaystream.NewMuxServer(gateway.OpenWireStream, logger, 2*time.Second)
 	if err := mux.Register(registry); err != nil {
+		return err
+	}
+	legacy := gatewaystream.NewLegacyDownlink()
+	if err := legacy.Register(registry, logger, "/api/events.mux", "/api/events.host"); err != nil {
 		return err
 	}
 	mounted.SetUnaryHandler(gateway.UnaryHandler())

@@ -231,6 +231,10 @@ func (h *Host) serveIndex(w http.ResponseWriter) error {
 		return nil
 	}
 	html := spliceAfterHead(string(raw), bootInjectionRows(h.graph))
+	// The entry document must never be served from a stale browser cache:
+	// it references content-hashed assets, and a cached index referencing
+	// pruned chunks white-screens the shell.
+	w.Header().Set("Cache-Control", "no-cache")
 	rendered, err := h.registry.RenderIndex(h.ctx, html)
 	if err != nil {
 		return err
