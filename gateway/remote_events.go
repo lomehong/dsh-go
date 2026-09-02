@@ -191,7 +191,7 @@ func (g *Gateway) OpenRemoteEvents(payload map[string]any, signal context.Contex
 	go func() {
 		defer close(done)
 		select {
-		case frames <- gatewaystream.RemoteEventReadyFrame{ClientID: client.ID, Host: reg.host}:
+		case frames <- gatewaystream.RemoteEventReadyFrame{Type: "ready", ClientID: client.ID, Host: reg.host}:
 		case <-signal.Done():
 			return
 		}

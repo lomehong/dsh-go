@@ -219,12 +219,6 @@ func serveWeb(app *boot.App, anchor string, host string, port string, logger cor
 		return err
 	}
 	mounted.SetUnaryHandler(gw.UnaryHandler())
-	// The forwarded-event source: the Go host composes no allowlisted Host
-	// event emitters yet, so $events streams open empty and stay open —
-	// completing the client's connection-generation readiness gate.
-	if _, err := gw.RegisterRemoteEvents(gateway.EmptyRemoteEventSource, gatewaystream.RemoteEventHostInfo{}); err != nil {
-		return err
-	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)

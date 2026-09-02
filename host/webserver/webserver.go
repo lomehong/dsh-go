@@ -208,6 +208,7 @@ func (rg *Registry) serveUpgrade(w http.ResponseWriter, r *http.Request) {
 	route, ok := rg.upgrades[r.URL.Path]
 	rg.mu.RUnlock()
 	if !ok {
+		rg.logger.Warn(fmt.Sprintf("webserver: upgrade %q has no registered route", r.URL.Path))
 		http.NotFound(w, r)
 		return
 	}

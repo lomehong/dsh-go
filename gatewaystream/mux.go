@@ -43,6 +43,7 @@ type MuxServer struct {
 	mu          sync.Mutex
 	connections map[*websocket.Conn]struct{}
 	missed      map[*websocket.Conn]int
+	streams     map[string]func()
 	closed      bool
 	hbStarted   bool
 	hbStop      chan struct{}
@@ -68,6 +69,7 @@ func NewMuxServer(open RemoteStreamOpener, logger cordis.Logger, heartbeatInterv
 		interval:    heartbeatInterval,
 		connections: map[*websocket.Conn]struct{}{},
 		missed:      map[*websocket.Conn]int{},
+		streams:     map[string]func(){},
 	}
 }
 
@@ -228,6 +230,7 @@ func (s *MuxServer) terminateIfStillStalled(ws *websocket.Conn, observed int) {
 // the logical streams until the socket dies.
 func (s *MuxServer) runConnection(ws *websocket.Conn) {
 	defer func() {
+		s.cancelAll()
 		s.mu.Lock()
 		delete(s.connections, ws)
 		delete(s.missed, ws)
@@ -241,49 +244,87 @@ func (s *MuxServer) runConnection(ws *websocket.Conn) {
 		}
 		clientMessage, parseErr := parseClientMessage(message)
 		if parseErr != nil {
-			_ = ws.WriteJSON(map[string]any{"type": "error", "message": parseErr.Error()})
-			continue
+			// The official server closes malformed-JSON sockets (1008)
+			// instead of answering them.
+			deadline := time.Now().Add(time.Second)
+			_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1008, parseErr.Error()), deadline)
+			return
 		}
 		switch clientMessage.Kind {
 		case "open":
 			s.openStream(ws, clientMessage)
-		case "close":
-			// The upstream client can request stream closure; the opened
-			// stream's cancellation is delivered through its own frame.
-			_ = ws.WriteJSON(map[string]any{"type": "closed"})
+		case "cancel":
+			s.cancelStream(clientMessage.StreamID)
 		}
 	}
 }
 
 // openStream dispatches one logical stream for an open request and relays
-// its frames to the client.
+// its frames to the client. Frames ride the official item envelope
+// ({type:'item', streamId, value}); stream errors surface as error frames;
+// source exhaustion answers end. The cancel is tracked per stream so a
+// client cancel message (or the socket dying) tears the source down.
 func (s *MuxServer) openStream(ws *websocket.Conn, msg clientMessage) {
 	if s.open == nil {
-		_ = ws.WriteJSON(map[string]any{"type": "error", "message": "remote stream dispatcher is not mounted"})
+		_ = ws.WriteJSON(map[string]any{"type": "error", "streamId": msg.StreamID, "error": map[string]any{"code": "internal", "message": "remote stream dispatcher is not mounted"}})
 		return
 	}
 	frames, errs, cancel := s.open(msg.Endpoint, msg.Payload)
-	if cancel != nil {
-		defer cancel()
-	}
+	s.mu.Lock()
+	s.streams[msg.StreamID] = cancel
+	s.mu.Unlock()
 	go func() {
+		defer func() {
+			s.mu.Lock()
+			delete(s.streams, msg.StreamID)
+			s.mu.Unlock()
+			if cancel != nil {
+				cancel()
+			}
+		}()
 		for {
 			select {
 			case frame, ok := <-frames:
 				if !ok {
-					_ = ws.WriteJSON(map[string]any{"type": "end", "endpoint": msg.Endpoint})
+					_ = ws.WriteJSON(map[string]any{"type": "end", "streamId": msg.StreamID})
 					return
 				}
-				_ = ws.WriteJSON(frame)
+				_ = ws.WriteJSON(map[string]any{"type": "item", "streamId": msg.StreamID, "value": frame})
 			case err, ok := <-errs:
 				if !ok {
 					return
 				}
-				_ = ws.WriteJSON(map[string]any{"type": "failure", "endpoint": msg.Endpoint, "error": err.Error()})
+				_ = ws.WriteJSON(map[string]any{"type": "error", "streamId": msg.StreamID, "error": map[string]any{"code": "internal", "message": err.Error()}})
 				return
 			}
 		}
 	}()
+}
+
+// cancelStream tears one tracked stream down on the client's cancel message.
+func (s *MuxServer) cancelStream(streamID string) {
+	s.mu.Lock()
+	cancel, tracked := s.streams[streamID]
+	if tracked {
+		delete(s.streams, streamID)
+	}
+	s.mu.Unlock()
+	if tracked && cancel != nil {
+		cancel()
+	}
+}
+
+// cancelAll tears every tracked stream down when the owning socket dies.
+func (s *MuxServer) cancelAll() {
+	s.mu.Lock()
+	streams := s.streams
+	s.streams = map[string]func(){}
+	s.mu.Unlock()
+	for _, cancel := range streams {
+		if cancel != nil {
+			cancel()
+		}
+	}
 }
 
 // Close terminates all sockets and stops the shared heartbeat timer, then
