@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -49,13 +50,17 @@ func ResolveFrontendDist(anchor string) (string, error) {
 
 // Host serves the browser surface: the fallback seat owns the frontend dist
 // (index.html through the registry's injection rendering, static assets from
-// the dist tree, SPA fallback to index for extension-less paths), and the
-// bound http.Server owns the listen lifecycle.
+// the dist tree, SPA fallback to index for extension-less paths), the
+// composed client boot graph and its plugin combo responses (official
+// ClientModuleRegistry serve half), and the bound http.Server owns the
+// listen lifecycle.
 type Host struct {
-	registry *webserver.Registry
-	ctx      *cordis.Context
-	dist     string
-	logger   cordis.Logger
+	registry  *webserver.Registry
+	ctx       *cordis.Context
+	dist      string
+	logger    cordis.Logger
+	graph     *bootGraph
+	responses map[string]servedResponse
 
 	server *http.Server
 	addr   net.Addr
@@ -63,14 +68,21 @@ type Host struct {
 }
 
 // Mount registers the frontend fallback owner on the registry. The dist dir
-// must already be resolved; a missing index.html fails loud at mount.
+// must already be resolved; a missing index.html fails loud at mount. The
+// client boot graph composes from the node_modules root above the dist —
+// the official ClientModuleRegistry activation scan runs synchronously and
+// fails loud on a malformed declaration or missing bundle.
 func Mount(registry *webserver.Registry, ctx *cordis.Context, dist string, logger cordis.Logger) (*Host, error) {
 	index := filepath.Join(dist, "index.html")
 	if _, err := os.Stat(index); err != nil {
 		return nil, fmt.Errorf("web: frontend dist has no index.html at %s: %w", index, err)
 	}
-	host := &Host{registry: registry, ctx: ctx, dist: dist, logger: logger}
-	_, err := registry.Register(webserver.Route{
+	graph, responses, err := composeBootGraph(nodeModulesFromDist(dist))
+	if err != nil {
+		return nil, err
+	}
+	host := &Host{registry: registry, ctx: ctx, dist: dist, logger: logger, graph: graph, responses: responses}
+	_, err = registry.Register(webserver.Route{
 		Kind:    webserver.KindFallback,
 		Handler: host.serve,
 	})
@@ -127,6 +139,12 @@ func (h *Host) Close() error {
 // their MIME type; any other path falls back to the rendered index (the SPA
 // entry). Path traversal outside the dist tree is rejected.
 func (h *Host) serve(w http.ResponseWriter, r *http.Request) error {
+	if strings.HasPrefix(r.URL.Path, "/plugins/") {
+		if !servePlugins(w, r, h.responses) {
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+		return nil
+	}
 	cleaned := filepath.Clean(strings.TrimPrefix(r.URL.Path, "/"))
 	if cleaned == "." || cleaned == "" {
 		return h.serveIndex(w)
@@ -157,15 +175,17 @@ func (h *Host) serve(w http.ResponseWriter, r *http.Request) error {
 	return err
 }
 
-// serveIndex renders the dist index.html through the registry's injection
-// table (head/body rows plus the boot-readiness tail).
+// serveIndex renders the dist index.html with the client boot protocol rows
+// ahead of the document (official renderIndexInjections head placement),
+// then through the registry's injection table.
 func (h *Host) serveIndex(w http.ResponseWriter) error {
 	raw, err := os.ReadFile(filepath.Join(h.dist, "index.html"))
 	if err != nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return nil
 	}
-	rendered, err := h.registry.RenderIndex(h.ctx, string(raw))
+	html := spliceAfterHead(string(raw), bootInjectionRows(h.graph))
+	rendered, err := h.registry.RenderIndex(h.ctx, html)
 	if err != nil {
 		return err
 	}
@@ -174,6 +194,19 @@ func (h *Host) serveIndex(w http.ResponseWriter) error {
 	_, err = w.Write([]byte(rendered))
 	return err
 }
+
+// spliceAfterHead inserts markup immediately after the opening head tag;
+// headless fragments get it prepended (official renderIndexInjections).
+func spliceAfterHead(html string, markup string) string {
+	open := headOpenRe.FindStringIndex(html)
+	if open == nil {
+		return markup + html
+	}
+	at := open[1]
+	return html[:at] + markup + html[at:]
+}
+
+var headOpenRe = regexp.MustCompile(`(?i)<head(?:\s[^>]*)?>`)
 
 // contentType guesses a media type from the file extension, defaulting to
 // application/octet-stream like the official static owner.
