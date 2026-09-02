@@ -331,7 +331,7 @@ func TestEpochStopReasonVocabulary(t *testing.T) {
 // newEpochSession + appendTurnArc build one stepped turn ending with `kind`.
 func newEpochSession(t *testing.T) *session.Session {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID("epoch"), nil, nil)
+	sess, err := session.NewDetached(session.SessionID("epoch"), nil, nil, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}

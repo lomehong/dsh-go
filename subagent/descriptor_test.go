@@ -149,7 +149,7 @@ func TestFoldDescriptorRejectsMalformedCurrentPayloads(t *testing.T) {
 
 func TestSeedDescriptorTurn(t *testing.T) {
 	// Stage the inherited prefix through a detached session, then seed.
-	prefix, err := session.NewDetached(session.SessionID("child-1"), nil, &session.SessionHeader{ID: session.SessionID("child-1")})
+	prefix, err := session.NewDetached(session.SessionID("child-1"), nil, &session.SessionHeader{ID: session.SessionID("child-1")}, 0)
 	if err != nil {
 		t.Fatalf("stage: %v", err)
 	}

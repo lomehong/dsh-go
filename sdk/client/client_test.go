@@ -54,7 +54,7 @@ func (f *stubAgents) Create(sessionID string, options server.CreateAgentOptions)
 	if f.registry.Get(session.SessionID(sessionID)) != nil {
 		return nil, errors.New("exists")
 	}
-	sess, err := session.NewDetached(session.SessionID(sessionID), nil, &session.SessionHeader{ID: session.SessionID(sessionID), CWD: options.Cwd})
+	sess, err := session.NewDetached(session.SessionID(sessionID), nil, &session.SessionHeader{ID: session.SessionID(sessionID), CWD: options.Cwd}, 0)
 	if err != nil {
 		return nil, err
 	}

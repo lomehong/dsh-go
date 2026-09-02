@@ -185,7 +185,7 @@ func TestCommitSplicePreservesTail(t *testing.T) {
 
 func newDetached(t *testing.T) *session.Session {
 	t.Helper()
-	sess, err := session.NewDetached("meter-probe", nil, &session.SessionHeader{ID: "meter-probe", CWD: "D:\\tmp"})
+	sess, err := session.NewDetached("meter-probe", nil, &session.SessionHeader{ID: "meter-probe", CWD: "D:\\tmp"}, 0)
 	if err != nil {
 		t.Fatalf("construct failed: %v", err)
 	}

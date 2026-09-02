@@ -172,7 +172,7 @@ func TestPreflightChildLlmRoute(t *testing.T) {
 
 func TestSessionPolicyEventRoundTripAndAppendOnce(t *testing.T) {
 	header := &session.SessionHeader{ID: "model-selection-sess", CWD: "D:\\work"}
-	sess, err := session.NewDetached("model-selection-sess", nil, header)
+	sess, err := session.NewDetached("model-selection-sess", nil, header, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestListSubagentModelsFlows(t *testing.T) {
 
 func TestResolveDelegationPolicySamplesSettingsOnce(t *testing.T) {
 	header := &session.SessionHeader{ID: "policy-parent", CWD: "D:\\work"}
-	sess, err := session.NewDetached("policy-parent", nil, header)
+	sess, err := session.NewDetached("policy-parent", nil, header, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

@@ -77,8 +77,8 @@ func cancellationPlaceholder(signal interface{ Done() <-chan struct{} }) map[str
 // to a stable value.
 func foldForTool(ag *agent.Agent) (*FoldedSchedules, map[string]any) {
 	seedLength := int64(0)
-	if header := ag.Session.Header(); header.SeedLength != nil {
-		seedLength = *header.SeedLength
+	if header := ag.Session.Header(); header.IsSeeded {
+		seedLength = int64(header.InheritedEventCount)
 	}
 	folded, err := FoldScheduleEvents(ag.Session.Events(), seedLength)
 	if err != nil {

@@ -20,7 +20,7 @@ func (noopNotifications) Claimed(llm.Message, int64) {}
 
 func newInvocationSession(t *testing.T, id string) *session.Session {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\work"})
+	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\work"}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

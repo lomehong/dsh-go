@@ -82,8 +82,8 @@ func NewInbox(s *session.Session, notifications InboxNotifications) (*Inbox, err
 	inbox := &Inbox{session: s, notifications: notifications}
 	events := s.Events()
 	start := 0
-	if seedLength := s.Header().SeedLength; seedLength != nil {
-		start = int(*seedLength)
+	if s.Header().IsSeeded {
+		start = int(s.Header().InheritedEventCount)
 	}
 	for _, event := range events[start:] {
 		if event.Type != EventAgentInboxSpliced {

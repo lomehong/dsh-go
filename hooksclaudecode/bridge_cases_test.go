@@ -254,7 +254,7 @@ func TestSubagentStartInjectsChildContextAndPairedEndRuns(t *testing.T) {
 	f.start()
 
 	// A live child agent the registry can resolve.
-	childSession, err := session.NewDetached(session.SessionID("child-1"), nil, &session.SessionHeader{ID: session.SessionID("child-1"), CWD: f.dir})
+	childSession, err := session.NewDetached(session.SessionID("child-1"), nil, &session.SessionHeader{ID: session.SessionID("child-1"), CWD: f.dir}, 0)
 	if err != nil {
 		t.Fatalf("child session: %v", err)
 	}

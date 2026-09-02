@@ -310,7 +310,7 @@ func newFixture(t *testing.T, config Config) *fixture {
 	t.Helper()
 	f := &fixture{registry: agent.NewAgentRegistry(nil, nil)}
 	header := &session.SessionHeader{ID: session.SessionID("sess-goal")}
-	sess, err := session.NewDetached(session.SessionID("sess-goal"), nil, header)
+	sess, err := session.NewDetached(session.SessionID("sess-goal"), nil, header, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
@@ -584,7 +584,7 @@ func TestServiceRoundAdmissionAdvancesCounter(t *testing.T) {
 func TestServiceRejectsForeignAgent(t *testing.T) {
 	f := newFixture(t, Config{})
 	header := &session.SessionHeader{ID: session.SessionID("sess-foreign")}
-	sess, err := session.NewDetached(session.SessionID("sess-foreign"), nil, header)
+	sess, err := session.NewDetached(session.SessionID("sess-foreign"), nil, header, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestServiceRegistersProjectionUnit(t *testing.T) {
 
 	f := &fixture{registry: agent.NewAgentRegistry(nil, nil)}
 	header := &session.SessionHeader{ID: session.SessionID("sess-proj")}
-	sess, err := session.NewDetached(session.SessionID("sess-proj"), nil, header)
+	sess, err := session.NewDetached(session.SessionID("sess-proj"), nil, header, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}

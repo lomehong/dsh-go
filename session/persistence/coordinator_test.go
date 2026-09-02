@@ -489,7 +489,7 @@ func TestCoordinatorLegacyMigrationSteeringAndMessages(t *testing.T) {
 func TestCoordinatorWritePathBatchesAndFlushes(t *testing.T) {
 	backend := newMemoryBackend()
 	coordinator := newTestCoordinator(t, backend)
-	live, err := session.NewDetached("live1", nil, &[]session.SessionHeader{testHeader("live1")}[0])
+	live, err := session.NewDetached("live1", nil, &[]session.SessionHeader{testHeader("live1")}[0], 0)
 	if err != nil {
 		t.Fatalf("detached: %v", err)
 	}
@@ -548,7 +548,7 @@ func TestCoordinatorOnCreatedRejectsSeedCollision(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 	// A live session with a DIFFERENT seed claiming the same id collides.
-	live, err := session.NewDetached(id, []session.Event{mustEvent(t, session.EventUserMessage, 0, validUserMessageData("different"))}, &[]session.SessionHeader{testHeader(id)}[0])
+	live, err := session.NewDetached(id, []session.Event{mustEvent(t, session.EventUserMessage, 0, validUserMessageData("different"))}, &[]session.SessionHeader{testHeader(id)}[0], 0)
 	if err != nil {
 		t.Fatalf("detached: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestCoordinatorOnCreatedRejectsSeedCollision(t *testing.T) {
 		t.Fatalf("append2: %v", err)
 	}
 	seed := []session.Event{session.DeepCopyEvent(first), mustEvent(t, session.EventStepEnd, 1, map[string]any{"turn": 1, "step": 1})}
-	live2, err := session.NewDetached(id2, seed, &[]session.SessionHeader{testHeader(id2)}[0])
+	live2, err := session.NewDetached(id2, seed, &[]session.SessionHeader{testHeader(id2)}[0], 0)
 	if err != nil {
 		t.Fatalf("detached2: %v", err)
 	}

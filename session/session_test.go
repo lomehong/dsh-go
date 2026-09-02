@@ -38,7 +38,7 @@ func TestSeedReplayAppendsEndSeedMarkerOnce(t *testing.T) {
 		event.Seq = int64(i)
 		seed = append(seed, event)
 	}
-	session, err := NewDetached("replay-1", seed, nil)
+	session, err := NewDetached("replay-1", seed, nil, 0)
 	if err != nil {
 		t.Fatalf("construct failed: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestSeedReplayAppendsEndSeedMarkerOnce(t *testing.T) {
 	}
 
 	// Reopening an untouched session does not grow its log per open.
-	reopened, err := NewDetached("replay-1", session.Events(), nil)
+	reopened, err := NewDetached("replay-1", session.Events(), nil, 0)
 	if err != nil {
 		t.Fatalf("reopen failed: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestSeedReplayAppendsEndSeedMarkerOnce(t *testing.T) {
 }
 
 func TestAppendEnforcesSurfaceIntentContract(t *testing.T) {
-	session, err := NewDetached("s", nil, nil)
+	session, err := NewDetached("s", nil, nil, 0)
 	if err != nil {
 		t.Fatalf("construct failed: %v", err)
 	}
@@ -197,18 +197,18 @@ func TestForkValidatesBoundariesAndOpenTurns(t *testing.T) {
 		t.Fatalf("fork seed wrong: %#v", seed)
 	}
 	child, err := store.Create("child", CreateOptions{Seed: seed, HeaderMetadata: SessionHeader{
-		CreatedAt: 2, ParentSession: "parent", SeedLength: ptrInt64(int64(len(seed))),
+		CreatedAt: 2, ParentSession: "parent", IsSeeded: true, InheritedEventCount: SessionLogOffset(len(seed)),
 	}})
 	if err != nil {
 		t.Fatalf("child create failed: %v", err)
 	}
-	if child.Header().ParentSession != "parent" || *child.Header().SeedLength != 2 {
+	if child.Header().ParentSession != "parent" || child.Header().InheritedEventCount != 2 {
 		t.Fatalf("child header lineage wrong: %#v", child.Header())
 	}
 }
 
 func TestDeriveMessagesAndEmptyAssistantHost(t *testing.T) {
-	session, err := NewDetached("derive", nil, nil)
+	session, err := NewDetached("derive", nil, nil, 0)
 	if err != nil {
 		t.Fatalf("construct failed: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestRequestHeaderFoldAndCanonicalEquality(t *testing.T) {
 		t.Fatal("canonicalization must be idempotent under equality")
 	}
 
-	session, err := NewDetached("header", nil, nil)
+	session, err := NewDetached("header", nil, nil, 0)
 	if err != nil {
 		t.Fatalf("construct failed: %v", err)
 	}

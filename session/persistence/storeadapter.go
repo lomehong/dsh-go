@@ -40,5 +40,5 @@ func (a *StoreSessions) List() []*session.Session {
 // Prepare builds the exact unpublished Session for resume: a restored
 // session over the seed events, not yet announced to the store.
 func (a *StoreSessions) Prepare(id session.SessionID, seed []session.Event, meta session.SessionHeader) (*session.Session, error) {
-	return session.NewRestored(id, seed, meta)
+	return session.NewRestored(id, seed, meta, meta.InheritedEventCount)
 }

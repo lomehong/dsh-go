@@ -69,7 +69,7 @@ func newDriverFixture(t *testing.T) *driverFixture {
 	f.root = cordis.NewRoot(cordis.Discard{})
 	t.Cleanup(func() { _ = f.root.Dispose() })
 	header := &session.SessionHeader{ID: session.SessionID("sess-driver")}
-	sess, err := session.NewDetached(session.SessionID("sess-driver"), nil, header)
+	sess, err := session.NewDetached(session.SessionID("sess-driver"), nil, header, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestStartupDisarmsExistingAgents(t *testing.T) {
 	root := cordis.NewRoot(cordis.Discard{})
 	defer func() { _ = root.Dispose() }()
 	header := &session.SessionHeader{ID: session.SessionID("sess-late")}
-	sess, err := session.NewDetached(session.SessionID("sess-late"), nil, header)
+	sess, err := session.NewDetached(session.SessionID("sess-late"), nil, header, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}

@@ -179,7 +179,7 @@ func (st *Store) Create(id SessionID, options CreateOptions) (*Session, error) {
 	header.ID = id
 	header.Origin = options.Origin
 	header.DelegationDepth = options.DelegationDepth
-	session, err := NewDetached(id, options.Seed, &header)
+	session, err := NewDetached(id, options.Seed, &header, SessionLogOffset(len(options.Seed)))
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +373,7 @@ func (st *Store) Flush() FlushResult {
 	st.mu.Lock()
 	sessions := make([]*Session, 0, len(st.items))
 	for _, entry := range st.items {
-		if entry.session.FirstLiveSeq() >= int64(len(entry.session.Events())) {
+		if entry.session.FirstLiveSeq() >= entry.session.Seq() {
 			continue // nothing live to flush
 		}
 		sessions = append(sessions, entry.session)

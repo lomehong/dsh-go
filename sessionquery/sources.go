@@ -12,7 +12,8 @@ func AssertSessionHeadersCompatible(a, b session.SessionHeader) error {
 		a.CreatedAt != b.CreatedAt ||
 		a.CWD != b.CWD ||
 		a.ParentSession != b.ParentSession ||
-		pointerValue(a.SeedLength) != pointerValue(b.SeedLength) ||
+		a.IsSeeded != b.IsSeeded ||
+		a.InheritedEventCount != b.InheritedEventCount ||
 		pointerValue(a.DelegationDepth) != pointerValue(b.DelegationDepth) {
 		return queryError(CodeSourceConflict, "session source headers conflict for session %q", a.ID)
 	}

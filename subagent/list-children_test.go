@@ -54,12 +54,16 @@ func (f *fakeCache) CachedSnapshot(header session.SessionHeader, units []string)
 // helpers ----------------------------------------------------------------------
 
 func listingHeader(id string, parent string, createdAt int64, origin string, seedLength *int64) session.SessionHeader {
-	return session.SessionHeader{
+	header := session.SessionHeader{
 		// This build stores format version 0 only (fail-closed vocabulary).
 		Version: 0, ID: session.SessionID(id), CreatedAt: createdAt,
 		CWD: "D:\\work", ParentSession: session.SessionID(parent), Origin: origin,
-		SeedLength: seedLength,
 	}
+	if seedLength != nil {
+		header.IsSeeded = true
+		header.InheritedEventCount = session.SessionLogOffset(*seedLength)
+	}
+	return header
 }
 
 func listingIdentity(mode string, label string, seq int64) *SubagentIdentityProjection {
@@ -86,7 +90,14 @@ func listingServices(query *fakeQuery, store *fakeSessionStore, projections *fak
 func TestListChildrenOrdersAndClassifies(t *testing.T) {
 	live := func(id string, createdAt int64, seedLength *int64) *session.Session {
 		header := listingHeader(id, "root", createdAt, SubagentOrigin, seedLength)
-		sess, err := session.NewDetached(session.SessionID(id), nil, &header)
+		var seed []session.Event
+		if seedLength != nil {
+			seed = make([]session.Event, 0, *seedLength)
+			for seq := int64(0); seq < *seedLength; seq++ {
+				seed = append(seed, session.Event{Type: session.EventTurnStart, Seq: seq, Time: 1, Data: []byte(`{"turn":1}`)})
+			}
+		}
+		sess, err := session.NewDetached(session.SessionID(id), seed, &header, session.SessionLogOffset(len(seed)))
 		if err != nil {
 			t.Fatalf("NewDetached %s: %v", id, err)
 		}

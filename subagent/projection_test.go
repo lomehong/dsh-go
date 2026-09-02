@@ -163,7 +163,7 @@ func TestRegisterSubagentProjectionsDrivesThroughRegistry(t *testing.T) {
 	}
 	defer undo()
 	header := session.SessionHeader{Version: 0, ID: "proj-child", CWD: "D:\\work"}
-	sess, err := session.NewDetached("proj-child", nil, &header)
+	sess, err := session.NewDetached("proj-child", nil, &header, 0)
 	if err != nil {
 		t.Fatalf("detached: %v", err)
 	}

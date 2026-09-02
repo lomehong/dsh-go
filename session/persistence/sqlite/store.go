@@ -331,8 +331,8 @@ func rowToMeta(row *sessionRow) session.SessionHeader {
 		header.ParentSession = session.SessionID(row.parentSession.String)
 	}
 	if row.seedLength.Valid {
-		seed := row.seedLength.Int64
-		header.SeedLength = &seed
+		header.IsSeeded = true
+		header.InheritedEventCount = session.SessionLogOffset(row.seedLength.Int64)
 	}
 	if row.origin.Valid {
 		header.Origin = row.origin.String
@@ -497,7 +497,7 @@ func (s *Store) upsertSession(meta session.SessionHeader) (int64, error) {
 		   agent_preset = excluded.agent_preset, incarnation = excluded.incarnation
 		 RETURNING id`,
 		string(meta.ID), meta.Version, meta.CreatedAt, nullableString(meta.CWD), nullableString(string(meta.ParentSession)),
-		nullableInt(meta.SeedLength), nullableString(meta.Origin), nullableInt(meta.DelegationDepth),
+		nullableSeedLength(meta), nullableString(meta.Origin), nullableInt(meta.DelegationDepth),
 		nullableString(meta.AgentPreset), newUUID(),
 	).Scan(&id)
 	if err != nil {
@@ -602,6 +602,16 @@ func nullableString(value string) any {
 		return nil
 	}
 	return value
+}
+
+// nullableSeedLength renders the physical v0 seed_length column from the
+// logical isSeeded + inheritedEventCount pair (W1): seeded → the exact cut,
+// unseeded → NULL (absent).
+func nullableSeedLength(header session.SessionHeader) any {
+	if !header.IsSeeded {
+		return nil
+	}
+	return int64(header.InheritedEventCount)
 }
 
 func nullableInt(value *int64) any {

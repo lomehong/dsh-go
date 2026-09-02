@@ -23,7 +23,7 @@ func (noopNotifications) Claimed(llm.Message, int64) {}
 
 func newPlanAgent(t *testing.T, id string) (*agent.Agent, *session.Session) {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\tmp"})
+	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\tmp"}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

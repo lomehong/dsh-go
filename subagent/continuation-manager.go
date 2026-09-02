@@ -688,8 +688,8 @@ func (m *SubagentContinuationManager) coldResume(ext ManagerExt, parent *agent.A
 	// Fold only the child's own suffix: a fork seed replays the parent's log,
 	// which may carry an ANCESTOR's descriptor.
 	seedLength := int64(0)
-	if observation.Header.SeedLength != nil {
-		seedLength = *observation.Header.SeedLength
+	if observation.Header.IsSeeded {
+		seedLength = int64(observation.Header.InheritedEventCount)
 	}
 	events := observation.Events
 	if seedLength > 0 && int(seedLength) <= len(events) {

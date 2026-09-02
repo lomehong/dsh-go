@@ -29,7 +29,7 @@ func infValue() float64 { return math.Inf(1) }
 // header for pure-helper tests.
 func newBareSession(t *testing.T, id string) *session.Session {
 	t.Helper()
-	s, err := session.NewDetached(id, nil, &session.SessionHeader{ID: id, CreatedAt: 1000})
+	s, err := session.NewDetached(id, nil, &session.SessionHeader{ID: id, CreatedAt: 1000}, 0)
 	if err != nil {
 		t.Fatalf("new session %s: %v", id, err)
 	}

@@ -52,7 +52,7 @@ func newExitWorld(t *testing.T, active bool) *exitWorld {
 	if !ok {
 		t.Fatalf("tool %q not registered", ExitToolName)
 	}
-	sess, err := session.NewDetached(session.SessionID("root"), nil, &session.SessionHeader{ID: session.SessionID("root")})
+	sess, err := session.NewDetached(session.SessionID("root"), nil, &session.SessionHeader{ID: session.SessionID("root")}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}
@@ -237,7 +237,7 @@ func newPlanCommandWorld(t *testing.T) (*commands.CommandRuntime, *Controller, *
 	if _, err := RegisterPlanCommand(runtime, controller); err != nil {
 		t.Fatalf("RegisterPlanCommand: %v", err)
 	}
-	sess, err := session.NewDetached(session.SessionID("plan-cmd"), nil, &session.SessionHeader{ID: session.SessionID("plan-cmd")})
+	sess, err := session.NewDetached(session.SessionID("plan-cmd"), nil, &session.SessionHeader{ID: session.SessionID("plan-cmd")}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

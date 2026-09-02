@@ -74,7 +74,7 @@ func (q queryEngine) ObserveSession(id session.SessionID) (*subagent.SubagentObs
 		return nil, err
 	}
 	values := subagent.SubagentProjectionValues{}
-	sess, err := session.NewRestored(id, inspection.Events, inspection.Meta)
+	sess, err := session.NewRestored(id, inspection.Events, inspection.Meta, inspection.Meta.InheritedEventCount)
 	if err != nil {
 		return nil, err
 	}

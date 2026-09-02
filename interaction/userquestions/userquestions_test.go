@@ -13,7 +13,7 @@ import (
 func newTestService(t *testing.T) (*Service, *agent.AgentRegistry, *agent.Agent) {
 	t.Helper()
 	registry := agent.NewAgentRegistry(nil, nil)
-	sess, err := session.NewDetached(session.SessionID("asker"), nil, &session.SessionHeader{ID: session.SessionID("asker")})
+	sess, err := session.NewDetached(session.SessionID("asker"), nil, &session.SessionHeader{ID: session.SessionID("asker")}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestLiveCallerCheck(t *testing.T) {
 	_ = a
 	// A same-id agent instance that never entered the registry is not the
 	// live one: Get(id) resolves to a different instance.
-	ghostSession, err := session.NewDetached(session.SessionID("ghost"), nil, &session.SessionHeader{ID: session.SessionID("ghost")})
+	ghostSession, err := session.NewDetached(session.SessionID("ghost"), nil, &session.SessionHeader{ID: session.SessionID("ghost")}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestLiveCallerCheck(t *testing.T) {
 func TestOwnedCallerCannotAsk(t *testing.T) {
 	service, registry, parent := newTestService(t)
 	// Enter an owned child (owner = parent): it is live but not a root.
-	childSession, err := session.NewDetached(session.SessionID("child"), nil, &session.SessionHeader{ID: session.SessionID("child")})
+	childSession, err := session.NewDetached(session.SessionID("child"), nil, &session.SessionHeader{ID: session.SessionID("child")}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

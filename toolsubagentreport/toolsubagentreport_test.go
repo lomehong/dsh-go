@@ -25,7 +25,7 @@ func (noopNotifications) Claimed(llm.Message, int64) {}
 func newChildAgent(t *testing.T, id string) *agent.Agent {
 	t.Helper()
 	header := &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\work"}
-	sess, err := session.NewDetached(session.SessionID(id), nil, header)
+	sess, err := session.NewDetached(session.SessionID(id), nil, header, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

@@ -65,7 +65,7 @@ func (noopSessionNotifications) Claimed(llm.Message, int64) {}
 func newRoutedAgent(t *testing.T, registry *agent.AgentRegistry, provider, model string) *agent.Agent {
 	t.Helper()
 	id := session.SessionID(fmt.Sprintf("read-image-%d", registryCount(registry)))
-	sess, err := session.NewDetached(id, nil, &session.SessionHeader{ID: id, CWD: "D:\\work"})
+	sess, err := session.NewDetached(id, nil, &session.SessionHeader{ID: id, CWD: "D:\\work"}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

@@ -1093,7 +1093,7 @@ func TestCatalogGoalServiceAssemblesAndRoundTrips(t *testing.T) {
 	// through the composed registry folds the change.
 	registry := root.Get(ServiceAgents).(*agent.AgentRegistry)
 	sess, err := session.NewDetached(session.SessionID("sess-goal-catalog"), nil,
-		&session.SessionHeader{ID: session.SessionID("sess-goal-catalog")})
+		&session.SessionHeader{ID: session.SessionID("sess-goal-catalog")}, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}

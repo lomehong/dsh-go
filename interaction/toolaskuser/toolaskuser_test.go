@@ -81,7 +81,7 @@ func newTestWorld(t *testing.T) *testWorld {
 	if !ok {
 		t.Fatalf("tool %q not registered", Name)
 	}
-	sess, err := session.NewDetached(session.SessionID("root"), nil, &session.SessionHeader{ID: session.SessionID("root")})
+	sess, err := session.NewDetached(session.SessionID("root"), nil, &session.SessionHeader{ID: session.SessionID("root")}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

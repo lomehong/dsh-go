@@ -16,7 +16,7 @@ import (
 func newTestService(t *testing.T, config Config) (*Service, *agent.AgentRegistry, *agent.Agent) {
 	t.Helper()
 	registry := agent.NewAgentRegistry(nil, nil)
-	sess, err := session.NewDetached(session.SessionID("agent-1"), nil, &session.SessionHeader{ID: session.SessionID("agent-1")})
+	sess, err := session.NewDetached(session.SessionID("agent-1"), nil, &session.SessionHeader{ID: session.SessionID("agent-1")}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestScopeFiltering(t *testing.T) {
 	})
 	defer unsubscribe()
 
-	sess2, err := session.NewDetached(session.SessionID("agent-2"), nil, &session.SessionHeader{ID: session.SessionID("agent-2")})
+	sess2, err := session.NewDetached(session.SessionID("agent-2"), nil, &session.SessionHeader{ID: session.SessionID("agent-2")}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestAbortedSignalYieldsCancelled(t *testing.T) {
 }
 
 func TestEffectiveApprovalPolicyFoldsLastWins(t *testing.T) {
-	sess, err := session.NewDetached(session.SessionID("fold"), nil, &session.SessionHeader{ID: session.SessionID("fold")})
+	sess, err := session.NewDetached(session.SessionID("fold"), nil, &session.SessionHeader{ID: session.SessionID("fold")}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestEffectiveApprovalPolicyFoldsLastWins(t *testing.T) {
 }
 
 func TestSetApprovalPolicyRejectsInvalidValues(t *testing.T) {
-	sess, err := session.NewDetached(session.SessionID("invalid"), nil, &session.SessionHeader{ID: session.SessionID("invalid")})
+	sess, err := session.NewDetached(session.SessionID("invalid"), nil, &session.SessionHeader{ID: session.SessionID("invalid")}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

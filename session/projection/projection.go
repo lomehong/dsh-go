@@ -348,7 +348,7 @@ func (r *Registry) snapshotLocked(sess *session.Session, keys []string) Snapshot
 		}
 		values[key] = reg.viewCell(reg.cells[sess])
 	}
-	return Snapshot{AsOfSeq: sess.Seq() - 1, Values: values}
+	return Snapshot{AsOfSeq: int64(sess.Seq() - 1), Values: values}
 }
 
 // CachedSnapshot reads only already-materialized client-visible cells
@@ -683,7 +683,7 @@ func (r *Registry) cellForLocked(reg *registration, sess *session.Session) *unit
 		reg.cells[sess] = cell
 		return cell
 	}
-	if err := r.advanceCellLocked(reg.def, cell, sess.Events(), sess.Seq()-1); err != nil {
+	if err := r.advanceCellLocked(reg.def, cell, sess.Events(), int64(sess.Seq()-1)); err != nil {
 		panic(projectionError{key: reg.def.Key, err: err})
 	}
 	return cell

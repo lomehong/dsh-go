@@ -16,7 +16,7 @@ import (
 func newCompactSession(t *testing.T, id string) *session.Session {
 	t.Helper()
 	header := session.SessionHeader{Version: 0, ID: session.SessionID(id)}
-	sess, err := session.NewDetached(id, nil, &header)
+	sess, err := session.NewDetached(id, nil, &header, 0)
 	if err != nil {
 		t.Fatalf("detached: %v", err)
 	}

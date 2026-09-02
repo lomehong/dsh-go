@@ -217,7 +217,7 @@ func newFixture(t *testing.T) *fixture {
 	f.dispose = dispose
 
 	header := &session.SessionHeader{ID: session.SessionID("sess-root"), CWD: "D:\\work"}
-	sess, err := session.NewDetached(session.SessionID("sess-root"), nil, header)
+	sess, err := session.NewDetached(session.SessionID("sess-root"), nil, header, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
@@ -585,7 +585,7 @@ func TestPluginAttachesOnlyFutureLiveRoots(t *testing.T) {
 	}
 
 	// A child (non-root) agent must not receive tools.
-	childSess, err := session.NewDetached(session.SessionID("sess-child"), nil, &session.SessionHeader{ID: session.SessionID("sess-child"), CWD: "D:\\work"})
+	childSess, err := session.NewDetached(session.SessionID("sess-child"), nil, &session.SessionHeader{ID: session.SessionID("sess-child"), CWD: "D:\\work"}, 0)
 	if err != nil {
 		t.Fatalf("child session: %v", err)
 	}

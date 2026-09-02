@@ -117,8 +117,8 @@ func ChildSessionMeta(presetService any, parent *agent.Agent, childDepth int64, 
 		DelegationDepth: &childDepth,
 	}
 	if lineageSeedLength > 0 {
-		seedLength := lineageSeedLength
-		meta.SeedLength = &seedLength
+		meta.IsSeeded = true
+		meta.InheritedEventCount = session.SessionLogOffset(lineageSeedLength)
 	}
 	if presets, ok := presetService.(AgentPresetService); ok && presets != nil {
 		if preset := presets.ComposedPreset(); preset != "" {

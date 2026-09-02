@@ -84,7 +84,7 @@ func (f *fakeAgents) Create(sessionID string, options CreateAgentOptions) (*agen
 	sess, err := session.NewDetached(session.SessionID(sessionID), nil, &session.SessionHeader{
 		ID:  session.SessionID(sessionID),
 		CWD: options.Cwd,
-	})
+	}, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +384,7 @@ func TestLifecycleNotifications(t *testing.T) {
 
 	// session/created with a parent announces subagent.started.
 	childHeader := session.SessionHeader{ID: "child-1", ParentSession: "observed"}
-	child, err := session.NewDetached("child-1", nil, &childHeader)
+	child, err := session.NewDetached("child-1", nil, &childHeader, 0)
 	if err != nil {
 		t.Fatalf("child: %v", err)
 	}

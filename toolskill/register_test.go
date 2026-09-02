@@ -89,7 +89,7 @@ func newRig(t *testing.T, config Config) *testRig {
 	}
 	rig.toolUndo = undo
 
-	sess, err := session.NewDetached(session.SessionID("agent-1"), nil, &session.SessionHeader{ID: session.SessionID("agent-1"), CWD: "D:\\proj"})
+	sess, err := session.NewDetached(session.SessionID("agent-1"), nil, &session.SessionHeader{ID: session.SessionID("agent-1"), CWD: "D:\\proj"}, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}

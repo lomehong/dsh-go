@@ -53,7 +53,7 @@ func testHeader(id session.SessionID) session.SessionHeader {
 func newTestSession(t *testing.T, id string) *session.Session {
 	t.Helper()
 	header := testHeader(session.SessionID(id))
-	sess, err := session.NewDetached(session.SessionID(id), nil, &header)
+	sess, err := session.NewDetached(session.SessionID(id), nil, &header, 0)
 	if err != nil {
 		t.Fatalf("detached: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestHydrateInstallsCellsAndShortCircuits(t *testing.T) {
 		{Type: session.EventTurnEnd, Seq: 1, Time: 2, Data: json.RawMessage(`{"turn":1,"reason":{"kind":"completed"}}`)},
 	}
 	header := testHeader("h1")
-	sess, err := session.NewDetached("h1", seed, &header)
+	sess, err := session.NewDetached("h1", seed, &header, 0)
 	if err != nil {
 		t.Fatalf("detached: %v", err)
 	}

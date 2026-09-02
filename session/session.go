@@ -22,7 +22,11 @@ type Session struct {
 	// Detached validated creation metadata, kept out of the event log — a
 	// storage concern, not replayable conversation state.
 	header       SessionHeader
-	firstLiveSeq int64
+	firstLiveSeq SessionLogOffset
+	// inheritedEventCount is the exact fork-inherited prefix length decoded
+	// from storage (W1): the cut where own events begin. Zero for a session
+	// without fork lineage.
+	inheritedEventCount SessionLogOffset
 
 	mu    sync.Mutex
 	entry *storeEntry
@@ -40,18 +44,22 @@ type Session struct {
 
 // NewDetached creates a detached session by validating and snapshotting
 // borrowed seed events and storage metadata. A nil header synthesizes the
-// minimal one (stamped with SESSION_FORMAT_VERSION).
-func NewDetached(id SessionID, seed []Event, header *SessionHeader) (*Session, error) {
-	return newSession(id, seed, header, false)
+// minimal one (stamped with SESSION_FORMAT_VERSION). inheritedEventCount is
+// the exact fork-inherited prefix length for a seeded header (W1); pass 0
+// for an unseeded session.
+func NewDetached(id SessionID, seed []Event, header *SessionHeader, inheritedEventCount SessionLogOffset) (*Session, error) {
+	return newSession(id, seed, header, false, inheritedEventCount)
 }
 
 // NewRestored restores a detached session by taking ownership of fresh
-// persistence values; the header must be present and validated.
-func NewRestored(id SessionID, seed []Event, header SessionHeader) (*Session, error) {
-	return newSession(id, seed, &header, true)
+// persistence values; the header must be present and validated, and
+// inheritedEventCount is the exact fork-inherited prefix length decoded from
+// storage (W1).
+func NewRestored(id SessionID, seed []Event, header SessionHeader, inheritedEventCount SessionLogOffset) (*Session, error) {
+	return newSession(id, seed, &header, true, inheritedEventCount)
 }
 
-func newSession(id SessionID, seed []Event, header *SessionHeader, restore bool) (*Session, error) {
+func newSession(id SessionID, seed []Event, header *SessionHeader, restore bool, suppliedInheritedEventCount SessionLogOffset) (*Session, error) {
 	s := &Session{}
 	if restore {
 		if err := validateSessionHeader(id, *header); err != nil {
@@ -67,6 +75,23 @@ func newSession(id SessionID, seed []Event, header *SessionHeader, restore bool)
 		s.header = SessionHeader{Version: SESSION_FORMAT_VERSION, ID: id, CreatedAt: time.Now().UnixMilli()}
 	}
 
+	if s.header.IsSeeded && seed == nil {
+		return nil, fmt.Errorf("seeded session %q requires an explicit constructor seed", id)
+	}
+	if s.header.IsSeeded && suppliedInheritedEventCount == 0 && len(seed) > 0 {
+		// A seeded header with a non-empty constructor seed admits the seed
+		// length as the inherited cut unless the caller supplied one (fork
+		// and restore paths pass the exact decoded value).
+		suppliedInheritedEventCount = SessionLogOffset(len(seed))
+	}
+	if !s.header.IsSeeded && suppliedInheritedEventCount != 0 {
+		return nil, fmt.Errorf("unseeded session %q inherited event count must be 0", id)
+	}
+	if suppliedInheritedEventCount > SessionLogOffset(len(seed)) {
+		return nil, fmt.Errorf("session %q inherited event count %d exceeds its event log %d", id, suppliedInheritedEventCount, len(seed))
+	}
+	s.inheritedEventCount = suppliedInheritedEventCount
+
 	s.surface = NewSurfaceManager(&s.log)
 	for index, source := range seed {
 		if err := validateSeedEvent(source, index); err != nil {
@@ -80,7 +105,7 @@ func newSession(id SessionID, seed []Event, header *SessionHeader, restore bool)
 		}
 		s.log = append(s.log, source)
 	}
-	s.firstLiveSeq = int64(len(s.log))
+	s.firstLiveSeq = SessionLogOffset(len(s.log))
 	// The marker is appended here so it is already in `events` when a
 	// backend captures the creation seed: no load-time write. A seed already
 	// ending in one is not re-marked, so reopening an untouched session does
@@ -101,8 +126,38 @@ func (s *Session) Header() SessionHeader { return s.header }
 
 // FirstLiveSeq is the first seq appended in this process: the constructor
 // seed length (0 without one). Smaller seqs entered through construction and
-// were never published on the event feed.
-func (s *Session) FirstLiveSeq() int64 { return s.firstLiveSeq }
+// were never published on the event feed. W1 brands this as a log offset —
+// it is a persistence boundary, not a live event position.
+func (s *Session) FirstLiveSeq() SessionLogOffset { return s.firstLiveSeq }
+
+// InheritedEventCount returns the exact fork-inherited prefix length (W1):
+// the cut where own events begin. Zero for a session without fork lineage.
+func (s *Session) InheritedEventCount() SessionLogOffset {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inheritedEventCount
+}
+
+// OwnEvents returns this Session's events after its fork-inherited prefix
+// (official ownEvents()): child-owned events in log order.
+func (s *Session) OwnEvents() []Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events := s.Events()
+	if s.inheritedEventCount >= SessionLogOffset(len(events)) {
+		return nil
+	}
+	return append([]Event(nil), events[s.inheritedEventCount:]...)
+}
+
+// IsOwnSeq reports whether one existing event position is outside the
+// fork-inherited prefix (official isOwnSeq()): the event belongs to this
+// Session rather than its parent.
+func (s *Session) IsOwnSeq(seq SessionSeq) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return seq >= SessionSeq(s.inheritedEventCount) && seq < SessionSeq(len(s.log))
+}
 
 // Surface returns the ordered surface view over the log.
 func (s *Session) Surface() *SurfaceManager { return s.surface }
@@ -119,11 +174,13 @@ func (s *Session) Events() []Event {
 }
 
 // Seq is the next event's sequence number — always the log length (the
-// seq = log.length contiguity contract).
-func (s *Session) Seq() int64 {
+// seq = log.length contiguity contract). W1 brands this as a log offset:
+// it equals the event count and is a storage/read boundary, not a live
+// event position.
+func (s *Session) Seq() SessionLogOffset {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return int64(len(s.log))
+	return SessionLogOffset(len(s.log))
 }
 
 // Append adds one typed event to the log and notifies the store-owned

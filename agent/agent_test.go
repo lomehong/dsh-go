@@ -35,7 +35,7 @@ func (r *recordingNotifications) Claimed(message llm.Message, turn int64) {
 
 func newTestAgent(t *testing.T, registry *AgentRegistry, id string, parentScope ScopeKey) *Agent {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, nil)
+	sess, err := session.NewDetached(session.SessionID(id), nil, nil, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestFactorySlotContract(t *testing.T) {
 type stubFactory struct{}
 
 func (f *stubFactory) CreateAgent(owner *cordis.Context, options CreateAgentOptions) (AgentHandle, error) {
-	sess, err := session.NewDetached(options.SessionID, nil, nil)
+	sess, err := session.NewDetached(options.SessionID, nil, nil, 0)
 	if err != nil {
 		return AgentHandle{}, err
 	}

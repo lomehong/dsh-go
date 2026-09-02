@@ -16,7 +16,7 @@ func inboxMessage(id string) llm.Message {
 
 func newEmptySession(t *testing.T, id string) *session.Session {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, nil)
+	sess, err := session.NewDetached(session.SessionID(id), nil, nil, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestInboxSeedBoundaryExcludesParentPendingWork(t *testing.T) {
 	}
 	seed := parent.Events()
 	seedLength := int64(len(seed))
-	child, err := session.NewDetached("inbox-6-child", seed, &session.SessionHeader{ID: "inbox-6-child", SeedLength: &seedLength})
+	child, err := session.NewDetached("inbox-6-child", seed, &session.SessionHeader{ID: "inbox-6-child", IsSeeded: true, InheritedEventCount: session.SessionLogOffset(seedLength)}, session.SessionLogOffset(seedLength))
 	if err != nil {
 		t.Fatalf("child session: %v", err)
 	}

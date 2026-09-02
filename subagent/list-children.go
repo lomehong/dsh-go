@@ -474,10 +474,10 @@ const SubagentOrigin = "subagent"
 
 // seedLengthOf reads a header's inherited seed length; absent means zero.
 func seedLengthOf(header session.SessionHeader) int64 {
-	if header.SeedLength == nil {
+	if !header.IsSeeded {
 		return 0
 	}
-	return *header.SeedLength
+	return int64(header.InheritedEventCount)
 }
 
 // lifecycleWitnessKeys are the immutable header fields that distinguish one

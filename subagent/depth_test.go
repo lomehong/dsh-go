@@ -13,7 +13,7 @@ import (
 // options and a header delegation depth.
 func newTestAgent(t *testing.T, registry *agent.AgentRegistry, id string, options agent.AgentOptions, headerDepth *int64) *agent.Agent {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), DelegationDepth: headerDepth})
+	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), DelegationDepth: headerDepth}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

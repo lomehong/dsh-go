@@ -245,8 +245,8 @@ func (c *Coordinator) CaptureSession(sess *session.Session, throughSeq int64) {
 
 // firstLiveSeq is the session's first non-seed event seq (or 0).
 func firstLiveSeq(sess *session.Session) int64 {
-	if sess.Header().SeedLength != nil {
-		return *sess.Header().SeedLength
+	if sess.Header().IsSeeded {
+		return int64(sess.Header().InheritedEventCount)
 	}
 	return 0
 }
@@ -464,8 +464,8 @@ func identityOf(sess *session.Session, event session.Event) map[string]any {
 	if header.ParentSession != "" {
 		attributes["session.parent_id"] = string(header.ParentSession)
 	}
-	if header.SeedLength != nil {
-		attributes["session.seed_length"] = *header.SeedLength
+	if header.IsSeeded {
+		attributes["session.seed_length"] = int64(header.InheritedEventCount)
 	}
 	return attributes
 }

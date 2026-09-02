@@ -668,7 +668,7 @@ func (c *Coordinator) buildPreparedSource(id session.SessionID, stored *StoredPr
 	if c.sessions != nil {
 		sess, buildErr = c.sessions.Prepare(id, balanced, meta)
 	} else {
-		sess, buildErr = session.NewRestored(id, balanced, meta)
+		sess, buildErr = session.NewRestored(id, balanced, meta, meta.InheritedEventCount)
 	}
 	if buildErr != nil {
 		return nil, buildErr
@@ -1033,7 +1033,7 @@ func (c *Coordinator) attachPrepared(sess *session.Session, res *reservation) (*
 	source, state := res.source, res.state
 	if source.sess != sess || state.owner != nil ||
 		state.cursor != int64(len(source.inspection.Events)) ||
-		sess.FirstLiveSeq() != state.cursor {
+		int64(sess.FirstLiveSeq()) != state.cursor {
 		return nil, fmt.Errorf("session %q preparation no longer matches its persistence state", sess.ID())
 	}
 	suffix := make([]session.Event, 0)

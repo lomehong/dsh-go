@@ -24,7 +24,7 @@ import (
 // fakeAgent mints a detached agent the way agent tests do.
 func fakeAgent(t *testing.T, id, cwd string) *agent.Agent {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: cwd})
+	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: cwd}, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}

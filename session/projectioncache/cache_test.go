@@ -121,7 +121,7 @@ func cacheHeader(id session.SessionID) session.SessionHeader {
 func newCacheSession(t *testing.T, id string) *session.Session {
 	t.Helper()
 	header := cacheHeader(session.SessionID(id))
-	sess, err := session.NewDetached(session.SessionID(id), nil, &header)
+	sess, err := session.NewDetached(session.SessionID(id), nil, &header, 0)
 	if err != nil {
 		t.Fatalf("detached: %v", err)
 	}

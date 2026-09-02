@@ -86,7 +86,7 @@ func TestDescribeVariesOnlyActiveClause(t *testing.T) {
 // turns.
 func newTestAgent(t *testing.T, registry *agent.AgentRegistry, id string) *agent.Agent {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id)})
+	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id)}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

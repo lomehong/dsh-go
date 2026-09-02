@@ -151,7 +151,7 @@ func (c coordinatorSessions) List() []*session.Session {
 }
 
 func (c coordinatorSessions) Prepare(id session.SessionID, seed []session.Event, meta session.SessionHeader) (*session.Session, error) {
-	return session.NewRestored(id, seed, meta)
+	return session.NewRestored(id, seed, meta, meta.InheritedEventCount)
 }
 
 // --- fixture ---------------------------------------------------------------

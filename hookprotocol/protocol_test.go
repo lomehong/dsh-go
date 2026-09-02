@@ -11,7 +11,7 @@ import (
 // newEventSession builds a detached session for durable-event assertions.
 func newEventSession(t *testing.T) *session.Session {
 	t.Helper()
-	sess, err := session.NewDetached("hook-events", nil, &session.SessionHeader{ID: "hook-events", CWD: t.TempDir()})
+	sess, err := session.NewDetached("hook-events", nil, &session.SessionHeader{ID: "hook-events", CWD: t.TempDir()}, 0)
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}

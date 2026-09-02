@@ -95,7 +95,7 @@ func (e *Engine) ReadSession(ctx context.Context, sessionID session.SessionID) (
 	if err != nil {
 		return SessionLogSnapshot{}, err
 	}
-	if _, err := session.NewRestored(sessionID, loaded.Events, loaded.Header); err != nil {
+	if _, err := session.NewRestored(sessionID, loaded.Events, loaded.Header, loaded.Header.InheritedEventCount); err != nil {
 		return SessionLogSnapshot{}, err
 	}
 	return SessionLogSnapshot{

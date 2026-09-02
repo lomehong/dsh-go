@@ -23,7 +23,7 @@ func (noopSessionNotifications) Claimed(llm.Message, int64) {}
 func newScopedAgent(t *testing.T, root *cordis.Context, id string) *agent.Agent {
 	t.Helper()
 	sid := session.SessionID(id)
-	sess, err := session.NewDetached(sid, nil, &session.SessionHeader{ID: sid, CWD: "D:\\work"})
+	sess, err := session.NewDetached(sid, nil, &session.SessionHeader{ID: sid, CWD: "D:\\work"}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

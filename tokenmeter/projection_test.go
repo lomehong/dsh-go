@@ -85,7 +85,7 @@ func TestFoldSurfaceTokensArmsAndConsumesClaims(t *testing.T) {
 	}
 
 	// The adjacent replacement consumes the claim.
-	replacement := rawSurfaceEvent(sess.Seq(), session.EventUserMessage, userMessageData("summary"), &session.SurfaceOp{
+	replacement := rawSurfaceEvent(int64(sess.Seq()), session.EventUserMessage, userMessageData("summary"), &session.SurfaceOp{
 		Kind: session.SurfaceReplace, Start: 0, End: 0,
 	})
 	// The replacement's own price derives from the same estimator.

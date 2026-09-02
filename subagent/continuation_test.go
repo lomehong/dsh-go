@@ -83,7 +83,7 @@ func newManagedAgent(t *testing.T, id string, parentID string) (*agent.Agent, *f
 	if parentID != "" {
 		header.ParentSession = session.SessionID(parentID)
 	}
-	sess, err := session.NewDetached(session.SessionID(id), nil, header)
+	sess, err := session.NewDetached(session.SessionID(id), nil, header, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

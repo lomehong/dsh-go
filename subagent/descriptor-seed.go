@@ -10,7 +10,14 @@ import (
 // and enforces the same lossless-JSON rules the durable log does. The
 // returned events are contiguous from sequence zero.
 func SeedDescriptorTurn(childID session.SessionID, seed []session.Event, descriptor SubagentDescriptorData) ([]session.Event, error) {
-	staged, err := session.NewDetached(childID, seed, &session.SessionHeader{ID: childID})
+	header := &session.SessionHeader{ID: childID}
+	inherited := session.SessionLogOffset(0)
+	if len(seed) > 0 {
+		header.IsSeeded = true
+		inherited = session.SessionLogOffset(len(seed))
+		header.InheritedEventCount = inherited
+	}
+	staged, err := session.NewDetached(childID, seed, header, inherited)
 	if err != nil {
 		return nil, err
 	}

@@ -249,7 +249,7 @@ func TestPreStepArmFlushesAgentSession(t *testing.T) {
 		t.Fatalf("attach: %v", err)
 	}
 	defer detach()
-	sess, err := session.NewDetached(session.SessionID("checkpoint-1"), nil, &session.SessionHeader{ID: session.SessionID("checkpoint-1"), CWD: "D:\\tmp"})
+	sess, err := session.NewDetached(session.SessionID("checkpoint-1"), nil, &session.SessionHeader{ID: session.SessionID("checkpoint-1"), CWD: "D:\\tmp"}, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}

@@ -19,7 +19,7 @@ func testHeader(provider string, model string) session.EpochHeader {
 
 func newTestSession(t *testing.T, id string) *session.Session {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\tmp"})
+	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\tmp"}, 0)
 	if err != nil {
 		t.Fatalf("construct failed: %v", err)
 	}

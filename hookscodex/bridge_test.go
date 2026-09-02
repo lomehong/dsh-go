@@ -96,7 +96,7 @@ func (f *fixture) start() {
 
 func (f *fixture) startAgent() {
 	f.t.Helper()
-	sess, err := session.NewDetached(session.SessionID("codex-agent"), nil, &session.SessionHeader{ID: session.SessionID("codex-agent"), CWD: f.dir})
+	sess, err := session.NewDetached(session.SessionID("codex-agent"), nil, &session.SessionHeader{ID: session.SessionID("codex-agent"), CWD: f.dir}, 0)
 	if err != nil {
 		f.t.Fatalf("session: %v", err)
 	}

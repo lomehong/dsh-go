@@ -13,7 +13,7 @@ import (
 func TestCompactionEventsRegistered(t *testing.T) {
 	// The init registered all four event types; a detached session accepts
 	// them as log-only appends between turns.
-	sess, err := session.NewDetached("c1", nil, &session.SessionHeader{ID: "c1"})
+	sess, err := session.NewDetached("c1", nil, &session.SessionHeader{ID: "c1"}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestCheckpointSource(t *testing.T) {
 // through its surface by appending events directly (log-only between turns).
 func newSessionWithSurface(t *testing.T, id string) (*session.Session, *agent.Agent) {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id)})
+	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id)}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

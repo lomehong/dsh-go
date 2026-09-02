@@ -309,8 +309,8 @@ func (r *ScheduleRuntime) waitForIdle() {
 // durable stream.
 func (r *ScheduleRuntime) readFolded() *FoldedSchedules {
 	seedLength := int64(0)
-	if r.ag.Session.Header().SeedLength != nil {
-		seedLength = *r.ag.Session.Header().SeedLength
+	if r.ag.Session.Header().IsSeeded {
+		seedLength = int64(r.ag.Session.Header().InheritedEventCount)
 	}
 	folded, err := FoldScheduleEvents(r.ag.Session.Events(), seedLength)
 	if err != nil {

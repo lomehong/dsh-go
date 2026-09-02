@@ -185,7 +185,14 @@ func toHeaderLine(header session.SessionHeader) headerLine {
 		parent := string(header.ParentSession)
 		line.ParentSession = &parent
 	}
-	line.SeedLength = header.SeedLength
+	// The private version-0 physical header keeps the numeric seedLength;
+	// the logical isSeeded + exact inherited cut translate onto it (W1,
+	// official toHeaderLine): seeded → seedLength = inheritedEventCount,
+	// unseeded → field absent.
+	if header.IsSeeded {
+		seed := int64(header.InheritedEventCount)
+		line.SeedLength = &seed
+	}
 	if header.Origin != "" {
 		line.Origin = &header.Origin
 	}
@@ -210,7 +217,10 @@ func headerFromLine(line headerLine) session.SessionHeader {
 	if line.ParentSession != nil {
 		header.ParentSession = session.SessionID(*line.ParentSession)
 	}
-	header.SeedLength = line.SeedLength
+	if line.SeedLength != nil {
+		header.IsSeeded = true
+		header.InheritedEventCount = session.SessionLogOffset(*line.SeedLength)
+	}
 	if line.Origin != nil {
 		header.Origin = *line.Origin
 	}

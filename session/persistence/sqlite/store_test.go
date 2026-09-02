@@ -16,15 +16,16 @@ func testHeader(id session.SessionID) session.SessionHeader {
 	depth := int64(0)
 	seed := int64(2)
 	return session.SessionHeader{
-		Version:         1,
-		ID:              id,
-		CreatedAt:       1700000000000,
-		CWD:             "D:\\tmp",
-		ParentSession:   session.SessionID("parent-1"),
-		SeedLength:      &seed,
-		Origin:          "subagent",
-		DelegationDepth: &depth,
-		AgentPreset:     "standard",
+		Version:             1,
+		ID:                  id,
+		CreatedAt:           1700000000000,
+		CWD:                 "D:\\tmp",
+		ParentSession:       session.SessionID("parent-1"),
+		IsSeeded:            true,
+		InheritedEventCount: session.SessionLogOffset(seed),
+		Origin:              "subagent",
+		DelegationDepth:     &depth,
+		AgentPreset:         "standard",
 	}
 }
 
@@ -89,7 +90,7 @@ func TestAppendLoadRoundTripPreservesHeaderAndEvents(t *testing.T) {
 	loaded := prefix.Meta
 	if loaded.ID != meta.ID || loaded.CWD != meta.CWD || loaded.ParentSession != meta.ParentSession ||
 		loaded.Origin != meta.Origin || loaded.AgentPreset != meta.AgentPreset ||
-		loaded.SeedLength == nil || *loaded.SeedLength != 2 ||
+		!loaded.IsSeeded || loaded.InheritedEventCount != 2 ||
 		loaded.DelegationDepth == nil || *loaded.DelegationDepth != 0 {
 		t.Fatalf("header round trip mismatch: %+v", loaded)
 	}
@@ -278,7 +279,8 @@ func TestListAndMaterializeHeader(t *testing.T) {
 	empty := testHeader("empty-1")
 	empty.CWD = ""
 	empty.ParentSession = ""
-	empty.SeedLength = nil
+	empty.IsSeeded = false
+	empty.InheritedEventCount = 0
 	empty.DelegationDepth = nil
 	empty.Origin = ""
 	if err := store.MaterializeHeader(empty); err != nil {
@@ -291,7 +293,7 @@ func TestListAndMaterializeHeader(t *testing.T) {
 	if len(headers) != 1 || headers[0].ID != empty.ID {
 		t.Fatalf("headers = %+v", headers)
 	}
-	if headers[0].CWD != "" || headers[0].SeedLength != nil {
+	if headers[0].CWD != "" || headers[0].IsSeeded {
 		t.Fatalf("optional columns must stay null: %+v", headers[0])
 	}
 	// The empty artifact loads with zero events and no torn marker.

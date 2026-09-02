@@ -32,6 +32,48 @@ const SESSION_FORMAT_VERSION = 0
 // artifacts.
 type SessionID = string
 
+// SessionSeq is the branded sequence number of one existing event in a
+// Session log. Port of the official `SessionSeq` brand
+// (packages/core/session/src/types.ts): memory-event positions are
+// distinguishable from log offsets so a consumer cannot mix a live event
+// position with a persisted prefix length. A valid SessionSeq is a
+// non-negative safe integer; zero is the first log event.
+type SessionSeq int64
+
+// NewSessionSeq admits a numeric value as an existing Session event position.
+// The official brand function rejects negative values, non-safe-integers,
+// and negative zero; the Go int64 domain narrows that to negatives.
+func NewSessionSeq(value int64) (SessionSeq, error) {
+	if value < 0 {
+		return 0, fmt.Errorf("SessionSeq must be a non-negative integer, got %d", value)
+	}
+	return SessionSeq(value), nil
+}
+
+// SessionLogOffset is the branded length of a Session log gap, prefix, or
+// read offset — it may equal the event count. Port of the official
+// `SessionLogOffset` brand: the persisted side of the seq/offset split
+// (fork-inherited prefix length, snapshot boundaries, storage cursors).
+type SessionLogOffset int64
+
+// NewSessionLogOffset admits a numeric value as a Session log offset.
+func NewSessionLogOffset(value int64) (SessionLogOffset, error) {
+	if value < 0 {
+		return 0, fmt.Errorf("SessionLogOffset must be a non-negative integer, got %d", value)
+	}
+	return SessionLogOffset(value), nil
+}
+
+// SessionSeqCursor is an inclusive Session event watermark, or -1 before any
+// event exists (official `SessionSeq | -1`). The -1 sentinel stays raw
+// because it is not a valid event position.
+type SessionSeqCursor = int64
+
+// OptionalSessionSeq is one existing Session event position, or explicit
+// absence (official `SessionSeq | null`); Go models the absence with a
+// pointer, so the value type is SessionSeq.
+type OptionalSessionSeq = *SessionSeq
+
 // SessionHeader is immutable validated storage metadata, kept outside the
 // conversation event log.
 type SessionHeader struct {
@@ -46,10 +88,16 @@ type SessionHeader struct {
 	CWD string `json:"cwd,omitempty"`
 	// ParentSession is the session this one was forked from, if any.
 	ParentSession SessionID `json:"parentSession,omitempty"`
-	// SeedLength is how many leading events were inherited through a seed;
-	// persisting it lets resume and replay distinguish parent history from
-	// child work.
-	SeedLength *int64 `json:"seedLength,omitempty"`
+	// IsSeeded reports whether this Session contains a fork-inherited event
+	// prefix. The exact prefix length is Session state
+	// (InheritedEventCount) rather than ordinary header metadata. Port of
+	// the official `SessionHeader.isSeeded` (W1): supplying replay history
+	// alone does not make it inherited.
+	IsSeeded bool `json:"-"`
+	// InheritedEventCount is the exact fork-inherited prefix length when
+	// IsSeeded is true; zero otherwise (validated). The constructor seed may
+	// also contain child-owned setup events after this cut.
+	InheritedEventCount SessionLogOffset `json:"-"`
 	// Origin is the coarse product classification for a session created as
 	// a subagent child; presentation metadata, not proof of continuable.
 	Origin string `json:"origin,omitempty"`

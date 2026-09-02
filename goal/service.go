@@ -498,7 +498,7 @@ func (s *Service) cacheLocked(sess *session.Session) (*goalCache, error) {
 			return nil, err
 		}
 	}
-	cache := &goalCache{state: state, activation: ActivationDisarmed, observedSeq: sess.Seq()}
+	cache := &goalCache{state: state, activation: ActivationDisarmed, observedSeq: int64(sess.Seq())}
 	s.caches[sess] = cache
 	return cache, nil
 }
@@ -599,7 +599,7 @@ func (s *Service) commitSnapshotLocked(
 // state. The caller holds s.mu and emits the notification after releasing
 // it (listeners may reenter the service).
 func (s *Service) commitLocked(a *agent.Agent, cache *goalCache, change ChangeMeta, activation GoalActivation) error {
-	cache.pendingActivation = &pendingActivation{seq: a.Session.Seq(), activation: activation}
+	cache.pendingActivation = &pendingActivation{seq: int64(a.Session.Seq()), activation: activation}
 	defer func() { cache.pendingActivation = nil }()
 	if _, err := a.Session.Append(EventChange, change, nil); err != nil {
 		return err

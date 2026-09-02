@@ -17,7 +17,7 @@ import (
 
 func newChildParent(t *testing.T, id string) (*agent.Agent, *session.Session) {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\work"})
+	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\work"}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}
@@ -177,15 +177,15 @@ func TestChildSessionMeta(t *testing.T) {
 	if meta.DelegationDepth == nil || *meta.DelegationDepth != 2 {
 		t.Fatalf("delegationDepth = %+v", meta.DelegationDepth)
 	}
-	if meta.SeedLength != nil {
-		t.Fatal("zero lineage must not record a seed length")
+	if meta.IsSeeded {
+		t.Fatal("zero lineage must not record seed metadata")
 	}
 	if meta.AgentPreset != "explorer" {
 		t.Fatalf("preset = %q", meta.AgentPreset)
 	}
 	seeded := ChildSessionMeta(nil, parent, 1, 7)
-	if seeded.SeedLength == nil || *seeded.SeedLength != 7 {
-		t.Fatalf("seedLength = %+v", seeded.SeedLength)
+	if !seeded.IsSeeded || seeded.InheritedEventCount != 7 {
+		t.Fatalf("seedLength = %+v", seeded)
 	}
 	if seeded.AgentPreset != "" {
 		t.Fatal("a rosterless deployment must not invent a preset")

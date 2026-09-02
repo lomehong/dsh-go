@@ -414,12 +414,13 @@ var ContextService = cordis.DefineService[*Agent]("agent")
 // Durable session data, so the session boundary validates and snapshots it
 // before asynchronous setup begins.
 type CreateAgentMeta struct {
-	CWD             string
-	ParentSession   session.SessionID
-	SeedLength      *int64
-	Origin          string
-	DelegationDepth *int64
-	AgentPreset     string
+	CWD                 string
+	ParentSession       session.SessionID
+	IsSeeded            bool
+	InheritedEventCount session.SessionLogOffset
+	Origin              string
+	DelegationDepth     *int64
+	AgentPreset         string
 }
 
 // CreateAgentOptions are options for creating an agent through the registry

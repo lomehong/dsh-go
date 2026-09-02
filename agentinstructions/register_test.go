@@ -100,7 +100,7 @@ func (f *testFixture) startPlugin(config Config) {
 
 func (f *testFixture) startAgent() {
 	f.t.Helper()
-	sess, err := session.NewDetached(session.SessionID("agent-1"), nil, &session.SessionHeader{ID: session.SessionID("agent-1"), CWD: f.nested})
+	sess, err := session.NewDetached(session.SessionID("agent-1"), nil, &session.SessionHeader{ID: session.SessionID("agent-1"), CWD: f.nested}, 0)
 	if err != nil {
 		f.t.Fatalf("session: %v", err)
 	}

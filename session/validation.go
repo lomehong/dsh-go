@@ -27,8 +27,11 @@ func validateSessionHeader(id SessionID, header SessionHeader) error {
 	if header.CWD != "" && !filepath.IsAbs(header.CWD) {
 		return fmt.Errorf("session header for %q has a non-absolute cwd %q", id, header.CWD)
 	}
-	if header.SeedLength != nil && *header.SeedLength < 0 {
-		return fmt.Errorf("session header for %q has negative seedLength %d", id, *header.SeedLength)
+	if header.InheritedEventCount < 0 {
+		return fmt.Errorf("session header for %q has negative inheritedEventCount %d", id, header.InheritedEventCount)
+	}
+	if !header.IsSeeded && header.InheritedEventCount != 0 {
+		return fmt.Errorf("session header for %q is unseeded but has inheritedEventCount %d (must be 0)", id, header.InheritedEventCount)
 	}
 	if header.Origin != "" && header.Origin != "subagent" {
 		return fmt.Errorf("session header for %q has an unknown origin %q", id, header.Origin)
