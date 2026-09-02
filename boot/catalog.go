@@ -900,8 +900,17 @@ var builders = map[string]pluginBuilder{
 				if !ok {
 					return errors.New("api-gateway: typert service is unavailable")
 				}
-				ctx.Provide(ServiceTypertGateway, gateway.New(ctx, registry))
-				return nil
+			ctx.Provide(ServiceTypertGateway, gateway.New(ctx, registry))
+			controller := gateway.NewSettingsController()
+			ctx.Provide("settingsController", controller)
+			// The composition may re-apply this row (bundle-row alias merge);
+			// the package face registers once.
+			if _, exists := registry.GetPackage("settings-controller", typert.FaceHost); !exists {
+				if _, err := registry.Register(controller.Contribution()); err != nil {
+					return fmt.Errorf("api-gateway: settings controller: %w", err)
+				}
+			}
+			return nil
 			},
 		}
 	},

@@ -92,6 +92,14 @@ func (g *Gateway) UnaryHandler() http.HandlerFunc {
 		if args == nil {
 			args = map[string]any{}
 		}
+		// The standard Remote payload wraps named args one level deep
+		// (official remoteRequest(): `args: payload.args`); tolerate the
+		// bare-args form defensively.
+		if len(args) == 1 {
+			if inner, ok := args["args"].(map[string]any); ok {
+				args = inner
+			}
+		}
 		value, err := g.Invoke(r.Context(), InvokeRequest{
 			Namespace: endpoint[:strings.Index(endpoint, "/")],
 			Method:    endpoint[strings.Index(endpoint, "/")+1:],
