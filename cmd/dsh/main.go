@@ -206,11 +206,11 @@ func serveWeb(app *boot.App, anchor string, host string, port string, logger cor
 		return err
 	}
 	gatewayValue := app.Root().Get(boot.ServiceTypertGateway)
-	gateway, ok := gatewayValue.(*gateway.Gateway)
-	if !ok || gateway == nil {
+	gw, ok := gatewayValue.(*gateway.Gateway)
+	if !ok || gw == nil {
 		return fmt.Errorf("web: typert gateway service has type %T", gatewayValue)
 	}
-	mux := gatewaystream.NewMuxServer(gateway.OpenWireStream, logger, 2*time.Second)
+	mux := gatewaystream.NewMuxServer(gw.OpenWireStream, logger, 2*time.Second)
 	if err := mux.Register(registry); err != nil {
 		return err
 	}
@@ -218,7 +218,13 @@ func serveWeb(app *boot.App, anchor string, host string, port string, logger cor
 	if err := legacy.Register(registry, logger, "/api/events.mux", "/api/events.host"); err != nil {
 		return err
 	}
-	mounted.SetUnaryHandler(gateway.UnaryHandler())
+	mounted.SetUnaryHandler(gw.UnaryHandler())
+	// The forwarded-event source: the Go host composes no allowlisted Host
+	// event emitters yet, so $events streams open empty and stay open —
+	// completing the client's connection-generation readiness gate.
+	if _, err := gw.RegisterRemoteEvents(gateway.EmptyRemoteEventSource, gatewaystream.RemoteEventHostInfo{}); err != nil {
+		return err
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)

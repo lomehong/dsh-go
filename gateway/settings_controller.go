@@ -26,9 +26,16 @@ func absentProvider() (any, error) {
 }
 
 // Describe answers the redacted layered snapshot of every registered
-// namespace plus its serialized schema.
+// namespace plus its serialized schema. The Go settings store composes no
+// schema namespaces yet, so the honest describe is a writable provider with
+// an empty namespace view — enough for the client settings plugin to boot,
+// provide settingsScope, and let the locale cascade activate.
 func (c *SettingsController) Describe(ctx context.Context) (any, error) {
-	return absentProvider()
+	return map[string]any{
+		"writable":    true,
+		"hasDocument": false,
+		"namespaces":  []any{},
+	}, nil
 }
 
 // CanOpenAgentPresetDirectory reports whether the deployment opens an
