@@ -917,6 +917,13 @@ var builders = map[string]pluginBuilder{
 						return fmt.Errorf("api-gateway: skills controller: %w", err)
 					}
 				}
+				picker := gateway.NewDirectoryPickerController()
+				ctx.Provide("directoryPickerController", picker)
+				if _, exists := registry.GetPackage("directory-picker-controller", typert.FaceHost); !exists {
+					if _, err := registry.Register(picker.Contribution()); err != nil {
+						return fmt.Errorf("api-gateway: directory picker controller: %w", err)
+					}
+				}
 				return nil
 			},
 		}
