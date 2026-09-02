@@ -910,6 +910,13 @@ var builders = map[string]pluginBuilder{
 						return fmt.Errorf("api-gateway: settings controller: %w", err)
 					}
 				}
+				skills := gateway.NewSkillsController(nil)
+				ctx.Provide("sessionSkillCatalog", skills)
+				if _, exists := registry.GetPackage("skills-controller", typert.FaceHost); !exists {
+					if _, err := registry.Register(skills.Contribution()); err != nil {
+						return fmt.Errorf("api-gateway: skills controller: %w", err)
+					}
+				}
 				return nil
 			},
 		}
