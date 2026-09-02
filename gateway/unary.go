@@ -164,10 +164,13 @@ func (g *Gateway) UnaryHandler() http.HandlerFunc {
 			if !errors.As(err, &gerr) {
 				gerr = wrapGatewayError("gateway/unknown", endpoint, "", err, "")
 			}
+			// The browser client validates error.code against a closed
+			// union whose fallback is "internal"; the Go-side diagnostic
+			// rides in the message.
 			result["ok"] = false
 			result["error"] = map[string]any{
-				"code":    string(gerr.Code),
-				"message": gerr.message,
+				"code":    "internal",
+				"message": string(gerr.Code) + ": " + gerr.message,
 			}
 		}
 		if err := json.NewEncoder(w).Encode(map[string]any{

@@ -924,6 +924,13 @@ var builders = map[string]pluginBuilder{
 						return fmt.Errorf("api-gateway: directory picker controller: %w", err)
 					}
 				}
+				runner := gateway.NewDynamicCordisRunnerController()
+				ctx.Provide("dynamicCordisRunnerController", runner)
+				if _, exists := registry.GetPackage("dynamic-cordis-runner-controller", typert.FaceHost); !exists {
+					if _, err := registry.Register(runner.Contribution()); err != nil {
+						return fmt.Errorf("api-gateway: dynamic cordis runner controller: %w", err)
+					}
+				}
 				// The workspace Remote namespace wires only when the composition
 				// provides the workspace registry — minimal profiles (headless,
 				// test fixtures) skip it instead of failing the assembly.
