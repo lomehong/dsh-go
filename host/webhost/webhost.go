@@ -193,15 +193,11 @@ func (h *Host) serve(w http.ResponseWriter, r *http.Request) error {
 // after. The Go host never rebuilds bundles, so no rebuilt frames are ever
 // emitted.
 func (h *Host) servePluginsEvents(w http.ResponseWriter, r *http.Request) error {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
-		return nil
-	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
+	controller := http.NewResponseController(w)
 	frame, err := json.Marshal(map[string]any{"type": "graph", "graph": h.graph})
 	if err != nil {
 		return err
@@ -209,7 +205,7 @@ func (h *Host) servePluginsEvents(w http.ResponseWriter, r *http.Request) error 
 	if _, err := fmt.Fprintf(w, "data: %s\n\n", frame); err != nil {
 		return nil
 	}
-	flusher.Flush()
+	controller.Flush()
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -220,7 +216,7 @@ func (h *Host) servePluginsEvents(w http.ResponseWriter, r *http.Request) error 
 			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
 				return nil
 			}
-			flusher.Flush()
+			controller.Flush()
 		}
 	}
 }

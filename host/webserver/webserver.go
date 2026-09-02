@@ -372,6 +372,13 @@ func (w *recordedWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
+// Unwrap exposes the underlying writer to http.ResponseController, so
+// streaming handlers (the /plugins/events SSE channel) can reach the
+// server's Flusher through the recorded wrapper.
+func (w *recordedWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // ContextService is the typed "webServer" service handle; the assertion for
 // the registry lookup lives here instead of at every consumer.
 var ContextService = cordis.DefineService[*Registry]("webServer")
