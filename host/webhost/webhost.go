@@ -8,6 +8,7 @@ package webhost
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"mime"
@@ -140,6 +141,9 @@ func (h *Host) Close() error {
 // entry). Path traversal outside the dist tree is rejected.
 func (h *Host) serve(w http.ResponseWriter, r *http.Request) error {
 	if strings.HasPrefix(r.URL.Path, "/plugins/") {
+		if r.URL.Path == "/plugins/events" {
+			return h.servePluginsEvents(w, r)
+		}
 		if !servePlugins(w, r, h.responses) {
 			http.Error(w, "not found", http.StatusNotFound)
 		}
@@ -173,6 +177,43 @@ func (h *Host) serve(w http.ResponseWriter, r *http.Request) error {
 	w.WriteHeader(http.StatusOK)
 	_, err = w.Write(raw)
 	return err
+}
+
+// servePlugins pushes the HMR SSE channel (official /plugins/events, client-hmr
+// src/events.ts wire): one full graph frame on connect, keepalive comments
+// after. The Go host never rebuilds bundles, so no rebuilt frames are ever
+// emitted.
+func (h *Host) servePluginsEvents(w http.ResponseWriter, r *http.Request) error {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return nil
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	frame, err := json.Marshal(map[string]any{"type": "graph", "graph": h.graph})
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", frame); err != nil {
+		return nil
+	}
+	flusher.Flush()
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return nil
+		case <-ticker.C:
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				return nil
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 // serveIndex renders the dist index.html with the client boot protocol rows
