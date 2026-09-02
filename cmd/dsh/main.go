@@ -72,6 +72,13 @@ func run() error {
 	os.Args = append([]string{os.Args[0]}, normalizeWebAlias(os.Args[1:])...)
 	flag.Parse()
 
+	// --home is the DSH_HOME override: every home consumer — profile
+	// manifests, config-expression dshHomePath, storage roots — must resolve
+	// to the same home the launcher runs with.
+	if *home != "" {
+		os.Setenv("DSH_HOME", *home)
+	}
+
 	args := flag.Args()
 	// Launcher-level flags the web-startup row parses from the inner
 	// arguments are re-injected so the composition sees them (Go's flag
