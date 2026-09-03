@@ -461,8 +461,11 @@ func nodeModulesFromDist(dist string) string {
 	return filepath.Clean(filepath.Join(dist, "..", "..", ".."))
 }
 
-// servePlugins answers exact-URL combo and map lookups; a miss lets the
-// caller fall through (official plugin route is exact-match).
+// servePlugins answers exact-URL combo lookups. The map key is the raw
+// request target, which keeps the double-question combo marker verbatim:
+// browsers serialize `/plugins/??a&rev=b` with both question marks (the
+// second is query content), so RequestURI matches the composed key exactly
+// (official plugin route is a `/plugins` prefix serving the same table).
 func servePlugins(w http.ResponseWriter, r *http.Request, responses map[string]servedResponse) bool {
 	response, ok := responses[r.URL.RequestURI()]
 	if !ok {
