@@ -931,6 +931,27 @@ var builders = map[string]pluginBuilder{
 						return fmt.Errorf("api-gateway: dynamic cordis runner controller: %w", err)
 					}
 				}
+				agentPresets := gateway.NewAgentPresetsController()
+				ctx.Provide("agentPresetsController", agentPresets)
+				if _, exists := registry.GetPackage("agent-presets-controller", typert.FaceHost); !exists {
+					if _, err := registry.Register(agentPresets.Contribution()); err != nil {
+						return fmt.Errorf("api-gateway: agent presets controller: %w", err)
+					}
+				}
+				llmController := gateway.NewLlmController()
+				ctx.Provide("llmController", llmController)
+				if _, exists := registry.GetPackage("llm-controller", typert.FaceHost); !exists {
+					if _, err := registry.Register(llmController.Contribution()); err != nil {
+						return fmt.Errorf("api-gateway: llm controller: %w", err)
+					}
+				}
+				pluginInventory := gateway.NewPluginInventoryController()
+				ctx.Provide("pluginInventoryController", pluginInventory)
+				if _, exists := registry.GetPackage("plugin-inventory-controller", typert.FaceHost); !exists {
+					if _, err := registry.Register(pluginInventory.Contribution()); err != nil {
+						return fmt.Errorf("api-gateway: plugin inventory controller: %w", err)
+					}
+				}
 				// The workspace Remote namespace wires only when the composition
 				// provides the workspace registry — minimal profiles (headless,
 				// test fixtures) skip it instead of failing the assembly.
