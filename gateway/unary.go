@@ -31,6 +31,23 @@ func (g *Gateway) OpenWireStream(endpoint string, payload any) (<-chan any, <-ch
 			}
 		}
 	}
+	if endpoint == workspaceFollowEndpoint {
+		frames, cancel, err := g.openWorkspaceFollow(args, context.Background())
+		if err != nil {
+			errCh <- err
+			close(errCh)
+			return nil, errCh, func() {}
+		}
+		out := make(chan any)
+		go func() {
+			defer close(out)
+			for value := range frames {
+				out <- value
+			}
+			close(errCh)
+		}()
+		return out, errCh, cancel
+	}
 	if endpoint != eventsEndpoint {
 		errCh <- wrapGatewayError("gateway/service-unavailable", endpoint, "", nil, "stream endpoint %q has no Go port", endpoint)
 		close(errCh)
@@ -49,7 +66,9 @@ func (g *Gateway) OpenWireStream(endpoint string, payload any) (<-chan any, <-ch
 			out <- value
 		}
 		<-done
-		errCh <- nil
+		// A normal stream end closes errCh without a value: the mux relay
+		// treats a closed error channel as clean termination, while a nil
+		// error value would dereference in its error frame path.
 		close(errCh)
 	}()
 	return out, errCh, cancel
