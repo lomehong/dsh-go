@@ -48,6 +48,23 @@ func (g *Gateway) OpenWireStream(endpoint string, payload any) (<-chan any, <-ch
 		}()
 		return out, errCh, cancel
 	}
+	if endpoint == sessionControlEndpoint {
+		frames, cancel, err := g.openSessionControl(args, context.Background())
+		if err != nil {
+			errCh <- err
+			close(errCh)
+			return nil, errCh, func() {}
+		}
+		out := make(chan any)
+		go func() {
+			defer close(out)
+			for value := range frames {
+				out <- value
+			}
+			close(errCh)
+		}()
+		return out, errCh, cancel
+	}
 	if endpoint != eventsEndpoint {
 		errCh <- wrapGatewayError("gateway/service-unavailable", endpoint, "", nil, "stream endpoint %q has no Go port", endpoint)
 		close(errCh)
