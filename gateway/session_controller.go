@@ -179,7 +179,9 @@ func (c *SessionController) List(ctx context.Context, request map[string]any) (a
 func (c *SessionController) Contribution() typert.Contribution {
 	jsonCodec := typert.Codec{Mode: typert.CodecSrcJSON}
 	requestParam := typert.InvocationParameterDescriptor{
-		Name: "request", Wire: "request", Source: typert.SourceJSON, Codec: jsonCodec,
+		// Wire name is "_request" (official generated descriptor): the
+		// browser sends the SessionListRequest under that field.
+		Name: "_request", Wire: "_request", Source: typert.SourceJSON, Codec: jsonCodec,
 	}
 	inv := typert.InvocationReceiver{Kind: typert.ReceiverDirect}
 	descriptor := func(id, method, implementation string, params ...typert.InvocationParameterDescriptor) typert.InvocationDescriptor {
