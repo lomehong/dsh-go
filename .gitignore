@@ -30,3 +30,4 @@ slide7-preview.png
 *.png
 
 .omo/
+.playwright-mcp/
