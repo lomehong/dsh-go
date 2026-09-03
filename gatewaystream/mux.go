@@ -226,9 +226,24 @@ func (s *MuxServer) terminateIfStillStalled(ws *websocket.Conn, observed int) {
 	})
 }
 
+// wsWriter serializes data-frame writes on one socket: gorilla/websocket
+// permits at most one concurrent writer, and each open stream relays from
+// its own goroutine.
+type wsWriter struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (w *wsWriter) writeJSON(v any) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.conn.WriteJSON(v)
+}
+
 // runConnection reads client messages (open/close frames) and multiplexes
 // the logical streams until the socket dies.
 func (s *MuxServer) runConnection(ws *websocket.Conn) {
+	writer := &wsWriter{conn: ws}
 	defer func() {
 		s.cancelAll()
 		s.mu.Lock()
@@ -252,7 +267,7 @@ func (s *MuxServer) runConnection(ws *websocket.Conn) {
 		}
 		switch clientMessage.Kind {
 		case "open":
-			s.openStream(ws, clientMessage)
+			s.openStream(writer, clientMessage)
 		case "cancel":
 			s.cancelStream(clientMessage.StreamID)
 		}
@@ -264,9 +279,9 @@ func (s *MuxServer) runConnection(ws *websocket.Conn) {
 // ({type:'item', streamId, value}); stream errors surface as error frames;
 // source exhaustion answers end. The cancel is tracked per stream so a
 // client cancel message (or the socket dying) tears the source down.
-func (s *MuxServer) openStream(ws *websocket.Conn, msg clientMessage) {
+func (s *MuxServer) openStream(w *wsWriter, msg clientMessage) {
 	if s.open == nil {
-		_ = ws.WriteJSON(map[string]any{"type": "error", "streamId": msg.StreamID, "error": map[string]any{"code": "internal", "message": "remote stream dispatcher is not mounted"}})
+		_ = w.writeJSON(map[string]any{"type": "error", "streamId": msg.StreamID, "error": map[string]any{"code": "internal", "message": "remote stream dispatcher is not mounted"}})
 		return
 	}
 	frames, errs, cancel := s.open(msg.Endpoint, msg.Payload)
@@ -286,15 +301,15 @@ func (s *MuxServer) openStream(ws *websocket.Conn, msg clientMessage) {
 			select {
 			case frame, ok := <-frames:
 				if !ok {
-					_ = ws.WriteJSON(map[string]any{"type": "end", "streamId": msg.StreamID})
+					_ = w.writeJSON(map[string]any{"type": "end", "streamId": msg.StreamID})
 					return
 				}
-				_ = ws.WriteJSON(map[string]any{"type": "item", "streamId": msg.StreamID, "value": frame})
+				_ = w.writeJSON(map[string]any{"type": "item", "streamId": msg.StreamID, "value": frame})
 			case err, ok := <-errs:
 				if !ok {
 					return
 				}
-				_ = ws.WriteJSON(map[string]any{"type": "error", "streamId": msg.StreamID, "error": map[string]any{"code": "internal", "message": err.Error()}})
+				_ = w.writeJSON(map[string]any{"type": "error", "streamId": msg.StreamID, "error": map[string]any{"code": "internal", "message": err.Error()}})
 				return
 			}
 		}

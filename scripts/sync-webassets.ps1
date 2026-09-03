@@ -67,7 +67,9 @@ if (Test-Path (Join-Path $webassets "node_modules")) {
     Remove-Item -Recurse -Force (Join-Path $webassets "node_modules")
 }
 New-Item -ItemType Directory -Force -Path $dstFront | Out-Null
-Copy-Item (Join-Path $srcRoot "dist") (Join-Path $dstFront "dist") -Recurse -Force
+# apps/web 的 vite outDir 即 dist（assets/index.html 直接在 dist 下），
+# 直接复制该目录本身到 dsh-frontend/dist。
+Copy-Item $srcRoot (Join-Path $dstFront "dist") -Recurse -Force
 Get-ChildItem (Join-Path $dstFront "dist") -Recurse -File -Filter "*.map" | Remove-Item -Force
 $frontPkg = Get-Content (Join-Path $Monorepo "apps\web\package.json") -Raw
 Set-Content (Join-Path $dstFront "package.json") -Value $frontPkg -NoNewline

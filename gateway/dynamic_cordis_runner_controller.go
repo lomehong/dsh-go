@@ -23,6 +23,14 @@ func (c *DynamicCordisRunnerController) SyncInspectManifest(ctx context.Context,
 	return nil, nil
 }
 
+// Inventory answers the client plugin-inventory poll (official
+// DynamicCordisRunnerService.inventory). The Go host runs no dynamic cordis
+// packages, so the honest empty roster is an empty array — the official
+// shape for "no dynamic plugin has ever run".
+func (c *DynamicCordisRunnerController) Inventory(ctx context.Context) (any, error) {
+	return []any{}, nil
+}
+
 // Contribution is the strict typert definition of the dynamicCordisRunner
 // namespace.
 func (c *DynamicCordisRunnerController) Contribution() typert.Contribution {
@@ -43,6 +51,16 @@ func (c *DynamicCordisRunnerController) Contribution() typert.Contribution {
 					{Name: "providers", Wire: "providers", Source: typert.SourceJSON, Codec: jsonCodec},
 				},
 				Result: jsonCodec,
+			},
+			{
+				ID:                    "dynamicCordisRunner.inventory",
+				Service:               "dynamicCordisRunnerController",
+				Namespace:             "dynamicCordisRunner",
+				Method:                "inventory",
+				Implementation:        "Inventory",
+				Invocation:            typert.InvocationReceiver{Kind: typert.ReceiverDirect},
+				CancellationParameter: "signal",
+				Result:                jsonCodec,
 			},
 		},
 	}
