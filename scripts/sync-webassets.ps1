@@ -26,9 +26,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-# The script lives in <repo>/scripts; the repo root is its parent. Manual
-# runs from elsewhere fall back to the current directory.
-$repo = if ($PSScriptRoot) { Split-Path (Split-Path $PSScriptRoot) } else { (Get-Location).Path }
+# The script lives in <repo>/scripts; the repo root is its parent (a single
+# Split-Path — the previous double split descended one level too far and
+# wrote under the parent workspace instead of this repo).
+$repo = if ($PSScriptRoot) { Split-Path $PSScriptRoot } else { (Get-Location).Path }
 $webassets = Join-Path $repo "webassets"
 $srcPkgs = Join-Path $Monorepo "packages"
 
