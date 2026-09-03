@@ -121,6 +121,72 @@ func (st *Store) HasNamespace(ns string) bool {
 	return ok
 }
 
+// Scope returns the owner handle for a registered namespace. A namespace the
+// composition never registered yields nil (the caller answers the
+// absent-namespace diagnostic).
+func (st *Store) Scope(ns string) *Scope {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if _, ok := st.register[ns]; !ok {
+		return nil
+	}
+	return &Scope{store: st, ns: ns}
+}
+
+// Namespaces returns the registered namespace names in registration order.
+func (st *Store) Namespaces() []string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	out := make([]string, 0, len(st.register))
+	for ns := range st.register {
+		out = append(out, ns)
+	}
+	return out
+}
+
+// EnsurePassthrough registers a namespace with no schema authority when it
+// is not yet registered, returning its scope. UI-owned namespaces whose host
+// half ships no schema (the web theme/appearance sections) persist whatever
+// the client validates against its own schema; a namespace the composition
+// already registered is returned untouched.
+func (st *Store) EnsurePassthrough(ns string) *Scope {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if _, ok := st.register[ns]; !ok {
+		st.register[ns] = &registration{}
+	}
+	return &Scope{store: st, ns: ns}
+}
+
+// NamespaceView is one describe entry: the schema envelope, the resolved
+// value, the composition base, and the raw user section. An unregistered
+// namespace yields nil.
+func (st *Store) NamespaceView(ns string) map[string]any {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	reg, ok := st.register[ns]
+	if !ok {
+		return nil
+	}
+	view := map[string]any{
+		"ns":    ns,
+		"value": st.resolveLocked(ns),
+	}
+	if reg.schema != nil && reg.schema.Envelope != nil {
+		view["schema"] = json.RawMessage(reg.schema.Envelope)
+	} else {
+		view["schema"] = nil
+	}
+	if reg.base != nil {
+		view["base"] = reg.base
+	}
+	if user, wrote := st.user[ns]; wrote {
+		view["user"] = user
+		view["revision"] = st.revision[ns]
+	}
+	return view
+}
+
 // Section returns the raw user-layer section without resolution; absent means
 // the user never wrote this namespace.
 func (st *Store) Section(ns string) map[string]any {
@@ -141,7 +207,7 @@ func (s *Scope) Get() map[string]any {
 func (st *Store) resolveLocked(ns string) map[string]any {
 	resolved := map[string]any{}
 	if reg := st.register[ns]; reg != nil {
-		if reg.schema.Defaults != nil {
+		if reg.schema != nil && reg.schema.Defaults != nil {
 			mergeInto(resolved, reg.schema.Defaults())
 		}
 		mergeInto(resolved, reg.base)
@@ -232,7 +298,7 @@ func (s *Scope) write(produce func(user map[string]any) map[string]any, source U
 	}
 
 	reg := st.register[s.ns]
-	if reg != nil && reg.schema.Validate != nil {
+	if reg != nil && reg.schema != nil && reg.schema.Validate != nil {
 		// Validate sees the section exactly as the owner will: defaults and
 		// base applied. A throw refuses the write that produced it.
 		if err := reg.schema.Validate(nextResolved); err != nil {

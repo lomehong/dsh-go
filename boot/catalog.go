@@ -351,12 +351,47 @@ var builders = map[string]pluginBuilder{
 						}
 					}
 				}
-				store := settings.NewStore(deps.Logger)
-				f, err := file.Open(path, store, deps.Logger)
-				if err != nil {
-					return err
-				}
-				ctx.Provide(ServiceSettings, store)
+			store := settings.NewStore(deps.Logger)
+			f, err := file.Open(path, store, deps.Logger)
+			if err != nil {
+				return err
+			}
+			// The web theme namespace ships no Go host half (ui-theme is a
+			// frontend-domain row), yet the browser scope rehydrates its
+			// schema from settings/describe before any preference resolves.
+			// Register the exact client-side ThemeSettingsSchema envelope so
+			// appearance/font-size persists and round-trips.
+			themeEnvelope, err := json.Marshal(map[string]any{
+				"type": "object",
+				"dict": map[string]any{
+					"preference": map[string]any{
+						"type": "union",
+						"list": []any{
+							map[string]any{"type": "const", "value": "light"},
+							map[string]any{"type": "const", "value": "dark"},
+							map[string]any{"type": "const", "value": "system"},
+						},
+						"meta": map[string]any{"default": "system"},
+					},
+					"fontSize": map[string]any{
+						"type": "number",
+						"meta": map[string]any{"default": 14},
+					},
+				},
+				"meta": map[string]any{"default": map[string]any{"preference": "system", "fontSize": 14}},
+			})
+			if err != nil {
+				return err
+			}
+			if _, err := store.Register("ui-theme", &settings.Schema{
+				Envelope: themeEnvelope,
+				Defaults: func() map[string]any {
+					return map[string]any{"preference": "system", "fontSize": 14}
+				},
+			}, map[string]any{"preference": "system", "fontSize": 14}); err != nil {
+				return err
+			}
+			ctx.Provide(ServiceSettings, store)
 				if err := ctx.Effect(func() (cordis.Disposer, error) {
 					return cordis.Disposer(func() { _ = f.Close() }), nil
 				}); err != nil {
@@ -901,7 +936,9 @@ var builders = map[string]pluginBuilder{
 					return errors.New("api-gateway: typert service is unavailable")
 				}
 				ctx.Provide(ServiceTypertGateway, gateway.New(ctx, registry))
-				controller := gateway.NewSettingsController()
+				controller := gateway.NewSettingsController(func() any {
+					return ctx.Get(ServiceSettings)
+				})
 				ctx.Provide("settingsController", controller)
 				// The composition may re-apply this row (bundle-row alias merge);
 				// the package face registers once.
