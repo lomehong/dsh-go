@@ -155,6 +155,16 @@ func (m *Mounts) teardown() {
 // standingKeyFor split.
 func (m *Mounts) Resolve(id string) (AgentPreset, error) { return m.roster.Resolve(id) }
 
+// List enumerates the roster's presets (the agentPresets/list wire source).
+func (m *Mounts) List() ([]AgentPreset, error) { return m.roster.List() }
+
+// Authorable reports whether this deployment has a locally authored preset
+// root (the agentPresets/list authorable flag).
+func (m *Mounts) Authorable() bool { return m.roster.Authorable() }
+
+// DefaultID reads the deployment's default preset id (empty when unset).
+func (m *Mounts) DefaultID() string { return m.roster.DefaultID() }
+
 // Mount installs the preset's standing composition around one agent: the
 // agent's scope key binds to the standing key, so every registration the
 // composition filed becomes visible down the agent's scope chain. Port of

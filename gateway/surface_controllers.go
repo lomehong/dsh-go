@@ -3,23 +3,67 @@ package gateway
 import (
 	"context"
 
+	"dshgo/preset"
 	"dshgo/typert"
 )
 
 // AgentPresetsController hosts the agentPresets Remote namespace (official
-// dsh-agent-presets). The Go host keeps a composed preset catalog on the
-// agent side but no Remote authoring surface yet, so list answers the honest
-// empty roster and authorable=false (the UI hides preset authoring instead
-// of exposing a broken create button).
-type AgentPresetsController struct{}
+// dsh-agent-presets). List projects the composed preset roster — the same
+// shipped/user roots the launcher mounts agents from.
+type AgentPresetsController struct {
+	lookup func() any
+}
 
-// NewAgentPresetsController builds the namespace host.
-func NewAgentPresetsController() *AgentPresetsController { return &AgentPresetsController{} }
+// NewAgentPresetsController builds the namespace host. The lookup resolves
+// the composition's preset mounts per call (nil provider answers an empty
+// roster with authorable=false).
+func NewAgentPresetsController(lookup func() any) *AgentPresetsController {
+	if lookup == nil {
+		lookup = func() any { return nil }
+	}
+	return &AgentPresetsController{lookup: lookup}
+}
 
-// List answers the preset roster (official agentPresets/list): the shape the
-// Settings Agent-preset panel validates, with an empty presets array.
+// mounts resolves the composed preset mounts, or nil when absent.
+func (c *AgentPresetsController) mounts() *preset.Mounts {
+	if mounts, ok := c.lookup().(*preset.Mounts); ok && mounts != nil {
+		return mounts
+	}
+	return nil
+}
+
+// List answers the preset roster (official agentPresets/list): every
+// discovered preset with its trust/default/broken facts, plus the
+// authorable flag the UI gates preset authoring on.
 func (c *AgentPresetsController) List(ctx context.Context) (any, error) {
-	return map[string]any{"presets": []any{}, "authorable": false}, nil
+	mounts := c.mounts()
+	if mounts == nil {
+		return map[string]any{"presets": []any{}, "authorable": false}, nil
+	}
+	presets, err := mounts.List()
+	if err != nil {
+		return nil, wrapGatewayError("gateway/internal", "agentPresets/list", "", err, "preset discovery failed")
+	}
+	defaultID := mounts.DefaultID()
+	items := make([]any, 0, len(presets))
+	for _, p := range presets {
+		row := map[string]any{
+			"id":        p.ID,
+			"trust":     p.Trust,
+			"isDefault": p.ID == defaultID,
+		}
+		if p.Name != nil {
+			row["name"] = *p.Name
+		}
+		if p.Description != nil {
+			row["description"] = *p.Description
+		}
+		if p.Broken != nil {
+			row["broken"] = *p.Broken
+		}
+		items = append(items, row)
+	}
+	return map[string]any{"presets": items, "authorable": mounts.Authorable()}, nil
 }
 
 // Contribution is the strict typert definition of the agentPresets namespace.
@@ -96,19 +140,41 @@ func (c *LlmController) Contribution() typert.Contribution {
 	}
 }
 
-// PluginInventoryController hosts the pluginInventory Remote namespace
-// (official dsh-host-plugin-inventory). The Go host's loader rows are the
-// boot catalog, not dynamic client plugins, so the snapshot answers an empty
-// entry list (the Settings Plugins panel renders its empty state).
-type PluginInventoryController struct{}
+// PluginInventoryRow is one wire inventory row: the composed profile entry
+// facts the Settings Plugins panel renders.
+type PluginInventoryRow struct {
+	EntryID    any    `json:"entryId"`
+	ModuleName string `json:"moduleName"`
+	Enabled    bool   `json:"enabled"`
+	FiberPhase *any   `json:"fiberPhase"`
+}
 
-// NewPluginInventoryController builds the namespace host.
-func NewPluginInventoryController() *PluginInventoryController { return &PluginInventoryController{} }
+// PluginInventoryController hosts the pluginInventory Remote namespace
+// (official dsh-host-plugin-inventory): a read-only projection of the
+// composed profile rows.
+type PluginInventoryController struct {
+	rows func() []PluginInventoryRow
+}
+
+// NewPluginInventoryController builds the namespace host over the composed
+// entry snapshot.
+func NewPluginInventoryController(rows func() []PluginInventoryRow) *PluginInventoryController {
+	if rows == nil {
+		rows = func() []PluginInventoryRow { return nil }
+	}
+	return &PluginInventoryController{rows: rows}
+}
 
 // List answers the loader-entry snapshot (official pluginInventory/list):
-// {entries:[], agentPresets:[]} — no dynamic rows on the Go host.
+// every composed profile row with its enabled flag; fiberPhase stays null
+// because the Go host holds no live plugin fibers.
 func (c *PluginInventoryController) List(ctx context.Context) (any, error) {
-	return map[string]any{"entries": []any{}}, nil
+	rows := c.rows()
+	entries := make([]any, 0, len(rows))
+	for _, row := range rows {
+		entries = append(entries, row)
+	}
+	return map[string]any{"entries": entries}, nil
 }
 
 // Contribution is the strict typert definition of the pluginInventory namespace.

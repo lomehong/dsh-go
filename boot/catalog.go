@@ -33,6 +33,7 @@ import (
 	"dshgo/compaction"
 	"dshgo/compactionbasic"
 	"dshgo/cordis"
+	"dshgo/cordis/loader"
 	"dshgo/credentials"
 	"dshgo/filereference"
 	"dshgo/fs"
@@ -968,7 +969,9 @@ var builders = map[string]pluginBuilder{
 						return fmt.Errorf("api-gateway: dynamic cordis runner controller: %w", err)
 					}
 				}
-				agentPresets := gateway.NewAgentPresetsController()
+				agentPresets := gateway.NewAgentPresetsController(func() any {
+					return ctx.Get(ServiceAgentPresets)
+				})
 				ctx.Provide("agentPresetsController", agentPresets)
 				if _, exists := registry.GetPackage("agent-presets-controller", typert.FaceHost); !exists {
 					if _, err := registry.Register(agentPresets.Contribution()); err != nil {
@@ -982,7 +985,33 @@ var builders = map[string]pluginBuilder{
 						return fmt.Errorf("api-gateway: llm controller: %w", err)
 					}
 				}
-				pluginInventory := gateway.NewPluginInventoryController()
+				pluginInventory := gateway.NewPluginInventoryController(func() []gateway.PluginInventoryRow {
+					rows := make([]gateway.PluginInventoryRow, 0)
+					for _, entry := range ComposedEntries() {
+						disabled, err := loader.IsDisabled(entry)
+						if err != nil {
+							disabled = true
+						}
+						var phase any
+						rows = append(rows, gateway.PluginInventoryRow{
+							EntryID:    entry.ID,
+							ModuleName: entry.Name,
+							Enabled:    !disabled,
+							FiberPhase: &phase,
+						})
+					}
+					return rows
+				})
+				sessionController := gateway.NewSessionController(
+					func() any { return ctx.Get(ServiceLlm) },
+					func() any { return ctx.Get(ServiceAgentDefaultModel) },
+				)
+				ctx.Provide("sessionController", sessionController)
+				if _, exists := registry.GetPackage("session-controller", typert.FaceHost); !exists {
+					if _, err := registry.Register(sessionController.Contribution()); err != nil {
+						return fmt.Errorf("api-gateway: session controller: %w", err)
+					}
+				}
 				ctx.Provide("pluginInventoryController", pluginInventory)
 				if _, exists := registry.GetPackage("plugin-inventory-controller", typert.FaceHost); !exists {
 					if _, err := registry.Register(pluginInventory.Contribution()); err != nil {
@@ -1978,15 +2007,27 @@ var builders = map[string]pluginBuilder{
 				}
 				if store := ctx.Get(ServiceSettings); store != nil {
 					settingsStore := store.(*settings.Store)
+					// The envelope must be schemastery-serialized: the browser
+					// scope rehydrates it with `new Schema(envelope)` before
+					// any value resolves. Object nodes carry their fields in
+					// `dict`; choice fields are unions of consts with the
+					// default in meta (the JSON-schema `properties` shape
+					// rehydrates to a fieldless object and the scope fails
+					// with "no defaultPreset field").
+					choices := make([]any, 0, len(names))
+					for _, name := range names {
+						choices = append(choices, map[string]any{"type": "const", "value": name})
+					}
 					envelope, err := json.Marshal(map[string]any{
 						"type": "object",
-						"properties": map[string]any{
+						"dict": map[string]any{
 							"defaultPreset": map[string]any{
-								"type": "enum",
-								"enum": names,
+								"type": "union",
+								"list": choices,
+								"meta": map[string]any{"default": service.DefaultPreset()},
 							},
 						},
-						"required": []string{"defaultPreset"},
+						"meta": map[string]any{"default": map[string]any{"defaultPreset": service.DefaultPreset()}},
 					})
 					if err != nil {
 						return err
@@ -3363,6 +3404,14 @@ var batchThreeBuilders = map[string]pluginBuilder{
 				includeShippedRoot := true
 				if cfg.IncludeShippedRoot != nil {
 					includeShippedRoot = *cfg.IncludeShippedRoot
+				}
+				// The shipped preset set travels inside the installed
+				// dsh-agent-presets package (official resolveSpec reads its
+				// own presets/ directory). An anchor-relative default keeps
+				// the fork self-contained; an explicit shippedRoot wins.
+				if cfg.ShippedRoot == "" && deps.Anchor != "" {
+					cfg.ShippedRoot = filepath.Join(filepath.Dir(deps.Anchor),
+						"node_modules", "@deepseek-ai", "dsh-agent-presets", "presets")
 				}
 				includeUserRoot := true
 				if cfg.IncludeUserRoot != nil {

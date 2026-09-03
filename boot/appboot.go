@@ -6,6 +6,8 @@
 package boot
 
 import (
+	"sync"
+
 	"dshgo/cordis"
 	"dshgo/cordis/loader"
 )
@@ -42,6 +44,24 @@ func AssembleProfileWithCmdline(binName, name, installAnchor, home string, args 
 	})
 }
 
+// composedEntriesSnapshot is the last composed profile's entry list — the
+// plugin-inventory projection source (official dsh-host-plugin-inventory
+// reads the live Loader table; the Go host's equivalent is the composed
+// profile rows). Guarded by its mutex; replaced wholesale per composition.
+var (
+	composedEntriesMu       sync.Mutex
+	composedEntriesSnapshot []loader.Entry
+)
+
+// ComposedEntries returns a copy of the last composed profile's rows.
+func ComposedEntries() []loader.Entry {
+	composedEntriesMu.Lock()
+	defer composedEntriesMu.Unlock()
+	out := make([]loader.Entry, len(composedEntriesSnapshot))
+	copy(out, composedEntriesSnapshot)
+	return out
+}
+
 // assembleLoaded shares the compose+mount tail between the cmdline and
 // plain entry points; the preMount hook runs on the root before Assemble.
 func assembleLoaded(profile *Profile, deps CatalogDeps, preMount func(*cordis.Context)) (*App, []string, error) {
@@ -51,6 +71,9 @@ func assembleLoaded(profile *Profile, deps CatalogDeps, preMount func(*cordis.Co
 	}
 	layers = append(layers, profile.Patches)
 	entries, warnings := ComposeEntries(layers...)
+	composedEntriesMu.Lock()
+	composedEntriesSnapshot = entries
+	composedEntriesMu.Unlock()
 	root := cordis.NewRoot(deps.Logger)
 	if preMount != nil {
 		preMount(root)

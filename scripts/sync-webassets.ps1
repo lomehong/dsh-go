@@ -113,6 +113,12 @@ foreach ($dir in $pkgDirs) {
     Copy-Item (Join-Path $dir "package.json") (Join-Path $dstPkg "package.json") -Force
     Copy-Item (Join-Path $dir "cordis.patch.yml") (Join-Path $dstPkg "cordis.patch.yml") -Force -ErrorAction SilentlyContinue
     Copy-Item (Join-Path $dir "lib\client.js") (Join-Path $dstPkg "lib\client.js") -Force
+    # The shipped preset set travels inside the package (the Go host's
+    # agent-presets row defaults its shippedRoot here).
+    $presetsSrc = Join-Path $dir "presets"
+    if (Test-Path $presetsSrc) {
+        Copy-Item $presetsSrc (Join-Path $dstPkg "presets") -Recurse -Force
+    }
     $mapSrc = Join-Path $dir "lib\client.js.map"
     # source maps are skipped: the Go boot composer builds identity maps
     $built++
