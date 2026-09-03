@@ -6,28 +6,40 @@ import (
 	"dshgo/agent"
 	"dshgo/agentdefaultmodel"
 	"dshgo/llm"
+	"dshgo/sessionquery"
 	"dshgo/typert"
 )
 
 // SessionController hosts the session Remote namespace pieces the Go web
-// surface serves today (official dsh-api-session-controller): the model
-// catalog the conversation model selector renders.
+// surface serves today (official dsh-api-session-controller): the session
+// list and the model catalog the conversation selector renders.
 type SessionController struct {
+	engineLookup  func() any
 	llmLookup     func() any
 	defaultLookup func() any
 }
 
-// NewSessionController builds the namespace host. Both lookups resolve per
-// call — a nil llm runtime answers an honest empty catalog, a nil default
-// selection omits the default field.
-func NewSessionController(llmLookup func() any, defaultLookup func() any) *SessionController {
+// NewSessionController builds the namespace host. Lookups resolve per call —
+// nil services answer honest empty values.
+func NewSessionController(engineLookup func() any, llmLookup func() any, defaultLookup func() any) *SessionController {
+	if engineLookup == nil {
+		engineLookup = func() any { return nil }
+	}
 	if llmLookup == nil {
 		llmLookup = func() any { return nil }
 	}
 	if defaultLookup == nil {
 		defaultLookup = func() any { return nil }
 	}
-	return &SessionController{llmLookup: llmLookup, defaultLookup: defaultLookup}
+	return &SessionController{engineLookup: engineLookup, llmLookup: llmLookup, defaultLookup: defaultLookup}
+}
+
+// engine resolves the composed session query engine, or nil when absent.
+func (c *SessionController) engine() *sessionquery.Engine {
+	if e, ok := c.engineLookup().(*sessionquery.Engine); ok && e != nil {
+		return e
+	}
+	return nil
 }
 
 // runtime resolves the composed llm runtime, or nil when absent.
@@ -123,25 +135,72 @@ func (c *SessionController) ModelCatalog(ctx context.Context) (any, error) {
 	return catalog, nil
 }
 
+// List answers the session list (official session/list): every session in
+// the corpus (live + persisted merged), newest first, with the fields the
+// session sidebar renders. running stays false (the Go host tracks no live
+// agent turn today); updatedAt falls back to the header's creation stamp
+// until per-session activity projections land; blank is false for any
+// materialized session.
+func (c *SessionController) List(ctx context.Context, request map[string]any) (any, error) {
+	engine := c.engine()
+	if engine == nil {
+		return map[string]any{"items": []any{}}, nil
+	}
+	records, err := engine.ListSessions(ctx)
+	if err != nil {
+		return nil, wrapGatewayError("gateway/internal", "session/list", "", err, "session list failed")
+	}
+	items := make([]any, 0, len(records))
+	for _, record := range records {
+		header := record.Header
+		item := map[string]any{
+			"sessionId": string(header.ID),
+			"updatedAt": float64(header.CreatedAt),
+			"running":   false,
+			"blank":     false,
+		}
+		if header.CWD != "" {
+			item["cwd"] = header.CWD
+		}
+		if header.ParentSession != "" {
+			item["parentSessionId"] = string(header.ParentSession)
+		}
+		if header.Origin != "" {
+			item["origin"] = header.Origin
+		}
+		items = append(items, item)
+	}
+	return map[string]any{"items": items}, nil
+}
+
 // Contribution is the strict typert definition of the served session slice.
-// Only modelCatalog carries a Go port today; the rest of the session
+// Only modelCatalog and list carry Go ports today; the rest of the session
 // namespace stays unregistered until its domain round.
 func (c *SessionController) Contribution() typert.Contribution {
 	jsonCodec := typert.Codec{Mode: typert.CodecSrcJSON}
+	requestParam := typert.InvocationParameterDescriptor{
+		Name: "request", Wire: "request", Source: typert.SourceJSON, Codec: jsonCodec,
+	}
+	inv := typert.InvocationReceiver{Kind: typert.ReceiverDirect}
+	descriptor := func(id, method, implementation string, params ...typert.InvocationParameterDescriptor) typert.InvocationDescriptor {
+		return typert.InvocationDescriptor{
+			ID:                    id,
+			Service:               "sessionController",
+			Namespace:             "session",
+			Method:                method,
+			Implementation:        implementation,
+			Invocation:            inv,
+			CancellationParameter: "signal",
+			Parameters:            params,
+			Result:                jsonCodec,
+		}
+	}
 	return typert.Contribution{
 		Package: "session-controller",
 		Face:    typert.FaceHost,
 		Invocations: []typert.InvocationDescriptor{
-			{
-				ID:                    "session.modelCatalog",
-				Service:               "sessionController",
-				Namespace:             "session",
-				Method:                "modelCatalog",
-				Implementation:        "ModelCatalog",
-				Invocation:            typert.InvocationReceiver{Kind: typert.ReceiverDirect},
-				CancellationParameter: "signal",
-				Result:                jsonCodec,
-			},
+			descriptor("session.modelCatalog", "modelCatalog", "ModelCatalog"),
+			descriptor("session.list", "list", "List", requestParam),
 		},
 	}
 }

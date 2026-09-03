@@ -1003,6 +1003,7 @@ var builders = map[string]pluginBuilder{
 					return rows
 				})
 				sessionController := gateway.NewSessionController(
+					func() any { return ctx.Get(ServiceSessionQuery) },
 					func() any { return ctx.Get(ServiceLlm) },
 					func() any { return ctx.Get(ServiceAgentDefaultModel) },
 				)
