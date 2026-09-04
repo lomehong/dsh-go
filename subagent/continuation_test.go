@@ -79,7 +79,7 @@ func (d *fakeDriver) Inject(message llm.Message) {
 
 func newManagedAgent(t *testing.T, id string, parentID string) (*agent.Agent, *fakeDriver) {
 	t.Helper()
-	header := &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\work"}
+	header := &session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: session.SessionID(id), CWD: "D:\\work"}
 	if parentID != "" {
 		header.ParentSession = session.SessionID(parentID)
 	}

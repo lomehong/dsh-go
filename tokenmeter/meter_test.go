@@ -269,7 +269,7 @@ func TestMeterRepricesAfterNewTurns(t *testing.T) {
 func sessionMustPrefix(t *testing.T, sess *session.Session, count int) *session.Session {
 	t.Helper()
 	events := sess.Events()[:count]
-	prefixed, err := session.NewDetached("prefix", append([]session.Event{}, events...), &session.SessionHeader{ID: "prefix", CWD: "D:\\tmp"}, 0)
+	prefixed, err := session.NewDetached("prefix", append([]session.Event{}, events...), &session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "prefix", CWD: "D:\\tmp"}, 0)
 	if err != nil {
 		t.Fatalf("prefix construct failed: %v", err)
 	}

@@ -29,7 +29,7 @@ func infValue() float64 { return math.Inf(1) }
 // header for pure-helper tests.
 func newBareSession(t *testing.T, id string) *session.Session {
 	t.Helper()
-	s, err := session.NewDetached(id, nil, &session.SessionHeader{ID: id, CreatedAt: 1000}, 0)
+	s, err := session.NewDetached(id, nil, &session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: id, CreatedAt: 1000}, 0)
 	if err != nil {
 		t.Fatalf("new session %s: %v", id, err)
 	}
@@ -93,7 +93,7 @@ func TestConfigValidation(t *testing.T) {
 // --- sources ---------------------------------------------------------------
 
 func TestAssertSessionHeadersCompatible(t *testing.T) {
-	base := session.SessionHeader{Version: 0, ID: "s1", CreatedAt: 100}
+	base := session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "s1", CreatedAt: 100}
 	if err := AssertSessionHeadersCompatible(base, base); err != nil {
 		t.Fatalf("identical headers rejected: %v", err)
 	}
@@ -119,9 +119,9 @@ func TestAssertSessionHeadersCompatible(t *testing.T) {
 
 func TestSessionResultFilters(t *testing.T) {
 	records := []SessionRecord{
-		{Header: session.SessionHeader{ID: "a", CreatedAt: 30, CWD: "C:\\w\\a"}, Live: true},
-		{Header: session.SessionHeader{ID: "b", CreatedAt: 20, ParentSession: "a"}, Persisted: true},
-		{Header: session.SessionHeader{ID: "c", CreatedAt: 10}, Live: true, Persisted: true},
+		{Header: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "a", CreatedAt: 30, CWD: "C:\\w\\a"}, Live: true},
+		{Header: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "b", CreatedAt: 20, ParentSession: "a"}, Persisted: true},
+		{Header: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "c", CreatedAt: 10}, Live: true, Persisted: true},
 	}
 	from := 15.0
 	to := 25.0
@@ -549,7 +549,7 @@ func TestTraceEventRelationships(t *testing.T) {
 
 func TestTraceSessionLineage(t *testing.T) {
 	mk := func(id, parent string, createdAt int64) SessionRecord {
-		record := SessionRecord{Header: session.SessionHeader{ID: id, CreatedAt: createdAt}, Live: true}
+		record := SessionRecord{Header: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: id, CreatedAt: createdAt}, Live: true}
 		if parent != "" {
 			record.Header.ParentSession = parent
 		}

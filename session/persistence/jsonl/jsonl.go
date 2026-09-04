@@ -150,9 +150,83 @@ func SessionDir(root, cwd, id string) string {
 	return filepath.Join(ProjectDir(root, cwd), encoded)
 }
 
-// LogPath is the append-only event-log file path for a session.
+// LogPath is the append-only event-log file path for a session at the
+// CURRENT format generation: v0 keeps the original `session.jsonl`; every
+// later generation carries `.vN` before the suffix (official
+// sessionFormatLogFilename).
 func LogPath(root, cwd, id string, compression Compression) string {
-	return filepath.Join(SessionDir(root, cwd, id), "session"+LogSuffix(compression))
+	return filepath.Join(SessionDir(root, cwd, id), GenerationBasename(session.SESSION_FORMAT_VERSION)+LogSuffix(compression))
+}
+
+// GenerationBasename is the canonical raw basename of one generation,
+// WITHOUT the LogSuffix (v0 → "session", v2 → "session.v2").
+func GenerationBasename(version int64) string {
+	if version <= 0 {
+		return "session"
+	}
+	return "session.v" + fmt.Sprintf("%d", version)
+}
+
+// SelectGenerationLog picks the highest canonical generation log from one
+// session directory (official list policy: numerically highest wins;
+// predecessors provide no fallback). ok=false when none exists.
+func SelectGenerationLog(dir string, compression Compression) (string, int64, bool) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", 0, false
+	}
+	best := ""
+	var bestVersion int64 = -1
+	suffix := LogSuffix(compression)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, suffix) {
+			continue
+		}
+		version, ok := parseGenerationFilename(strings.TrimSuffix(name, suffix))
+		if !ok {
+			continue
+		}
+		if version > bestVersion {
+			bestVersion = version
+			best = filepath.Join(dir, name)
+		}
+	}
+	if bestVersion < 0 {
+		return "", 0, false
+	}
+	return best, bestVersion, true
+}
+
+// parseGenerationFilename parses the raw basename (LogSuffix stripped):
+// `session` is generation 0; `session.vN` generation N (uppercase,
+// leading-zero, and v0 forms are not canonical).
+func parseGenerationFilename(raw string) (int64, bool) {
+	if raw == "session" {
+		return 0, true
+	}
+	digits := strings.TrimPrefix(raw, "session.v")
+	if digits == raw || digits == "" {
+		return 0, false
+	}
+	if digits[0] == '0' {
+		return 0, false
+	}
+	var version int64
+	for i := 0; i < len(digits); i++ {
+		c := digits[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		version = version*10 + int64(c-'0')
+	}
+	if version <= 0 {
+		return 0, false
+	}
+	return version, true
 }
 
 // headerLine is the first JSONL record of a session artifact: the immutable
@@ -590,7 +664,10 @@ func (st *Store) List() ([]session.SessionHeader, error) {
 			if !dir.IsDir() {
 				continue
 			}
-			path := filepath.Join(st.Root, project.Name(), dir.Name(), "session"+LogSuffix(st.suffix()))
+			path, _, found := SelectGenerationLog(filepath.Join(st.Root, project.Name(), dir.Name()), st.suffix())
+			if !found {
+				continue
+			}
 			file, err := os.Open(path)
 			if err != nil {
 				continue

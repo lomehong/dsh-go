@@ -171,7 +171,7 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 	if !ok {
 		t.Fatal("sessionProjectionCache service missing")
 	}
-	if _, hit := cache.CachedSnapshot(session.SessionHeader{ID: "never-created", CreatedAt: 1}); hit {
+	if _, hit := cache.CachedSnapshot(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "never-created", CreatedAt: 1}); hit {
 		t.Fatal("unknown session read as cached")
 	}
 	if err := app.Shutdown(); err != nil {
@@ -663,7 +663,6 @@ func TestCatalogRegistersSessionListMetadataProjection(t *testing.T) {
 	}
 }
 
-
 func TestCatalogStorageHubDomainAndSpillRoundTrip(t *testing.T) {
 	home := t.TempDir()
 	root := cordis.NewRoot(cordis.Discard{})
@@ -1135,7 +1134,7 @@ func TestCatalogGoalServiceAssemblesAndRoundTrips(t *testing.T) {
 	// through the composed registry folds the change.
 	registry := root.Get(ServiceAgents).(*agent.AgentRegistry)
 	sess, err := session.NewDetached(session.SessionID("sess-goal-catalog"), nil,
-		&session.SessionHeader{ID: session.SessionID("sess-goal-catalog")}, 0)
+		&session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: session.SessionID("sess-goal-catalog")}, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}

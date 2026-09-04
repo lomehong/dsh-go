@@ -38,7 +38,7 @@ func (h *fakeHost) ReadSessionHeader(id session.SessionID) (session.SessionHeade
 	defer h.mu.Unlock()
 	header, ok := h.headers[id]
 	if !ok {
-		return session.SessionHeader{}, errors.New("no persisted session with this id")
+		return session.SessionHeader{Version: session.SESSION_FORMAT_VERSION}, errors.New("no persisted session with this id")
 	}
 	return header, nil
 }
@@ -52,7 +52,7 @@ func (h *fakeHost) RememberSessionPath(id session.SessionID, path string) {
 func (h *fakeHost) putHeader(id session.SessionID, cwd string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.headers[id] = session.SessionHeader{Version: 0, ID: id, CreatedAt: 1, CWD: cwd}
+	h.headers[id] = session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: id, CreatedAt: 1, CWD: cwd}
 }
 
 // realDir creates a distinctive existing directory and returns its

@@ -176,6 +176,11 @@ func (st *Store) onEventCommit(session *Session, event Event) {
 // disposal.
 func (st *Store) Create(id SessionID, options CreateOptions) (*Session, error) {
 	header := options.HeaderMetadata
+	if header.Version == 0 {
+		// An unstamped caller header is a creation-time default, not a
+		// stored generation: stamp the current writer version.
+		header.Version = SESSION_FORMAT_VERSION
+	}
 	header.ID = id
 	header.Origin = options.Origin
 	header.DelegationDepth = options.DelegationDepth

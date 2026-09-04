@@ -95,7 +95,7 @@ func newSessionListFixture(t *testing.T) *sessionListFixture {
 // row carries a cleared blank and a user-prompt time.
 func (f *sessionListFixture) createLiveMaterializedSession(t *testing.T, id string, createdAt int64) *session.Session {
 	t.Helper()
-	sess, err := f.store.Create(id, session.CreateOptions{HeaderMetadata: session.SessionHeader{CreatedAt: createdAt}})
+	sess, err := f.store.Create(id, session.CreateOptions{HeaderMetadata: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, CreatedAt: createdAt}})
 	if err != nil {
 		t.Fatalf("create %s: %v", id, err)
 	}
@@ -161,7 +161,7 @@ func TestSessionListReadsProjectionMetadata(t *testing.T) {
 func TestSessionListCacheMissFallsBackToVisible(t *testing.T) {
 	f := newSessionListFixture(t)
 	if _, err := f.store.Create("cold", session.CreateOptions{
-		HeaderMetadata: session.SessionHeader{CreatedAt: 2000},
+		HeaderMetadata: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, CreatedAt: 2000},
 	}); err != nil {
 		t.Fatalf("create: %v", err)
 	}

@@ -165,7 +165,7 @@ func TestPruneContentSplitsOnCodePointsNotBytes(t *testing.T) {
 // newSession builds a detached probe session.
 func newSession(t *testing.T) *session.Session {
 	t.Helper()
-	sess, err := session.NewDetached("prune-probe", nil, &session.SessionHeader{ID: "prune-probe", CWD: "D:\\tmp"}, 0)
+	sess, err := session.NewDetached("prune-probe", nil, &session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "prune-probe", CWD: "D:\\tmp"}, 0)
 	if err != nil {
 		t.Fatalf("construct failed: %v", err)
 	}

@@ -109,9 +109,11 @@ func newSession(id SessionID, seed []Event, header *SessionHeader, restore bool,
 	// The marker is appended here so it is already in `events` when a
 	// backend captures the creation seed: no load-time write. A seed already
 	// ending in one is not re-marked, so reopening an untouched session does
-	// not grow its log per open.
+	// not grow its log. The marker carries {inherited: true}: under format
+	// v2 the exact cut derives from the last tagged marker (the header
+	// stores no numeric cut).
 	if len(s.log) > 0 && s.log[len(s.log)-1].Type != EventEndSeed {
-		if _, err := s.Append(EventEndSeed, map[string]any{}, nil); err != nil {
+		if _, err := s.Append(EventEndSeed, map[string]any{"inherited": true}, nil); err != nil {
 			return nil, err
 		}
 	}

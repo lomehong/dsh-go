@@ -90,7 +90,7 @@ func TestAppendSeqContiguityAndEventFeed(t *testing.T) {
 	var fed []Event
 	store.OnEvent(func(_ *Session, event Event) { fed = append(fed, event) })
 	depth := int64(1)
-	session, err := store.Create("live-1", CreateOptions{HeaderMetadata: SessionHeader{
+	session, err := store.Create("live-1", CreateOptions{HeaderMetadata: SessionHeader{Version: SESSION_FORMAT_VERSION,
 		CreatedAt: 1, DelegationDepth: &depth, Origin: "subagent",
 	}})
 	if err != nil {
@@ -132,7 +132,7 @@ func TestAppendFeedDeliversEveryConcurrentCommitExactlyOnce(t *testing.T) {
 		mu.Unlock()
 	})
 	depth := int64(1)
-	session, err := store.Create("feed-race", CreateOptions{HeaderMetadata: SessionHeader{
+	session, err := store.Create("feed-race", CreateOptions{HeaderMetadata: SessionHeader{Version: SESSION_FORMAT_VERSION,
 		CreatedAt: 1, DelegationDepth: &depth, Origin: "subagent",
 	}})
 	if err != nil {
@@ -196,7 +196,7 @@ func TestForkValidatesBoundariesAndOpenTurns(t *testing.T) {
 	if len(seed) != 2 || seed[0].Type != EventTurnStart {
 		t.Fatalf("fork seed wrong: %#v", seed)
 	}
-	child, err := store.Create("child", CreateOptions{Seed: seed, HeaderMetadata: SessionHeader{
+	child, err := store.Create("child", CreateOptions{Seed: seed, HeaderMetadata: SessionHeader{Version: SESSION_FORMAT_VERSION,
 		CreatedAt: 2, ParentSession: "parent", IsSeeded: true, InheritedEventCount: SessionLogOffset(len(seed)),
 	}})
 	if err != nil {

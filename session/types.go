@@ -16,17 +16,17 @@ import (
 	"dshgo/llm"
 )
 
-// SESSION_FORMAT_VERSION is the on-disk session format version, stamped into
-// every newly-written SessionHeader and enforced by every persistence
-// backend on load. While the harness is unreleased it is pinned at 0: no
-// compatibility is implied, incompatible logs are rejected, and no migration
-// is provided. Bump exactly when an older runtime could no longer read a new
-// log with full semantic correctness — only structural changes reach that
-// bar: the header shape, the event envelope, core event semantics, or the
-// surface mechanism. Adding an ordinary event type does not bump: the
-// known-event guard makes older runtimes refuse logs containing a type they
-// do not understand.
-const SESSION_FORMAT_VERSION = 0
+// SESSION_FORMAT_VERSION is the on-disk session format version, stamped
+// into every newly-written SessionHeader and enforced by every persistence
+// backend on load. Version 2 is the released format of upstream
+// dsh-v0.1.3-alpha.1: no top-level assistant/chunk events — each model
+// attempt commits one settlement (assistant/message or assistant/attempt)
+// embedding the compact timed stream — and a seeded artifact marks its exact
+// cut with a `session/end-seed {inherited:true}` marker (the v2 header
+// stores isSeeded, never a numeric cut). Historical v0/v1 logs migrate on
+// body read through the sessionformat chain; the exact source generation
+// remains on disk untouched.
+const SESSION_FORMAT_VERSION = 2
 
 // SessionID identifies one session in the store and its persistence
 // artifacts.
@@ -120,11 +120,16 @@ const (
 	EventUserMessage    = "user/message"
 	EventAssistantChunk = "assistant/chunk"
 	EventAssistantMsg   = "assistant/message"
-	EventToolCall       = "tool/call"
-	EventToolResult     = "tool/result"
-	EventRequestHeader  = "request/header"
-	EventRequestCtx     = "request/context"
-	EventEndSeed        = "session/end-seed"
+	// EventAssistantAttempt is the format-v2 log-only settlement for a
+	// failed, retried, cancelled, or stream-errored attempt that reached
+	// settlement without a surface message. Its payload embeds the compact
+	// timed stream; it never appears on the surface or in model history.
+	EventAssistantAttempt = "assistant/attempt"
+	EventToolCall         = "tool/call"
+	EventToolResult       = "tool/result"
+	EventRequestHeader    = "request/header"
+	EventRequestCtx       = "request/context"
+	EventEndSeed          = "session/end-seed"
 )
 
 // Surface events: the subset whose events produce LLM messages and are
@@ -145,18 +150,19 @@ func IsSurfaceEventType(eventType string) bool {
 // does not know an event type refuses the log (fail-closed vocabulary);
 // plugins extend the vocabulary by registering here.
 var knownEventTypes = map[string]bool{
-	EventTurnStart:      true,
-	EventTurnEnd:        true,
-	EventStepStart:      true,
-	EventStepEnd:        true,
-	EventUserMessage:    true,
-	EventAssistantChunk: true,
-	EventAssistantMsg:   true,
-	EventToolCall:       true,
-	EventToolResult:     true,
-	EventRequestHeader:  true,
-	EventRequestCtx:     true,
-	EventEndSeed:        true,
+	EventTurnStart:        true,
+	EventTurnEnd:          true,
+	EventStepStart:        true,
+	EventStepEnd:          true,
+	EventUserMessage:      true,
+	EventAssistantChunk:   true,
+	EventAssistantMsg:     true,
+	EventAssistantAttempt: true,
+	EventToolCall:         true,
+	EventToolResult:       true,
+	EventRequestHeader:    true,
+	EventRequestCtx:       true,
+	EventEndSeed:          true,
 }
 
 // KnownEventType reports whether the build understands this event type.
@@ -446,6 +452,11 @@ func DecodeAssistantMessage(e Event) (AssistantMessageData, error) {
 	return decodePayload[AssistantMessageData](e, EventAssistantMsg)
 }
 
+// DecodeAssistantAttempt reads an assistant/attempt payload.
+func DecodeAssistantAttempt(e Event) (AssistantAttemptData, error) {
+	return decodePayload[AssistantAttemptData](e, EventAssistantAttempt)
+}
+
 // DecodeToolResult reads a tool/result payload.
 func DecodeToolResult(e Event) (ToolResultData, error) {
 	return decodePayload[ToolResultData](e, EventToolResult)
@@ -454,14 +465,27 @@ func DecodeToolResult(e Event) (ToolResultData, error) {
 // AssistantMessageData is the assistant/message payload: the assembled
 // message for one step, with its usage when the adapter reported token
 // accounting. Interrupted marks a cancelled mid-stream finalization of the
-// delivered prefix.
+// delivered prefix. Stream is the format-v2 compact timed stream that must
+// reproduce the message (empty only for a migrated legacy message without
+// source chunks).
 type AssistantMessageData struct {
 	Turn    int64           `json:"turn"`
 	Step    int64           `json:"step"`
 	Message llm.Message     `json:"message"`
 	Usage   *llm.TokenUsage `json:"usage,omitempty"`
 	// Interrupted is true only on the cancelled-prefix finalization marker.
-	Interrupted bool `json:"interrupted,omitempty"`
+	Interrupted bool            `json:"interrupted,omitempty"`
+	Stream      json.RawMessage `json:"stream,omitempty"`
+}
+
+// AssistantAttemptData is the assistant/attempt payload: the log-only
+// settlement for an attempt that never produced a surface message. It
+// preserves the stream (and, through it, usage, terminal state, and timing)
+// for diagnostics and accounting without fabricating model-visible history.
+type AssistantAttemptData struct {
+	Turn   int64           `json:"turn"`
+	Step   int64           `json:"step"`
+	Stream json.RawMessage `json:"stream"`
 }
 
 // ToolCallData is the tool/call payload: the raw arguments JSON string

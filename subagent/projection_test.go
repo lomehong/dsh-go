@@ -28,7 +28,7 @@ func timedEvent(eventType string, seq int64, at int64) session.Event {
 }
 
 func foldAll[S any](def projection.Unit[S], events []session.Event) S {
-	state := def.Init(session.SessionHeader{})
+	state := def.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 	for _, event := range events {
 		state, _ = def.Apply(state, event)
 	}
@@ -162,7 +162,7 @@ func TestRegisterSubagentProjectionsDrivesThroughRegistry(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	defer undo()
-	header := session.SessionHeader{Version: 0, ID: "proj-child", CWD: "D:\\work"}
+	header := session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "proj-child", CWD: "D:\\work"}
 	sess, err := session.NewDetached("proj-child", nil, &header, 0)
 	if err != nil {
 		t.Fatalf("detached: %v", err)

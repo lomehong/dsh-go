@@ -52,7 +52,7 @@ func (commandNoopNotifications) Claimed(llm.Message, int64) {}
 func newCommandFixture(t *testing.T) *commandFixture {
 	t.Helper()
 	f := &commandFixture{registry: agent.NewAgentRegistry(nil, nil), driver: &commandFakeDriver{}}
-	header := &session.SessionHeader{ID: session.SessionID("sess-command")}
+	header := &session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: session.SessionID("sess-command")}
 	sess, err := session.NewDetached(session.SessionID("sess-command"), nil, header, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)

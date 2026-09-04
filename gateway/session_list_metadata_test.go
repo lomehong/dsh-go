@@ -43,7 +43,7 @@ func nonUserPromptEvent(seq int64, text string) session.Event {
 
 func TestSessionListMetadataInitIsBlank(t *testing.T) {
 	unit := SessionListMetadataUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 	if !state.Blank {
 		t.Fatal("a brand-new session must start blank")
 	}
@@ -54,7 +54,7 @@ func TestSessionListMetadataInitIsBlank(t *testing.T) {
 
 func TestSessionListMetadataTurnStartClearsBlank(t *testing.T) {
 	unit := SessionListMetadataUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 
 	state, changed := unit.Apply(state, sessionListMetadataEvent(0, session.EventTurnStart, session.TurnStartData{Turn: 1}))
 	if !changed {
@@ -80,7 +80,7 @@ func TestSessionListMetadataTurnStartClearsBlank(t *testing.T) {
 
 func TestSessionListMetadataUserPromptAdvancesLastPromptAt(t *testing.T) {
 	unit := SessionListMetadataUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 
 	// A user-authored prompt stamps the time. Blank is untouched by a
 	// prompt: the official fold keeps blank until a turn/start arrives
@@ -109,7 +109,7 @@ func TestSessionListMetadataUserPromptAdvancesLastPromptAt(t *testing.T) {
 
 func TestSessionListMetadataUserPromptKeepsBlankUntilTurnStart(t *testing.T) {
 	unit := SessionListMetadataUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 
 	// Prompts alone never clear blank.
 	state, _ = unit.Apply(state, userPromptEvent(1, "hi"))
@@ -131,7 +131,7 @@ func TestSessionListMetadataUserPromptKeepsBlankUntilTurnStart(t *testing.T) {
 }
 func TestSessionListMetadataNonUserPromptDoesNotAdvance(t *testing.T) {
 	unit := SessionListMetadataUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 	state, _ = unit.Apply(state, userPromptEvent(4, "hello"))
 
 	before := state
@@ -149,7 +149,7 @@ func TestSessionListMetadataNonUserPromptDoesNotAdvance(t *testing.T) {
 
 func TestSessionListMetadataUninterestingEventsDoNotChange(t *testing.T) {
 	unit := SessionListMetadataUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 	state, _ = unit.Apply(state, userPromptEvent(4, "hello"))
 
 	for _, event := range []session.Event{
@@ -175,7 +175,7 @@ func TestSessionListMetadataUninterestingEventsDoNotChange(t *testing.T) {
 
 func TestSessionListMetadataViewIsIdentity(t *testing.T) {
 	unit := SessionListMetadataUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 	state, _ = unit.Apply(state, userPromptEvent(4, "hello"))
 
 	view, ok := unit.View(state).(SessionListMetadata)
@@ -227,7 +227,7 @@ func TestSessionListMetadataDecodeState(t *testing.T) {
 
 func TestSessionListMetadataFoldMatchesOfficialSequence(t *testing.T) {
 	unit := SessionListMetadataUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 
 	state, _ = unit.Apply(state, sessionListMetadataEvent(0, session.EventTurnStart, session.TurnStartData{Turn: 1}))
 	if state.Blank {

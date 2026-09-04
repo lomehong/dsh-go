@@ -23,7 +23,7 @@ func statsEvent(eventType string, seq int64, at int64, data json.RawMessage) ses
 
 func foldEvents(t *testing.T, events []session.Event) *State {
 	t.Helper()
-	state := SessionStatsProjection.Init(session.SessionHeader{})
+	state := SessionStatsProjection.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 	for _, event := range events {
 		state, _ = SessionStatsProjection.Apply(state, event)
 	}

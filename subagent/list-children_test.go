@@ -56,7 +56,7 @@ func (f *fakeCache) CachedSnapshot(header session.SessionHeader, units []string)
 func listingHeader(id string, parent string, createdAt int64, origin string, seedLength *int64) session.SessionHeader {
 	header := session.SessionHeader{
 		// This build stores format version 0 only (fail-closed vocabulary).
-		Version: 0, ID: session.SessionID(id), CreatedAt: createdAt,
+		Version: session.SESSION_FORMAT_VERSION, ID: session.SessionID(id), CreatedAt: createdAt,
 		CWD: "D:\\work", ParentSession: session.SessionID(parent), Origin: origin,
 	}
 	if seedLength != nil {

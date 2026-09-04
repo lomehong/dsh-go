@@ -27,11 +27,13 @@ func (createDriver) WhenIdle() <-chan struct{} {
 	close(done)
 	return done
 }
-func (createDriver) RunMaintenance(task func(context.Context) error) error { return task(context.Background()) }
-func (createDriver) Send(llm.Message, agent.InboxTarget, bool)             {}
-func (createDriver) Followup(llm.Message)                                  {}
-func (createDriver) Steer(llm.Message)                                     {}
-func (createDriver) Inject(llm.Message)                                    {}
+func (createDriver) RunMaintenance(task func(context.Context) error) error {
+	return task(context.Background())
+}
+func (createDriver) Send(llm.Message, agent.InboxTarget, bool) {}
+func (createDriver) Followup(llm.Message)                      {}
+func (createDriver) Steer(llm.Message)                         {}
+func (createDriver) Inject(llm.Message)                        {}
 
 // createFakeFactory is the loop-factory stand-in: it materializes the
 // session and agent exactly where the real factory would, and records the
@@ -54,7 +56,7 @@ func (f *createFakeFactory) Create(ctx context.Context, options agent.CreateAgen
 	}
 	f.lastMeta = options.Meta
 	sess, err := f.store.Create(options.SessionID, session.CreateOptions{
-		HeaderMetadata: session.SessionHeader{CWD: options.Meta.CWD, AgentPreset: options.Meta.AgentPreset},
+		HeaderMetadata: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, CWD: options.Meta.CWD, AgentPreset: options.Meta.AgentPreset},
 	})
 	if err != nil {
 		return agent.AgentHandle{}, err

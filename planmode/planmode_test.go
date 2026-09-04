@@ -23,7 +23,7 @@ func (noopNotifications) Claimed(llm.Message, int64) {}
 
 func newPlanAgent(t *testing.T, id string) (*agent.Agent, *session.Session) {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\tmp"}, 0)
+	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: session.SessionID(id), CWD: "D:\\tmp"}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestProjectionFoldAndWire(t *testing.T) {
 	if definition.Key != "plan" || definition.StateVersion != 2 {
 		t.Fatalf("definition = %+v", definition)
 	}
-	state := definition.Init(session.SessionHeader{})
+	state := definition.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 	state = definition.Apply(state, session.Event{
 		Type: "command/run",
 		Data: json.RawMessage(`{"name":"plan","commandId":"c1","args":"enter planning"}`),
@@ -345,7 +345,7 @@ func TestProjectionFoldAndWire(t *testing.T) {
 	}
 
 	// A failed command settlement keeps nothing pending.
-	failed := definition.Apply(definition.Init(session.SessionHeader{}), session.Event{
+	failed := definition.Apply(definition.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION}), session.Event{
 		Type: "command/run",
 		Data: json.RawMessage(`{"name":"plan","commandId":"c2","args":"on"}`),
 	})

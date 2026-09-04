@@ -64,6 +64,12 @@ type ReactLoopAgent struct {
 	hasRequestSurfaceGeneration bool
 	requestSurfaceGeneration    int64
 
+	// Process-local live attempt framing: the attached-Session-local attempt
+	// counter and the frame revision allocator (both Agent-lifecycle scoped;
+	// a replacement Agent restarts both).
+	assistantAttemptCounter int64
+	assistantStreamRevision int64
+
 	runtimeContext *RuntimeContextProjection
 }
 

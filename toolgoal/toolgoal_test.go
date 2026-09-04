@@ -91,7 +91,7 @@ func newFixture(t *testing.T, config Config) *fixture {
 	f := &fixture{registry: agent.NewAgentRegistry(nil, nil)}
 	f.root = cordis.NewRoot(cordis.Discard{})
 	t.Cleanup(func() { _ = f.root.Dispose() })
-	header := &session.SessionHeader{ID: session.SessionID("sess-tool-goal")}
+	header := &session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: session.SessionID("sess-tool-goal")}
 	sess, err := session.NewDetached(session.SessionID("sess-tool-goal"), nil, header, 0)
 	if err != nil {
 		t.Fatalf("session: %v", err)

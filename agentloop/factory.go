@@ -290,6 +290,7 @@ func (l *AgentLoop) installAgentVariables(a *agent.Agent) func() {
 // unpublished setup, publishes both records, and starts the loop.
 func (l *AgentLoop) CreateAgent(owner *cordis.Context, options agent.CreateAgentOptions) (agent.AgentHandle, error) {
 	sess, err := session.NewDetached(options.SessionID, options.Seed, &session.SessionHeader{
+		Version:             session.SESSION_FORMAT_VERSION,
 		ID:                  options.SessionID,
 		CreatedAt:           time.Now().UnixMilli(),
 		CWD:                 options.Meta.CWD,

@@ -1,6 +1,7 @@
 package jsonl
 
 import (
+	"fmt"
 	"encoding/json"
 	"errors"
 	"os"
@@ -254,12 +255,12 @@ func TestForeignFormatVersionRefusesBeforeStructure(t *testing.T) {
 	}
 	path := st.PathOf(header.CWD, string(header.ID))
 	raw, _ := os.ReadFile(path)
-	future := strings.Replace(string(raw), `"version":0`, `"version":1`, 1)
+	future := strings.Replace(string(raw), fmt.Sprintf(`"version":%d`, session.SESSION_FORMAT_VERSION), `"version":99`, 1)
 	os.WriteFile(path, []byte(future), 0o644)
 
 	_, err := st.Load(header.CWD, string(header.ID))
 	var unsupported *SessionFormatUnsupportedError
-	if !errors.As(err, &unsupported) || unsupported.Version != 1 {
+	if !errors.As(err, &unsupported) || unsupported.Version != 99 {
 		t.Fatalf("a future version must refuse as unsupported, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "upgrade the harness") {
@@ -276,7 +277,7 @@ func TestForeignFormatVersionRefusesBeforeStructure(t *testing.T) {
 }
 
 func TestParseHeaderMetaRejectsNonHeaders(t *testing.T) {
-	header, ok, err := ParseHeaderMeta(`{"type":"session","version":0,"id":"a","createdAt":0,"delegationDepth":0}`)
+	header, ok, err := ParseHeaderMeta(fmt.Sprintf(`{"type":"session","version":%d,"id":"a","createdAt":0,"delegationDepth":0}`, session.SESSION_FORMAT_VERSION))
 	if err != nil || !ok || header.ID != "a" {
 		t.Fatalf("a valid header line must parse: %v %v %+v", err, ok, header)
 	}
@@ -286,7 +287,7 @@ func TestParseHeaderMetaRejectsNonHeaders(t *testing.T) {
 	if _, ok, err := ParseHeaderMeta(`{not json`); err != nil || ok {
 		t.Fatalf("an unparsable line is skipped, got ok=%v err=%v", ok, err)
 	}
-	if _, _, err := ParseHeaderMeta(`{"type":"session","version":3,"id":"a","createdAt":0,"delegationDepth":0}`); err == nil {
+	if _, _, err := ParseHeaderMeta(`{"type":"session","version":99,"id":"a","createdAt":0,"delegationDepth":0}`); err == nil {
 		t.Fatal("a foreign version must surface through list too")
 	}
 }
@@ -300,7 +301,10 @@ func TestSessionDirLayout(t *testing.T) {
 	if got := ProjectDir(root, ""); got != filepath.Join(root, "_no-cwd") {
 		t.Fatalf("cwd-less sessions group under _no-cwd, got %q", got)
 	}
-	if got := LogPath(root, `D:\work`, "s1", CompressionNone); !strings.HasSuffix(got, filepath.Join("--D-work--", "s1", "session.jsonl")) {
-		t.Fatalf("log path wrong: %q", got)
+	if got := LogPath(root, `D:\work`, "s1", CompressionNone); !strings.HasSuffix(got, filepath.Join("--D-work--", "s1", "session.v2.jsonl")) {
+		t.Fatalf("current-generation log path wrong: %q", got)
+	}
+	if got := filepath.Join(SessionDir(root, `D:\work`, "s1"), GenerationBasename(0)+LogSuffix(CompressionNone)); !strings.HasSuffix(got, "session.jsonl") {
+		t.Fatalf("v0 basename wrong: %q", got)
 	}
 }

@@ -92,7 +92,7 @@ func defaultConfig() Config {
 
 func createSession(t *testing.T, store *session.Store, id string) *session.Session {
 	t.Helper()
-	sess, err := store.Create(id, session.CreateOptions{HeaderMetadata: session.SessionHeader{CreatedAt: 30}})
+	sess, err := store.Create(id, session.CreateOptions{HeaderMetadata: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, CreatedAt: 30}})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

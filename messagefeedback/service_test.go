@@ -90,5 +90,5 @@ func TestSameIdentityLifecycleFencing(t *testing.T) {
 
 // makeTestHeader builds a minimal persisted session header.
 func makeTestHeader() session.SessionHeader {
-	return session.SessionHeader{ID: session.SessionID("s1"), CreatedAt: 100, CWD: "/ws"}
+	return session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: session.SessionID("s1"), CreatedAt: 100, CWD: "/ws"}
 }

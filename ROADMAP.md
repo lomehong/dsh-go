@@ -217,10 +217,13 @@ workflow / typert / sdk / boot / jobs / interaction / guard 的 src 在 alpha.2 
 | r117 | `sessionformat` 核心：lossless 值纪律/快照验证/Chain 编译/Catalog 四态分发/规范文件名 | ✅ |
 | r118 | `sessionformatv01` released v0→v1 边全量（47 类型清单、载荷语义验证、跨事件关系、v0/v1 物理 codec 含 packed rows/区间 provenance/可恢复解码、legacy 归一化迁移） | ✅ |
 | r119 | `sessionformatv12` released v1→v2 边全量（attempt 分组/稠密重映射/被消费引用拒绝/seed 标记割点/流重组三重一致性验证/v2 物理 codec）；**集成测试：Go 宿主真实日志整链迁移到 v2 通过** | ✅ |
+| r121 | SESSION_FORMAT_VERSION 0→2：assistant/attempt 词汇、end-seed 标记 {inherited:true}、AssistantMessageData.Stream/AssistantAttemptData 载荷、store.Create 未戳头部缺省盖当前版 | ✅ |
+| r122 | agentloop v2 live writer：AssistantStreamAttempt（accumulator+assembler 双喂、start/chunk/end 帧、settle 前置于 committed end、append 失败 abandon）；中断有可见前缀→message(interrupted)+stream、否则 attempt；finish error/aborted→attempt+request-error 瀑布；assistant/message 不再携 sourceEventSeqs；agent/assistant-stream 作用域事件+TypedEmit.Publish | ✅ |
+| r120a | jsonl 代文件名：LogPath 按 SESSION_FORMAT_VERSION 产 session.v2.jsonl（v0 裸名保留）、SelectGenerationLog 最高代当选、findByID/List/ListSnapshots 走代选择 | ✅ |
 
 ## 待续轮次（依赖序）
 
-1. **r120 jsonl provider**：规范代文件名发现（session.vN.jsonl 最高代当选）、open 时 ensure-current（可恢复解码→内存迁移→同目录临时 stage→源指纹复查→不覆盖发布→重开）、stat/list 仅头翻译、create 按文件名独立保留 id；Go 写路径暂只 plain jsonl（zstd 变体维持缓议）。
+1. **r120b ensure-current 发布**：open 时对 v0/v1 历史代执行 可恢复解码→内存迁移（链已可用）→同目录临时 stage→源指纹复查→不覆盖发布 session.v2.jsonl→重开；stat/list 仅头翻译（现 refusal 直通为过渡态——迁移链集成测试已证明可迁移，仅发布生命周期待接）；zstd 变体维持缓议。
 2. **r121 session v2 核心**：SESSION_FORMAT_VERSION→2、v2 头（isSeeded 必在、割点走 end-seed {inherited:true} 标记）、assistant/attempt 词汇注册、seeded 构造器追标记、装词汇 restoreCurrent（catalog 接线）。
 3. **r122 agentloop v2 live writer**：停写顶层 assistant/chunk；settlement 前置于 committed end（`agent/assistant-stream` 帧 start/chunk/end、attemptId=`<sessionId>:<n>`、dense index、revision）；中断有可见前缀→message(interrupted)、否则 attempt；finish error/aborted→attempt+request-error 瀑布。
 4. **r123 消费方**：surface/sessionquery 提取/sessionstats/tokenmeter 折叠/sessiontelemetry/projectioncache（checkpoint 绑 format 世代）对 assistant/attempt+内嵌流适配；gateway journal-stream + session-controller assistant-stream（web follow 光标无帧 FIFO）。

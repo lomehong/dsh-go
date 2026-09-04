@@ -16,7 +16,7 @@ import (
 // surface validator.
 func newLoopAgent(t *testing.T, id string) (*agent.Agent, *session.Session) {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\tmp"}, 0)
+	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: session.SessionID(id), CWD: "D:\\tmp"}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}

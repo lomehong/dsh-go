@@ -223,13 +223,13 @@ func TestAgentPresetProjectionFold(t *testing.T) {
 	if definition.Key != "agentPreset" || definition.StateVersion != 1 {
 		t.Fatalf("definition header = %+v", definition)
 	}
-	if got := definition.Init(session.SessionHeader{AgentPreset: "standard"}); got == nil || *got != "standard" {
+	if got := definition.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, AgentPreset: "standard"}); got == nil || *got != "standard" {
 		t.Fatalf("init with header preset = %v", got)
 	}
-	if got := definition.Init(session.SessionHeader{}); got != nil {
+	if got := definition.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION}); got != nil {
 		t.Fatalf("init without header preset = %v", got)
 	}
-	state := definition.Init(session.SessionHeader{})
+	state := definition.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 	data, err := json.Marshal(SelectionData{AgentPreset: "ptc"})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)

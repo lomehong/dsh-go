@@ -188,7 +188,7 @@ func newFixture(t *testing.T) *queryFixture {
 
 func (f *queryFixture) createSession(t *testing.T, id string, createdAt int64, parent string) *session.Session {
 	t.Helper()
-	header := session.SessionHeader{CreatedAt: createdAt}
+	header := session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, CreatedAt: createdAt}
 	if parent != "" {
 		header.ParentSession = parent
 	}
@@ -223,7 +223,7 @@ func storedPrefix(t *testing.T, id string, createdAt int64, texts ...string) *pe
 		})
 	}
 	return &persistence.StoredPrefix{
-		Meta:     session.SessionHeader{ID: id, CreatedAt: createdAt},
+		Meta:     session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: id, CreatedAt: createdAt},
 		Events:   events,
 		Revision: persistence.Revision("rev-" + id),
 	}
@@ -323,7 +323,7 @@ func TestLoadSources(t *testing.T) {
 	// A corrupt stored log (invalid message payload) is isolated as
 	// CORRUPT_SESSION.
 	corrupt := &persistence.StoredPrefix{
-		Meta: session.SessionHeader{ID: "c", CreatedAt: 10},
+		Meta: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "c", CreatedAt: 10},
 		Events: []session.Event{
 			{Seq: 0, Time: 1, Type: session.EventUserMessage, Data: json.RawMessage(`{"broken":true}`)},
 		},
@@ -362,7 +362,7 @@ func TestProjectManyOrderAndIsolation(t *testing.T) {
 	f.createSession(t, "a", 30, "")
 	f.backend.stored["b"] = storedPrefix(t, "b", 20, "one")
 	f.backend.stored["c"] = &persistence.StoredPrefix{
-		Meta: session.SessionHeader{ID: "c", CreatedAt: 10},
+		Meta: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "c", CreatedAt: 10},
 		Events: []session.Event{
 			{Seq: 0, Time: 1, Type: session.EventUserMessage, Data: json.RawMessage(`{"broken":true}`)},
 		},

@@ -15,7 +15,7 @@ import (
 // newCompactSession builds a detached session for lifecycle records.
 func newCompactSession(t *testing.T, id string) *session.Session {
 	t.Helper()
-	header := session.SessionHeader{Version: 0, ID: session.SessionID(id)}
+	header := session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: session.SessionID(id)}
 	sess, err := session.NewDetached(id, nil, &header, 0)
 	if err != nil {
 		t.Fatalf("detached: %v", err)

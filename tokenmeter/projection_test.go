@@ -156,7 +156,7 @@ func indexOf(haystack, needle string) int {
 
 func TestTokenUsageUnitFoldsAndReplaces(t *testing.T) {
 	unit := TokenUsageUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 
 	// A usage chunk samples the attempt.
 	state = unit.Apply(state, usageEvent(1, 1, 1, llm.TokenUsage{
@@ -218,7 +218,7 @@ func int64Ptr(value int64) *int64 { return &value }
 
 func TestContextPressureUnitAnchorsAndProjects(t *testing.T) {
 	unit := ContextPressureUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 
 	// Route capacity lands via request/context.
 	state = unit.Apply(state, rawEvent(1, session.EventRequestCtx, session.RequestContext{
@@ -261,7 +261,7 @@ func TestContextPressureUnitAnchorsAndProjects(t *testing.T) {
 
 func TestContextPressureUnitCompactionShrinksProjection(t *testing.T) {
 	unit := ContextPressureUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 	state = unit.Apply(state, rawEvent(1, session.EventRequestCtx, session.RequestContext{
 		Provider: "deepseek", Model: "deepseek-chat",
 	}))
@@ -290,7 +290,7 @@ func TestContextPressureUnitCompactionShrinksProjection(t *testing.T) {
 
 func TestContextBreakdownUnitFoldsEnvelopeAndSurface(t *testing.T) {
 	unit := ContextBreakdownUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 
 	header := session.EpochHeader{
 		Config: llm.LlmCallConfig{Provider: "deepseek", Model: "deepseek-chat"},
@@ -332,7 +332,7 @@ func TestContextBreakdownUnitFoldsEnvelopeAndSurface(t *testing.T) {
 
 func TestContextBreakdownUnitUnchangedEventKeepsState(t *testing.T) {
 	unit := ContextBreakdownUnit()
-	state := unit.Init(session.SessionHeader{})
+	state := unit.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 	// A tool/call is neither envelope nor surface: unchanged.
 	next := unit.Apply(state, rawEvent(1, session.EventToolCall, session.ToolCallData{
 		Turn: 1, Step: 1, Name: "x", Arguments: "{}",

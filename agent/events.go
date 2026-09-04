@@ -291,6 +291,12 @@ func (b *SubjectEventBus) RequestError() TypedWaterfall[RequestErrorPayload, Req
 	return NewTypedWaterfall[RequestErrorPayload, RequestErrorAction](b, EventRequestError)
 }
 
+// AssistantStream is the typed accessor for the agent/assistant-stream emit
+// event: the loop's process-local live attempt frames.
+func (b *SubjectEventBus) AssistantStream() TypedEmit[AssistantStreamFrame] {
+	return NewTypedEmit[AssistantStreamFrame](b, EventAssistantStream)
+}
+
 // TypedEmit binds one emit event name to its payload type. It drives the
 // same any-erased listener table as the raw OnEmit; the payload assertion
 // sits at this boundary, where construction guarantees it holds. Register
@@ -310,6 +316,11 @@ func (e TypedEmit[T]) On(listenerScope scope.ScopeKey, fn func(payload T) error)
 	return e.bus.OnEmit(e.event, listenerScope, func(payload any) error {
 		return fn(payload.(T))
 	})
+}
+
+// Publish dispatches the emit event through the agent's scope.
+func (e TypedEmit[T]) Publish(agentScope scope.ScopeKey, payload T) {
+	e.bus.Emit(e.event, agentScope, payload)
 }
 
 // TypedSerial binds one serial event name to its payload type and the type

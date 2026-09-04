@@ -56,7 +56,10 @@ func (b *Backend) findByID(id session.SessionID) (string, error) {
 			if !dir.IsDir() {
 				continue
 			}
-			path := filepath.Join(projectDir, dir.Name(), "session"+LogSuffix(b.Store.suffix()))
+			path, _, found := SelectGenerationLog(filepath.Join(projectDir, dir.Name()), b.Store.suffix())
+			if !found {
+				continue
+			}
 			header, ok, metaErr := readFirstLineHeader(path)
 			if metaErr != nil {
 				// A format refusal for THIS id must surface unwrapped with
@@ -225,7 +228,10 @@ func (b *Backend) ListSnapshots() ([]persistence.Snapshot, error) {
 			if !dir.IsDir() {
 				continue
 			}
-			path := filepath.Join(projectDir, dir.Name(), "session"+LogSuffix(b.Store.suffix()))
+			path, _, found := SelectGenerationLog(filepath.Join(projectDir, dir.Name()), b.Store.suffix())
+			if !found {
+				continue
+			}
 			info, err := os.Stat(path)
 			if err != nil {
 				continue

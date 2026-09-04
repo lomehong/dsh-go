@@ -60,7 +60,7 @@ func TestFollowRefusesUnknownSessions(t *testing.T) {
 func TestFollowSnapshotsALiveSessionWithHeaderCursorAndBaseline(t *testing.T) {
 	gateway, store := newFollowGateway(t)
 	sess, err := store.Create("session-live", session.CreateOptions{
-		HeaderMetadata: session.SessionHeader{CWD: `C:\tmp`, AgentPreset: "standard"},
+		HeaderMetadata: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, CWD: `C:\tmp`, AgentPreset: "standard"},
 	})
 	if err != nil {
 		t.Fatalf("seed session: %v", err)

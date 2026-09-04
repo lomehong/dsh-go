@@ -27,7 +27,7 @@ func TestStoreSessionsAdaptsTheRegistrySeam(t *testing.T) {
 	}
 
 	seed := []session.Event{}
-	prepared, err := adapter.Prepare("s-2", seed, session.SessionHeader{ID: "s-2"})
+	prepared, err := adapter.Prepare("s-2", seed, session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "s-2"})
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}

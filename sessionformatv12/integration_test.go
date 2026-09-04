@@ -15,12 +15,17 @@ import (
 // frozen released-v0 codec, the identity v0->v1 edge, the cardinality-
 // changing v1->v2 edge, and released-v2 target validation.
 func TestGoSessionLogMigratesToV2(t *testing.T) {
+	legacyVersion := int64(0)
 	header := session.SessionHeader{
+		// The live session is current-generation; the PHYSICAL header line
+		// below simulates the historical Go writer (stamped 0), which the
+		// migration chain takes to the current v2.
 		Version:   session.SESSION_FORMAT_VERSION,
 		ID:        "go-session-1",
 		CreatedAt: 1725500000000,
 		CWD:       t.TempDir(),
 	}
+	_ = legacyVersion
 	seed := []session.Event{}
 	live, err := session.NewDetached(header.ID, seed, &header, 0)
 	if err != nil {
@@ -91,7 +96,7 @@ func TestGoSessionLogMigratesToV2(t *testing.T) {
 		CreatedAt       int64  `json:"createdAt"`
 		CWD             string `json:"cwd,omitempty"`
 		DelegationDepth int64  `json:"delegationDepth"`
-	}{"session", header.Version, header.ID, header.CreatedAt, header.CWD, 0})
+	}{"session", 0, header.ID, header.CreatedAt, header.CWD, 0})
 	if err != nil {
 		t.Fatal(err)
 	}

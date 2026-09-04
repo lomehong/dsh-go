@@ -90,7 +90,7 @@ func (discardSessionLogger) Warn(string) {}
 
 func createSession(t *testing.T, store *session.Store, id, parent string) *session.Session {
 	t.Helper()
-	header := session.SessionHeader{CreatedAt: 30}
+	header := session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, CreatedAt: 30}
 	if parent != "" {
 		header.ParentSession = parent
 	}

@@ -13,7 +13,7 @@ import (
 
 func newSession(t *testing.T, id string) *session.Session {
 	t.Helper()
-	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{ID: session.SessionID(id), CWD: "D:\\tmp"}, 0)
+	sess, err := session.NewDetached(session.SessionID(id), nil, &session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: session.SessionID(id), CWD: "D:\\tmp"}, 0)
 	if err != nil {
 		t.Fatalf("NewDetached: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestProjectionFoldAndWire(t *testing.T) {
 	if definition.Key != "permissions" || definition.StateVersion != 1 {
 		t.Fatalf("definition = %+v", definition)
 	}
-	state := definition.Init(session.SessionHeader{})
+	state := definition.Init(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION})
 	state = definition.Apply(state, session.Event{Type: EventSandboxMode, Data: mustJSON(t, SandboxModeData{Mode: SandboxReadOnly})})
 	view := definition.Wire.View(state).(PermissionSelect)
 	if view.CurrentValue != CustomPreset || len(view.Options) != 3 {

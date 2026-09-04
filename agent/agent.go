@@ -133,6 +133,10 @@ const (
 	EventRequestError      = "agent/request-error"
 	EventTurnStopping      = "agent/turn-stopping"
 	EventAgentError        = "agent/error"
+	// EventAssistantStream publishes process-local live attempt frames
+	// (start/chunk/end). The declaration stays agent-scoped: a listener
+	// observes only its owning Agent unless it registers globally.
+	EventAssistantStream = "agent/assistant-stream"
 )
 
 // Payload shapes for the agent-subject events. Waterfall/serial payloads

@@ -228,7 +228,7 @@ func TestInboxSeedBoundaryExcludesParentPendingWork(t *testing.T) {
 	}
 	seed := parent.Events()
 	seedLength := int64(len(seed))
-	child, err := session.NewDetached("inbox-6-child", seed, &session.SessionHeader{ID: "inbox-6-child", IsSeeded: true, InheritedEventCount: session.SessionLogOffset(seedLength)}, session.SessionLogOffset(seedLength))
+	child, err := session.NewDetached("inbox-6-child", seed, &session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: "inbox-6-child", IsSeeded: true, InheritedEventCount: session.SessionLogOffset(seedLength)}, session.SessionLogOffset(seedLength))
 	if err != nil {
 		t.Fatalf("child session: %v", err)
 	}

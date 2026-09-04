@@ -207,7 +207,7 @@ func TestBackendFormatRefusalCarriesRawLogPath(t *testing.T) {
 	if !strings.Contains(unsupported.Error(), "upgrade the harness") {
 		t.Fatalf("refusal = %q", unsupported.Error())
 	}
-	if unsupported.Location == nil || !strings.Contains(unsupported.Location.Path, "session.jsonl") {
+	if unsupported.Location == nil || !strings.Contains(unsupported.Location.Path, "session.v") {
 		t.Fatalf("location = %+v", unsupported.Location)
 	}
 }

@@ -36,7 +36,7 @@ func (p *fakePersistence) List(ctx context.Context) ([]session.SessionHeader, er
 func (p *fakePersistence) seed(id session.SessionID, cwd string, createdAt int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.headers = append(p.headers, session.SessionHeader{Version: 0, ID: id, CreatedAt: createdAt, CWD: cwd})
+	p.headers = append(p.headers, session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: id, CreatedAt: createdAt, CWD: cwd})
 }
 
 type recordingLogger struct {

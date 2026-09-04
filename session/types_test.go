@@ -8,9 +8,9 @@ import (
 	"dshgo/llm"
 )
 
-func TestSessionFormatVersionPinnedAtZero(t *testing.T) {
-	if SESSION_FORMAT_VERSION != 0 {
-		t.Fatal("the unreleased harness pins the format at 0 with no compatibility promise")
+func TestSessionFormatVersionPinnedAtTwo(t *testing.T) {
+	if SESSION_FORMAT_VERSION != 2 {
+		t.Fatal("the current writer generation is the released v2 format")
 	}
 }
 

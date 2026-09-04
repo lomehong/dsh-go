@@ -119,7 +119,7 @@ func (f *fakeFactory) Create(ctx context.Context, options agent.CreateAgentOptio
 	if err != nil {
 		return agent.AgentHandle{}, err
 	}
-	f.persistence.seed(session.SessionHeader{ID: options.SessionID, CreatedAt: 1, CWD: options.Meta.CWD})
+	f.persistence.seed(session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: options.SessionID, CreatedAt: 1, CWD: options.Meta.CWD})
 	agentCtx := f.host.Child()
 	agentCtx.Provide(testScopeService, scope.NewScopeKey(nil))
 	built := agent.NewAgent(agent.AgentConfig{

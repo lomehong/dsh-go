@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"dshgo/agent"
 	"dshgo/llm"
@@ -17,7 +18,8 @@ import (
 // signal (the Go runtime resolves synchronously); markAgentLoopRequest is a
 // dev-mode marker with no value-type counterpart.
 
-// assistantChunkData is the assistant/chunk payload.
+// assistantChunkData is the historical assistant/chunk payload; format v2
+// writers no longer append it (chunks fold into attempt settlements).
 type assistantChunkData struct {
 	Turn  int64           `json:"turn"`
 	Step  int64           `json:"step"`
@@ -26,6 +28,12 @@ type assistantChunkData struct {
 
 // stepEndReason is the extract of turn endings a single step can produce.
 type stepEndReason = session.TurnEndReason
+
+// nextAssistantStreamRevision allocates the next frame revision.
+func (d *ReactLoopAgent) nextAssistantStreamRevision() int64 {
+	d.assistantStreamRevision++
+	return d.assistantStreamRevision
+}
 
 // preparedStep is the loop-internal admitted or rejected pre-step result with
 // its assembly attached.
@@ -38,6 +46,12 @@ type preparedStep struct {
 
 // step drives one model request and its tool calls. Returns the step's turn
 // ending; nil means the turn continues at the next step.
+//
+// Format-v2 durable discipline: top-level assistant/chunk events are gone.
+// Each model attempt settles once — assistant/message (with the embedded
+// compact stream) for a successful or cancelled-with-visible-prefix
+// response, assistant/attempt for failed/retried/stream-errored attempts —
+// and the committed settlement is named by the terminal live frame.
 func (d *ReactLoopAgent) step(signal context.Context, turn, step int64, assembly *systemprompt.PromptAssembly, startsRequestSeries bool) (stepEndReason, error) {
 	d.mu.Lock()
 	phase := d.phase
@@ -60,8 +74,11 @@ func (d *ReactLoopAgent) step(signal context.Context, turn, step int64, assembly
 			return stepEndReason{}, err
 		}
 		startsRequestSeries = false
-		assembler := llm.NewBlockAssembler()
-		var chunkSeqs []int64
+		d.assistantAttemptCounter++
+		live := newAssistantStreamAttempt(d.Session.ID(), d.assistantAttemptCounter, d.nextAssistantStreamRevision, turn, step, func(frame agent.AssistantStreamFrame) {
+			d.Events().AssistantStream().Publish(d.Scope, frame)
+		})
+		started := false
 		stream := d.loop.LLM.Stream(request)
 		if preparedCall != nil {
 			stream = preparedCall.Stream(request)
@@ -69,51 +86,43 @@ func (d *ReactLoopAgent) step(signal context.Context, turn, step int64, assembly
 		if err := signal.Err(); err != nil {
 			return stepEndReason{}, err
 		}
+		live.Start(d.nextAssistantStreamRevision())
+		started = true
 		streamErr := error(nil)
 		for chunk := range stream {
 			if err := signal.Err(); err != nil {
 				streamErr = err
 				break
 			}
-			event, appendErr := d.Session.Append(session.EventAssistantChunk, assistantChunkData{Turn: turn, Step: step, Chunk: chunk}, nil)
-			if appendErr != nil {
-				streamErr = appendErr
+			chunkJSON, marshalErr := json.Marshal(chunk)
+			if marshalErr != nil {
+				streamErr = marshalErr
 				break
 			}
-			chunkSeqs = append(chunkSeqs, event.Seq)
-			assembler.Push(chunk)
+			live.Push(llm.TimedStreamChunk{Time: time.Now().UnixMilli(), Chunk: chunk}, d.nextAssistantStreamRevision(), chunkJSON)
 		}
 		if streamErr == nil {
 			streamErr = signal.Err()
 		}
 		if streamErr != nil {
-			// A cancelled mid-stream finalizes its delivered text/reasoning
-			// prefix; undispatched tool calls are absent.
-			if signal.Err() != nil {
-				content := assembler.InterruptedBlocks()
-				if len(content) > 0 {
-					interrupted := llm.NewAssistantMessage(content, request.Provider, request.Model, nil)
-					data := session.AssistantMessageData{Turn: turn, Step: step, Message: interrupted, Interrupted: true}
-					if usage := assembler.Usage(); usage != nil {
-						data.Usage = usage
-					}
-					if _, err := d.Session.Append(session.EventAssistantMsg, data, &session.SurfaceIntent{
-						SurfaceOp:         session.SurfaceOp{Kind: session.SurfaceAppend},
-						SourceEventSeqs:   chunkSeqs,
-						SourceSeqsPresent: true,
-					}); err != nil {
-						return stepEndReason{}, err
-					}
-				}
+			if !started {
+				return stepEndReason{}, streamErr
+			}
+			settlementErr := d.settleInterruptedOrAbandoned(signal, live, request)
+			if settlementErr != nil {
+				return stepEndReason{}, fmt.Errorf("assistant stream failed and its durable settlement was rejected: %v; settlement error: %w", streamErr, settlementErr)
 			}
 			return stepEndReason{}, streamErr
 		}
 
-		finish := assembler.Finish()
+		finish := live.Finish()
 		if finish.Kind == llm.FinishError || finish.Kind == llm.FinishAborted {
 			failure := llm.LlmFailure{}
 			if finish.Failure != nil {
 				failure = *finish.Failure
+			}
+			if _, settleErr := d.settleAttempt(live); settleErr != nil {
+				return stepEndReason{}, settleErr
 			}
 			action := d.Events().RequestError().Dispatch(d.Scope, agent.RequestErrorPayload{
 				Agent:       d.Agent,
@@ -135,19 +144,8 @@ func (d *ReactLoopAgent) step(signal context.Context, turn, step int64, assembly
 			continue
 		}
 
-		message := assembler.Message(request.Provider, request.Model)
-		data := session.AssistantMessageData{Turn: turn, Step: step, Message: message}
-		if usage := assembler.Usage(); usage != nil {
-			data.Usage = usage
-		}
-		if chunkSeqs == nil {
-			chunkSeqs = []int64{}
-		}
-		if _, err := d.Session.Append(session.EventAssistantMsg, data, &session.SurfaceIntent{
-			SurfaceOp:         session.SurfaceOp{Kind: session.SurfaceAppend},
-			SourceEventSeqs:   chunkSeqs,
-			SourceSeqsPresent: true,
-		}); err != nil {
+		message := llm.NewAssistantMessage(live.Blocks(), request.Provider, request.Model, marshalReplayState(live.ReplayState()))
+		if _, err := d.settleMessage(live, message, false); err != nil {
 			return stepEndReason{}, err
 		}
 		if finish.Kind == llm.FinishMaxTokens {
@@ -178,6 +176,76 @@ func (d *ReactLoopAgent) step(signal context.Context, turn, step int64, assembly
 			return stepEndReason{Kind: session.TurnEndCompleted}, nil
 		}
 	}
+}
+
+// appendAssistantMessage commits one assistant/message settlement with its
+// embedded stream (surface append; chunk provenance is obsolete under v2).
+func (d *ReactLoopAgent) appendAssistantMessage(live *AssistantStreamAttempt, message llm.Message, interrupted bool) (session.Event, error) {
+	stream, err := live.StreamJSON()
+	if err != nil {
+		return session.Event{}, err
+	}
+	data := session.AssistantMessageData{
+		Turn: live.Turn, Step: live.Step, Message: message,
+		Interrupted: interrupted, Stream: stream,
+	}
+	if usage := live.Usage(); usage != nil {
+		data.Usage = usage
+	}
+	return d.Session.Append(session.EventAssistantMsg, data, &session.SurfaceIntent{
+		SurfaceOp: session.SurfaceOp{Kind: session.SurfaceAppend},
+	})
+}
+
+// settleMessage commits the message settlement then publishes the committed
+// end frame.
+func (d *ReactLoopAgent) settleMessage(live *AssistantStreamAttempt, message llm.Message, interrupted bool) (session.Event, error) {
+	return live.Settle(session.EventAssistantMsg, d.nextAssistantStreamRevision(), func() (session.Event, error) {
+		return d.appendAssistantMessage(live, message, interrupted)
+	})
+}
+
+// settleAttempt commits the log-only attempt settlement then publishes the
+// committed end frame.
+func (d *ReactLoopAgent) settleAttempt(live *AssistantStreamAttempt) (session.Event, error) {
+	return live.Settle(session.EventAssistantAttempt, d.nextAssistantStreamRevision(), func() (session.Event, error) {
+		stream, err := live.StreamJSON()
+		if err != nil {
+			return session.Event{}, err
+		}
+		return d.Session.Append(session.EventAssistantAttempt, session.AssistantAttemptData{
+			Turn: live.Turn, Step: live.Step, Stream: stream,
+		}, nil)
+	})
+}
+
+// settleInterruptedOrAbandoned finalizes a stream that died mid-flight:
+// a cancellation with visible content settles an interrupted message,
+// everything else settles a log-only attempt.
+func (d *ReactLoopAgent) settleInterruptedOrAbandoned(signal context.Context, live *AssistantStreamAttempt, request llm.GenerateOptions) error {
+	if signal.Err() != nil {
+		content := live.InterruptedBlocks()
+		if len(content) > 0 {
+			interrupted := llm.NewAssistantMessage(content, request.Provider, request.Model, marshalReplayState(live.ReplayState()))
+			_, err := d.settleMessage(live, interrupted, true)
+			return err
+		}
+	}
+	_, err := d.settleAttempt(live)
+	return err
+}
+
+// marshalReplayState renders the attempt's replay envelope for the message
+// source (nil stays absent).
+func marshalReplayState(replay *llm.ReplayEnvelope) json.RawMessage {
+	if replay == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(replay)
+	if err != nil {
+		return nil
+	}
+	return encoded
 }
 
 func preparedRetryPolicy(prepared *llm.PreparedCall) *llm.ResolvedRetryPolicy {
