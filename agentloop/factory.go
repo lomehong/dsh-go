@@ -19,8 +19,8 @@ import (
 // unload-following effect becomes the factory's own teardown signal plus the
 // caller's cancellation context; setup runs synchronously before publication
 // (the Go AgentSetup contract); a racing disposal is memoized with sync.Once;
-// the sessions registry (`ctx.sessions.enter/announce`) is out of this
-// slice's surface, so publication enters and announces the agent registry.
+// the live session enters the optional Sessions store inside publish (official
+// ctx.sessions.enter/announce), publishing the agent registry regardless.
 
 // newUUID mints a random RFC 4122 v4 id for derived fresh identities.
 func newUUID() string {
@@ -154,24 +154,56 @@ func (l *AgentLoop) prepare(id session.SessionID, options agent.AgentOptions, se
 		if goCtx.Err() != nil {
 			return agent.AgentHandle{}, fmt.Errorf("agent %q creation aborted", id)
 		}
+		// Official publish order (agent-loop index.ts): the live session
+		// enters the session store before the agent enters the registry, so
+		// the session corpus never misses a published agent.
+		var sessionDetach func()
+		if l.Sessions != nil {
+			sessionDetach, err = l.Sessions.Enter(built.Session)
+			if err != nil {
+				return agent.AgentHandle{}, err
+			}
+		}
 		entryDetach, err := l.Registry.Enter(built, nil)
 		if err != nil {
+			if sessionDetach != nil {
+				sessionDetach()
+			}
 			return agent.AgentHandle{}, err
 		}
+		if l.Sessions != nil {
+			if err := l.Sessions.Announce(built.Session); err != nil {
+				entryDetach()
+				sessionDetach()
+				return agent.AgentHandle{}, err
+			}
+		}
 		if err := l.Registry.Announce(built); err != nil {
+			if l.Sessions != nil {
+				sessionDetach()
+			}
 			entryDetach()
 			return agent.AgentHandle{}, err
 		}
 		if goCtx.Err() != nil {
+			if l.Sessions != nil {
+				sessionDetach()
+			}
 			entryDetach()
 			return agent.AgentHandle{}, fmt.Errorf("agent %q creation aborted", id)
 		}
 		l.emitSessionStart(built, source)
 		if goCtx.Err() != nil {
+			if l.Sessions != nil {
+				sessionDetach()
+			}
 			entryDetach()
 			return agent.AgentHandle{}, fmt.Errorf("agent %q creation aborted", id)
 		}
 		detach = func() {
+			if l.Sessions != nil {
+				sessionDetach()
+			}
 			entryDetach()
 			unwindVariables()
 		}

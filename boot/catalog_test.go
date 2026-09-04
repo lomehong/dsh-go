@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"dshgo/agent"
+	"dshgo/agentloop"
 	"dshgo/commands"
 	"dshgo/cordis"
 	"dshgo/cordis/loader"
@@ -145,6 +146,13 @@ func TestCatalogAssemblesCoreServicesThroughAssemble(t *testing.T) {
 	}
 	if ctx.Get(ServiceSessionTitle) == nil {
 		t.Fatal("session title service missing after assembly")
+	}
+	// The agent loop carries the composed session store so every published
+	// agent's session enters the corpus session/list reads.
+	if loop, ok := ctx.Get(ServiceAgentLoop).(*agentloop.AgentLoop); !ok || loop == nil {
+		t.Fatal("agent loop service missing after assembly")
+	} else if loop.Sessions == nil {
+		t.Fatal("agent loop must carry the composed session store")
 	}
 	// Both delegation rows mount with their configured identities and
 	// provider-routed wording.

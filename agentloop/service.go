@@ -20,12 +20,12 @@ import (
 //
 // Port of packages/core/agent-loop/src/index.ts. Go adaptations: the cordis
 // service-injection strings become explicit constructor references; the
-// session registry (`ctx.sessions.enter/announce`) is out of this slice's
-// surface, so publication enters and announces the agent registry only; the
-// settings-section installation and `agent-loop/config-start-failed` cordis
-// event arrive with the settings/boot wiring (config startup failures log
-// through the loop logger); per-agent `provider`/`model`/`cwd` prompt
-// variables register at the agent's own scope inside prepare.
+// live session enters the optional Sessions store inside publish (official
+// ctx.sessions.enter/announce); the settings-section installation and
+// `agent-loop/config-start-failed` cordis event arrive with the
+// settings/boot wiring (config startup failures log through the loop
+// logger); per-agent `provider`/`model`/`cwd` prompt variables register at
+// the agent's own scope inside prepare.
 
 // AgentLoopConfig is the agent-loop plugin configuration.
 type AgentLoopConfig struct {
@@ -195,6 +195,11 @@ type AgentLoop struct {
 	// Persistence is the optional session store used by Resume and by
 	// configured agents with a sessionId.
 	Persistence *persistence.Coordinator
+	// Sessions is the optional live-session store a published agent's
+	// session enters (official ctx.sessions.enter/announce inside publish).
+	// A nil store publishes the agent registry only, which keeps minimal
+	// profiles and the pre-session-query composition honest.
+	Sessions *session.Store
 
 	// Registry receives the factory and owns publication.
 	Registry *agent.AgentRegistry

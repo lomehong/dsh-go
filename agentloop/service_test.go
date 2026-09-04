@@ -1,6 +1,7 @@
 package agentloop
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -194,5 +195,36 @@ func TestDerivedFreshSessionIDForConfiguredAgent(t *testing.T) {
 	}
 	if len(newUUID()) != 36 {
 		t.Fatalf("uuid length = %d", len(newUUID()))
+	}
+}
+
+func TestCreateEntersTheLiveSessionIntoTheOptionalStore(t *testing.T) {
+	h := newHarness(t)
+	store := session.NewStore(nil)
+	h.loop.Sessions = store
+
+	handle, err := h.loop.CreateAgent(nil, agent.CreateAgentOptions{
+		SessionID:    session.SessionID("stored-session"),
+		AgentOptions: agent.AgentOptions{Provider: "stub", Model: "stub-model"},
+	})
+	if err != nil {
+		t.Fatalf("CreateAgent: %v", err)
+	}
+	if !slices.Contains(store.List(), session.SessionID("stored-session")) {
+		t.Fatalf("published session must be live in the store, list = %v", store.List())
+	}
+	if err := handle.Dispose(); err != nil {
+		t.Fatalf("dispose: %v", err)
+	}
+	if slices.Contains(store.List(), session.SessionID("stored-session")) {
+		t.Fatalf("disposed session must leave the store, list = %v", store.List())
+	}
+}
+
+func TestCreateWithoutAStorePublishesTheAgentRegistryOnly(t *testing.T) {
+	h := newHarness(t)
+	a := h.startAgent("no-store")
+	if a == nil || h.registry.Get(a.ID) == nil {
+		t.Fatalf("agent must still publish without a session store")
 	}
 }
