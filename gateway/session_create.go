@@ -17,6 +17,7 @@ import (
 	"dshgo/llm"
 	"dshgo/preset"
 	"dshgo/session"
+	"dshgo/sessiontitle"
 	"dshgo/workspace"
 )
 
@@ -40,6 +41,8 @@ type SessionCreateDeps struct {
 	Presets func() any
 	// Sessions answers the cold-identity check (the sessions store).
 	Sessions func() any
+	// Titles renames a live session (the sessionTitle service).
+	Titles func() any
 	// DefaultCwd is the project directory used when create names neither a
 	// workspace nor a cwd (official ApiSessionCommands defaultCwd).
 	DefaultCwd string
@@ -61,7 +64,21 @@ func (c *SessionController) EnableCreate(deps SessionCreateDeps) {
 	if deps.Sessions == nil {
 		deps.Sessions = func() any { return nil }
 	}
+	if deps.Titles == nil {
+		deps.Titles = func() any { return nil }
+	}
 	c.createDeps = &deps
+}
+
+// titles resolves the composed session-title service, or nil when absent.
+func (c *SessionController) titles() *sessiontitle.Service {
+	if c.createDeps == nil {
+		return nil
+	}
+	if s, ok := c.createDeps.Titles().(*sessiontitle.Service); ok && s != nil {
+		return s
+	}
+	return nil
 }
 
 // createReady reports whether the create seams are composed.

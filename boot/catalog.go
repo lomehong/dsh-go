@@ -1014,6 +1014,7 @@ var builders = map[string]pluginBuilder{
 					Agents:     func() any { return ctx.Get(ServiceAgents) },
 					Presets:    func() any { return ctx.Get(ServiceAgentPresets) },
 					Sessions:   func() any { return ctx.Get(ServiceSessions) },
+					Titles:     func() any { return ctx.Get(ServiceSessionTitle) },
 					DefaultCwd: defaultCwd,
 				})
 				ctx.Provide("sessionController", sessionController)

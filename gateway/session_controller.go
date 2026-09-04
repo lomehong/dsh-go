@@ -2,11 +2,14 @@ package gateway
 
 import (
 	"context"
+	"errors"
 
 	"dshgo/agent"
 	"dshgo/agentdefaultmodel"
 	"dshgo/llm"
+	"dshgo/session"
 	"dshgo/session/projectioncache"
+	"dshgo/sessiontitle"
 	"dshgo/sessionquery"
 	"dshgo/typert"
 )
@@ -203,6 +206,40 @@ func (c *SessionController) List(ctx context.Context, request map[string]any) (a
 	return map[string]any{"items": items}, nil
 }
 
+// Rename pins an explicit user title on one live session (official
+// session/rename, commands.rename): live-agent lookup resolves the session,
+// then session-title supersedes with the normalized text. Empty-normalized
+// titles answer session/title-invalid (the service's ErrInvalid seam).
+func (c *SessionController) Rename(ctx context.Context, request map[string]any) (any, error) {
+	if !c.createReady() {
+		return nil, wrapGatewayError("gateway/not-composed", "session/rename", "", nil, "session rename is not composed on this profile")
+	}
+	sessionID := session.SessionID(requestString(request, "sessionId"))
+	if sessionID == "" {
+		return nil, wrapGatewayError("gateway/arguments-invalid", "session/rename", "sessionId", nil, "session rename requires a sessionId")
+	}
+	title := requestString(request, "title")
+	live := c.liveAgent(sessionID)
+	if live == nil {
+		return nil, wrapGatewayError("session/not-found", "session/rename", "sessionId", nil, "session %q is not live", sessionID)
+	}
+	service := c.titles()
+	if service == nil {
+		return nil, wrapGatewayError("gateway/internal", "session/rename", "", nil, "renaming is unavailable: this deployment mounts no session-title service")
+	}
+	snapshot, err := service.Rename(live.Session, title)
+	if err != nil {
+		if errors.Is(err, sessiontitle.ErrInvalid) {
+			return nil, wrapGatewayError("session/title-invalid", "session/rename", "title", err, "session title must contain visible characters")
+		}
+		return nil, wrapGatewayError("gateway/internal", "session/rename", "", err, "failed to rename session %q", sessionID)
+	}
+	return map[string]any{
+		"title": snapshot.Title,
+		"seq":   snapshot.EventSeq,
+	}, nil
+}
+
 // Contribution is the strict typert definition of the served session slice.
 // Only modelCatalog and list carry Go ports today; the rest of the session
 // namespace stays unregistered until its domain round.
@@ -237,7 +274,9 @@ func (c *SessionController) Contribution() typert.Contribution {
 				descriptor("session.page", "page", "Page", requestParam),
 			}
 			if c.createDeps != nil {
-				invocations = append(invocations, descriptor("session.create", "create", "Create", requestParam))
+				invocations = append(invocations,
+					descriptor("session.create", "create", "Create", requestParam),
+					descriptor("session.rename", "rename", "Rename", requestParam))
 			}
 			return invocations
 		}(),
