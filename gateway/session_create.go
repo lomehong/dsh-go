@@ -206,9 +206,13 @@ func (c *SessionController) Create(ctx context.Context, request map[string]any) 
 
 	// Preset composition: the requested id, else the roster default, else
 	// the official agentless fallback (no preset field, selection-only
-	// setup) — composeAgent's two branches.
+	// setup) — composeAgent's two branches. An explicitly requested preset
+	// that fails composition is a loud refusal; a default-derived preset
+	// whose plugin closure is not yet ported degrades to the agentless
+	// composition instead of dead-ending the New Session flow.
 	presetID := requestedPreset
-	if presetID == "" {
+	presetExplicit := presetID != ""
+	if !presetExplicit {
 		if mounts := c.presets(); mounts != nil {
 			presetID = mounts.DefaultID()
 		}
@@ -219,10 +223,15 @@ func (c *SessionController) Create(ctx context.Context, request map[string]any) 
 			return nil, wrapGatewayError("gateway/not-composed", "session/create", "agentPreset", nil, "session create has no preset mounts to resolve %q", presetID)
 		}
 		if _, err := mounts.Resolve(presetID); err != nil {
-			return nil, wrapGatewayError("gateway/arguments-invalid", "session/create", "agentPreset", err, "agent preset %q not resolvable", presetID)
-		}
-		if _, err := mounts.StandingKeyFor(presetID); err != nil {
-			return nil, wrapGatewayError("gateway/arguments-invalid", "session/create", "agentPreset", err, "agent preset %q is not mountable", presetID)
+			if presetExplicit {
+				return nil, wrapGatewayError("gateway/arguments-invalid", "session/create", "agentPreset", err, "agent preset %q not resolvable", presetID)
+			}
+			presetID = ""
+		} else if _, err := mounts.StandingKeyFor(presetID); err != nil {
+			if presetExplicit {
+				return nil, wrapGatewayError("gateway/arguments-invalid", "session/create", "agentPreset", err, "agent preset %q is not mountable", presetID)
+			}
+			presetID = ""
 		}
 	}
 

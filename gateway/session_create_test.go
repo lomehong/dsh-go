@@ -267,3 +267,22 @@ func TestCreateAnswersColdIdentityUntilResumeLands(t *testing.T) {
 		t.Fatalf("want the cold-identity refusal, got %v", err)
 	}
 }
+
+func TestCreateDegradesTheBrokenDefaultPresetToAgentless(t *testing.T) {
+	controller, factory, _ := newCreateController(t)
+	controller.EnableCreate(SessionCreateDeps{
+		Agents:   func() any { return factory.registry },
+		Sessions: func() any { return factory.store },
+		Presets:  func() any { return "not-a-mounts" },
+	})
+	value, err := controller.Create(context.Background(), map[string]any{"cwd": t.TempDir()})
+	if err != nil {
+		t.Fatalf("create with an unresolvable default preset must degrade to agentless, got %v", err)
+	}
+	if row := value.(map[string]any); row["agentPreset"] != nil {
+		t.Fatalf("the degraded create must not advertise a preset, got %v", row)
+	}
+	if len(factory.ids) != 1 {
+		t.Fatalf("the degraded create still builds one agent, got %v", factory.ids)
+	}
+}
