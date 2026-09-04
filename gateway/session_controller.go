@@ -234,6 +234,7 @@ func (c *SessionController) Contribution() typert.Contribution {
 			invocations := []typert.InvocationDescriptor{
 				descriptor("session.modelCatalog", "modelCatalog", "ModelCatalog"),
 				descriptor("session.list", "list", "List", requestParam),
+				descriptor("session.page", "page", "Page", requestParam),
 			}
 			if c.createDeps != nil {
 				invocations = append(invocations, descriptor("session.create", "create", "Create", requestParam))

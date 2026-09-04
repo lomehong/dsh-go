@@ -11,40 +11,12 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"dshgo/session"
 )
 
 const sessionFollowEndpoint = "session/follow"
-
-// followMessageTypes are the events paginate counts toward maxMessages
-// (official MESSAGE_TYPES).
-var followMessageTypes = map[string]bool{
-	"user/message":      true,
-	"assistant/message": true,
-}
-
-// followDefaultMaxMessages is the official DEFAULT_MAX_MESSAGES.
-const followDefaultMaxMessages = 50
-
-// followEventFrame is the wire form of one raw event (official
-// SessionWireEvent): the durable event fields the browser journal renders.
-type followEventFrame struct {
-	Type            string          `json:"type"`
-	Seq             int64           `json:"seq"`
-	Time            int64           `json:"time"`
-	Data            json.RawMessage `json:"data"`
-	Ignorable       bool            `json:"ignorable,omitempty"`
-	SourceEventSeqs []int64         `json:"sourceEventSeqs,omitempty"`
-}
-
-// followRecord is one history-page record (official SessionHistoryRecord =
-// SessionEventEntry | SessionChunkRun). Chunk packing stays a later round:
-// unpacked chunk events remain valid SessionEventEntry records.
-type followRecord struct {
-	Type  string            `json:"type"`
-	Event followEventFrame  `json:"event"`
-}
 
 // followWireHeader is the v0 browser header (official SessionWireHeader):
 // IsSeeded folds into seedLength, Origin into the subagent discriminator.
@@ -67,27 +39,27 @@ type followAddress struct {
 	SessionID string `json:"sessionId"`
 }
 
-// parseFollowAddress extracts the plain-session id from the decoded
-// address. Subagent addresses answer a loud not-supported until that
-// domain round.
-func parseFollowAddress(args map[string]any) (string, error) {
+// parseSessionAddress extracts the plain-session id from the decoded
+// address payload. Subagent addresses answer a loud not-supported until
+// that domain round. endpoint labels the caller (follow/page) in errors.
+func parseSessionAddress(args map[string]any, endpoint string) (string, error) {
 	raw, ok := args["address"]
 	if !ok || raw == nil {
-		return "", wrapGatewayError("gateway/arguments-invalid", "session/follow", "address", nil, "session follow requires an address")
+		return "", wrapGatewayError("gateway/arguments-invalid", endpoint, "address", nil, "session %s requires an address", strings.TrimPrefix(endpoint, "session/"))
 	}
 	encoded, err := json.Marshal(raw)
 	if err != nil {
-		return "", wrapGatewayError("gateway/arguments-invalid", "session/follow", "address", err, "session follow address is not JSON")
+		return "", wrapGatewayError("gateway/arguments-invalid", endpoint, "address", err, "session address is not JSON")
 	}
 	var address followAddress
 	if err := json.Unmarshal(encoded, &address); err != nil {
-		return "", wrapGatewayError("gateway/arguments-invalid", "session/follow", "address", err, "session follow address is not decodable")
+		return "", wrapGatewayError("gateway/arguments-invalid", endpoint, "address", err, "session address is not decodable")
 	}
 	if address.Kind != "" && address.Kind != "session" {
-		return "", wrapGatewayError("gateway/arguments-invalid", "session/follow", "address", nil, "session follow address kind %q is not served yet", address.Kind)
+		return "", wrapGatewayError("gateway/arguments-invalid", endpoint, "address", nil, "session address kind %q is not served yet", address.Kind)
 	}
 	if address.SessionID == "" {
-		return "", wrapGatewayError("gateway/arguments-invalid", "session/follow", "address", nil, "session follow address lacks a sessionId")
+		return "", wrapGatewayError("gateway/arguments-invalid", endpoint, "address", nil, "session address lacks a sessionId")
 	}
 	return address.SessionID, nil
 }
@@ -98,45 +70,6 @@ func followMaxMessages(args map[string]any) int {
 		return int(raw)
 	}
 	return followDefaultMaxMessages
-}
-
-// followPage is the message-aligned backwards cut (official paginate): walk
-// from the newest event counting message-typed surface events up to the
-// bound, then slice from that cut.
-func followPage(events []session.Event, maxMessages int) (page []session.Event, hasMore bool) {
-	count := 0
-	cut := 0
-	for index := len(events) - 1; index >= 0; index-- {
-		event := events[index]
-		if !followMessageTypes[event.Type] {
-			continue
-		}
-		count++
-		if count >= maxMessages {
-			cut = index
-			break
-		}
-	}
-	return events[cut:], cut > 0
-}
-
-// followRecords translates events into wire records.
-func followRecords(events []session.Event) []followRecord {
-	records := make([]followRecord, 0, len(events))
-	for _, event := range events {
-		records = append(records, followRecord{
-			Type: "event",
-			Event: followEventFrame{
-				Type:            event.Type,
-				Seq:             event.Seq,
-				Time:            event.Time,
-				Data:            event.Data,
-				Ignorable:       event.Ignorable,
-				SourceEventSeqs: event.SourceEventSeqs,
-			},
-		})
-	}
-	return records
 }
 
 // sessionsStoreService is the composed live-session store (boot
@@ -155,7 +88,7 @@ func (g *Gateway) sessionStore() *session.Store {
 // (header, cursor, message-aligned records, projection baseline) then an
 // open, quiet hold until the caller's signal ends.
 func (g *Gateway) openSessionFollow(args map[string]any, signal context.Context) (<-chan any, func(), error) {
-	sessionID, err := parseFollowAddress(args)
+	sessionID, err := parseSessionAddress(args, sessionFollowEndpoint)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -170,7 +103,7 @@ func (g *Gateway) openSessionFollow(args map[string]any, signal context.Context)
 
 	events := sess.Events()
 	cursor := int64(sess.Seq()) - 1
-	page, hasMore := followPage(events, followMaxMessages(args))
+	page, hasMore := paginateHistory(events, nil, followMaxMessages(args), cursor)
 	header := sess.Header()
 	wire := followWireHeader{
 		Version:         header.Version,
@@ -215,10 +148,10 @@ func (g *Gateway) openSessionFollow(args map[string]any, signal context.Context)
 		case <-ctx.Done():
 			return
 		}
-	select {
-	case <-signal.Done():
-	case <-ctx.Done():
-	}
-}()
+		select {
+		case <-signal.Done():
+		case <-ctx.Done():
+		}
+	}()
 	return frames, cancel, nil
 }
