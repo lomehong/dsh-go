@@ -1008,6 +1008,14 @@ var builders = map[string]pluginBuilder{
 					func() any { return ctx.Get(ServiceLlm) },
 					func() any { return ctx.Get(ServiceAgentDefaultModel) },
 				)
+				defaultCwd, _ := os.Getwd()
+				sessionController.EnableCreate(gateway.SessionCreateDeps{
+					Workspaces: func() any { return ctx.Get(ServiceWorkspace) },
+					Agents:     func() any { return ctx.Get(ServiceAgents) },
+					Presets:    func() any { return ctx.Get(ServiceAgentPresets) },
+					Sessions:   func() any { return ctx.Get(ServiceSessions) },
+					DefaultCwd: defaultCwd,
+				})
 				ctx.Provide("sessionController", sessionController)
 				// The sessionListMetadata projection unit (official
 				// api-session-controller list projection) registers only

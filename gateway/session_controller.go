@@ -19,6 +19,9 @@ type SessionController struct {
 	cacheLookup   func() any
 	llmLookup     func() any
 	defaultLookup func() any
+	// createDeps carries the session/create seams; nil until EnableCreate
+	// runs, which also gates whether the create invocation is advertised.
+	createDeps *SessionCreateDeps
 }
 
 // NewSessionController builds the namespace host. Lookups resolve per call —
@@ -227,9 +230,15 @@ func (c *SessionController) Contribution() typert.Contribution {
 	return typert.Contribution{
 		Package: "session-controller",
 		Face:    typert.FaceHost,
-		Invocations: []typert.InvocationDescriptor{
-			descriptor("session.modelCatalog", "modelCatalog", "ModelCatalog"),
-			descriptor("session.list", "list", "List", requestParam),
-		},
+		Invocations: func() []typert.InvocationDescriptor {
+			invocations := []typert.InvocationDescriptor{
+				descriptor("session.modelCatalog", "modelCatalog", "ModelCatalog"),
+				descriptor("session.list", "list", "List", requestParam),
+			}
+			if c.createDeps != nil {
+				invocations = append(invocations, descriptor("session.create", "create", "Create", requestParam))
+			}
+			return invocations
+		}(),
 	}
 }
