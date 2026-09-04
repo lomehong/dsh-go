@@ -11,6 +11,7 @@ package preset
 
 import (
 	"os"
+	"path/filepath"
 
 	"dshgo/homepaths"
 )
@@ -104,13 +105,37 @@ func (r *Roster) List() ([]AgentPreset, error) {
 }
 
 // harnessBase is the directory a row's package name resolves against: the
-// installed harness itself.
+// installed harness itself. A Go deployment's shipped presets ride inside
+// the bundled webassets node_modules tree, so the walk starts from the
+// directory that owns that tree — walking up from the shipped root until a
+// node_modules owner appears — rather than the process working directory.
 func (r *Roster) harnessBase() string {
+	if r.options.ShippedRoot != "" {
+		if dir := nodeModulesOwner(r.options.ShippedRoot); dir != "" {
+			return dir
+		}
+	}
 	base, err := os.Getwd()
 	if err != nil {
 		return "."
 	}
 	return base
+}
+
+// nodeModulesOwner returns the nearest ancestor of dir that directly owns a
+// node_modules directory, or "" when none does.
+func nodeModulesOwner(dir string) string {
+	current := filepath.Clean(dir)
+	for {
+		if info, err := os.Stat(filepath.Join(current, "node_modules")); err == nil && info.IsDir() {
+			return current
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return ""
+		}
+		current = parent
+	}
 }
 
 // resolve resolves one preset id against the roster.

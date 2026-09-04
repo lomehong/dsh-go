@@ -217,9 +217,49 @@ func (c *PluginInventoryController) List(ctx context.Context) (any, error) {
 	if m, ok := c.presets().(*preset.Mounts); ok && m != nil {
 		list, err := m.List()
 		if err == nil {
+			defaultID := m.DefaultID()
 			presets := make([]any, 0, len(list))
 			for _, p := range list {
-				presets = append(presets, p)
+				rows, rowErr := preset.CompositionRows(p)
+				if rowErr != nil {
+					presets = append(presets, map[string]any{
+						"id":        p.ID,
+						"trust":     p.Trust,
+						"isDefault": p.ID == defaultID,
+						"broken":    rowErr.Error(),
+						"rows":      []any{},
+					})
+					continue
+				}
+				rowList := make([]any, 0, len(rows))
+				for _, row := range rows {
+					rowMap := map[string]any{
+						"moduleName": row.ModuleName,
+						"fiberPhase": nil,
+					}
+					if row.EntryID != nil {
+						rowMap["entryId"] = *row.EntryID
+					}
+					if row.Enabled != nil {
+						rowMap["enabled"] = *row.Enabled
+					} else {
+						rowMap["enabled"] = "conditional"
+					}
+					rowList = append(rowList, rowMap)
+				}
+				presetMap := map[string]any{
+					"id":        p.ID,
+					"trust":     p.Trust,
+					"isDefault": p.ID == defaultID,
+					"rows":      rowList,
+				}
+				if p.Name != nil {
+					presetMap["name"] = *p.Name
+				}
+				if p.Broken != nil {
+					presetMap["broken"] = *p.Broken
+				}
+				presets = append(presets, presetMap)
 			}
 			result["agentPresets"] = presets
 		}
