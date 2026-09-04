@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"sync"
+	"time"
 
 	"dshgo/agent"
 	"dshgo/cordis"
@@ -290,6 +291,7 @@ func (l *AgentLoop) installAgentVariables(a *agent.Agent) func() {
 func (l *AgentLoop) CreateAgent(owner *cordis.Context, options agent.CreateAgentOptions) (agent.AgentHandle, error) {
 	sess, err := session.NewDetached(options.SessionID, options.Seed, &session.SessionHeader{
 		ID:                  options.SessionID,
+		CreatedAt:           time.Now().UnixMilli(),
 		CWD:                 options.Meta.CWD,
 		ParentSession:       options.Meta.ParentSession,
 		IsSeeded:            options.Meta.IsSeeded,
