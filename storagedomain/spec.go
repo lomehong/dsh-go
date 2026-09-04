@@ -32,6 +32,19 @@ const (
 	LayoutPerRecord = "per-record"
 )
 
+// InvalidRecordPolicy names how a stored record that fails its schema is
+// handled at open.
+const (
+	// InvalidRecordsFailLoud (the default) rejects the whole open with
+	// `invalid-record` — right for authoritative data.
+	InvalidRecordsFailLoud = ""
+	// InvalidRecordsBackupAndSkip moves the failing record's document aside
+	// (through the backend's RecordBackuper seam), logs the cause, and opens
+	// without the record — for domains whose records are disposable derived
+	// data. Backends without the seam keep the fail-loud path.
+	InvalidRecordsBackupAndSkip = "backup-and-skip"
+)
+
 // DomainSpec is the static declaration of one domain: identity, version, and
 // record layout. The owning package defines it once with DefineDomain; both
 // the type surface and the runtime (validation, descriptor projection)
@@ -43,6 +56,16 @@ type DomainSpec struct {
 	// Version is the domain format version; a medium stamped with a
 	// different version rejects at open.
 	Version int
+	// CompatibleVersions lists older versions whose stored records the
+	// current record schemas still accept. Per-record reads admit documents
+	// stamped with any listed version; the legacy whole-unit bootstrap
+	// accepts only a legacy file stamped with one. Writes always stamp
+	// Version. Single-layout reads stay exact-version.
+	CompatibleVersions []int
+	// InvalidRecordPolicy names how a stored record failing its schema is
+	// handled at open: InvalidRecordsBackupAndSkip moves it aside and skips;
+	// the default (InvalidRecordsFailLoud) rejects the open.
+	InvalidRecordPolicy string
 	// Layout is the medium layout; empty means LayoutSingle.
 	Layout string
 	// Tables are the declared table names, each matching UnitNamePattern.
@@ -74,6 +97,17 @@ func DefineDomain(spec DomainSpec) (DomainSpec, error) {
 	if spec.Version < 0 {
 		return DomainSpec{}, fmt.Errorf("domain '%s' version must be a non-negative integer, got %d", spec.Name, spec.Version)
 	}
+	for _, compat := range spec.CompatibleVersions {
+		if compat < 0 || compat >= spec.Version {
+			return DomainSpec{}, fmt.Errorf(
+				"domain '%s' compatibleVersions entries must be non-negative integers below version %d, got %d",
+				spec.Name, spec.Version, compat)
+		}
+	}
+	if spec.InvalidRecordPolicy != "" && spec.InvalidRecordPolicy != InvalidRecordsBackupAndSkip {
+		return DomainSpec{}, fmt.Errorf("domain '%s' invalidRecordPolicy must be 'backup-and-skip' when present, got %s",
+			spec.Name, spec.InvalidRecordPolicy)
+	}
 	if spec.Layout != "" && spec.Layout != LayoutSingle && spec.Layout != LayoutPerRecord {
 		return DomainSpec{}, fmt.Errorf("domain '%s' layout must be 'single' or 'per-record', got %s", spec.Name, spec.Layout)
 	}
@@ -101,6 +135,9 @@ type KvUnitDescriptor struct {
 	// Version is the unit format version stamped on the medium at first
 	// materialization.
 	Version int
+	// CompatibleVersions lists older versions the unit reads as its own
+	// (acceptedStamps = Version + CompatibleVersions).
+	CompatibleVersions []int
 	// Tables are the table names.
 	Tables []string
 	// HasGlobal declares the global singleton slot.
@@ -112,10 +149,11 @@ type KvUnitDescriptor struct {
 // DescriptorOf projects a spec onto the backend-facing unit descriptor.
 func DescriptorOf(spec DomainSpec) KvUnitDescriptor {
 	return KvUnitDescriptor{
-		Name:      spec.Name,
-		Version:   spec.Version,
-		Tables:    spec.Tables,
-		HasGlobal: spec.HasGlobal,
-		Layout:    spec.Layout,
+		Name:               spec.Name,
+		Version:            spec.Version,
+		CompatibleVersions: spec.CompatibleVersions,
+		Tables:             spec.Tables,
+		HasGlobal:          spec.HasGlobal,
+		Layout:             spec.Layout,
 	}
 }

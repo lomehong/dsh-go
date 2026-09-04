@@ -464,3 +464,50 @@ func TestConcurrentUpdatesSerialize(t *testing.T) {
 		t.Fatal("the updated record must remain")
 	}
 }
+
+func TestDefineDomainValidatesCompatibleVersionsAndPolicy(t *testing.T) {
+	if _, err := DefineDomain(DomainSpec{Name: "ok", Version: 2, CompatibleVersions: []int{3}}); err == nil || !strings.Contains(err.Error(), "compatibleVersions entries must be non-negative integers below version 2") {
+		t.Fatalf("err = %v, want the compat>=version rejection", err)
+	}
+	if _, err := DefineDomain(DomainSpec{Name: "ok", Version: 2, InvalidRecordPolicy: "explode"}); err == nil || !strings.Contains(err.Error(), "invalidRecordPolicy must be 'backup-and-skip'") {
+		t.Fatalf("err = %v, want the policy rejection", err)
+	}
+	if _, err := DefineDomain(DomainSpec{Name: "ok", Version: 2, CompatibleVersions: []int{0, 1}, InvalidRecordPolicy: InvalidRecordsBackupAndSkip}); err != nil {
+		t.Fatalf("valid spec rejected: %v", err)
+	}
+}
+
+func TestOpenBacksUpAndSkipsInvalidRecords(t *testing.T) {
+	spec, err := DefineDomain(DomainSpec{
+		Name:               "test_domain",
+		Version:            2,
+		InvalidRecordPolicy: InvalidRecordsBackupAndSkip,
+		Tables:             []string{"things"},
+		ValidateRecord: func(table string, key string, raw json.RawMessage) error {
+			var decoded map[string]any
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				return err
+			}
+			if _, ok := decoded["id"]; !ok {
+				return errors.New("record needs an id")
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("define: %v", err)
+	}
+	_, _, domain, err := newFacility(t, spec, map[string]map[string]json.RawMessage{
+		"things": {"good": json.RawMessage(`{"id":"a"}`), "bad": json.RawMessage(`{"nope":1}`)},
+	}, nil)
+	if err != nil || domain == nil {
+		t.Fatalf("domain = %v err = %v, want open with the bad record skipped", domain, err)
+	}
+	table := domain.Table("things")
+	if value := table.Get("bad"); value != nil {
+		t.Fatalf("backed-up record must read as absent, got %s", value)
+	}
+	if value := table.Get("good"); string(value) != `{"id":"a"}` {
+		t.Fatalf("good record = %s, want it present", value)
+	}
+}

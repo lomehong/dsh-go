@@ -107,13 +107,14 @@ func SerializeRecord(version int, value json.RawMessage) ([]byte, error) {
 	return marshalPretty(map[string]any{"version": version, "record": nullable(value)})
 }
 
-// ParseRecord parses one per-record document, validating its version stamp.
-// A malformed document or one stamped with a different version is FOREIGN
-// and reads as absent — the per-record contract: one bad or stale record
-// file must not brick the whole unit, and a version bump discards stale
-// records instead of migrating them (the whole-unit format rejects instead,
-// because there is exactly one document).
-func ParseRecord(text []byte, version int) (json.RawMessage, bool) {
+// ParseRecord parses one per-record document, validating its version stamp
+// against the accepted set (the unit's current version plus any declared
+// compatible versions). A malformed document or one stamped with a version
+// outside the accepted set is FOREIGN and reads as absent — the per-record
+// contract: one bad or stale record file must not brick the whole unit, and
+// a version bump discards stale records instead of migrating them (the
+// whole-unit format rejects instead, because there is exactly one document).
+func ParseRecord(text []byte, versions []int) (json.RawMessage, bool) {
 	var document struct {
 		Version *int            `json:"version"`
 		Record  json.RawMessage `json:"record"`
@@ -121,10 +122,19 @@ func ParseRecord(text []byte, version int) (json.RawMessage, bool) {
 	if err := json.Unmarshal(text, &document); err != nil {
 		return nil, false
 	}
-	if document.Version == nil || *document.Version != version {
+	if document.Version == nil || !containsVersion(versions, *document.Version) {
 		return nil, false
 	}
 	return document.Record, true
+}
+
+func containsVersion(versions []int, version int) bool {
+	for _, candidate := range versions {
+		if candidate == version {
+			return true
+		}
+	}
+	return false
 }
 
 // nullable maps the nil sentinel to a JSON null for encoding.

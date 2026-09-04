@@ -428,3 +428,80 @@ func TestConcurrentSingleUnitWritesStayConsistent(t *testing.T) {
 		t.Fatalf("the published file must always parse: %v", err)
 	}
 }
+
+func TestPerRecordUnitReadsCompatibleVersions(t *testing.T) {
+	root := t.TempDir()
+	// Write a v3 document through a unit stamped 3, then open a unit
+	// stamped 4 that declares version 3 compatible: the record must read.
+	legacy := storagedomain.KvUnitDescriptor{
+		Name: "test_unit", Version: 3, Tables: []string{"things"}, HasGlobal: true, Layout: storagedomain.LayoutPerRecord,
+	}
+	oldUnit, err := OpenPerRecordUnit(legacy, root, nil)
+	if err != nil {
+		t.Fatalf("open legacy: %v", err)
+	}
+	if err := oldUnit.PutRecord("things", "a", json.RawMessage(`{"v":3}`)); err != nil {
+		t.Fatalf("legacy put: %v", err)
+	}
+	if err := oldUnit.Close(); err != nil {
+		t.Fatalf("legacy close: %v", err)
+	}
+
+	current := storagedomain.KvUnitDescriptor{
+		Name: "test_unit", Version: 4, CompatibleVersions: []int{3}, Tables: []string{"things"}, HasGlobal: true, Layout: storagedomain.LayoutPerRecord,
+	}
+	unit, err := OpenPerRecordUnit(current, root, nil)
+	if err != nil {
+		t.Fatalf("open current: %v", err)
+	}
+	defer unit.Close()
+	tables, _, err := unit.LoadAll()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if raw, ok := tables["things"]["a"]; !ok || !jsonEqual(t, raw, map[string]any{"v": float64(3)}) {
+		t.Fatalf("compatible-v3 record not read: %v", tables["things"])
+	}
+
+	// A v5-stamped record (outside the accepted set) reads as absent.
+	if err := os.WriteFile(filepath.Join(root, "test_unit", "things", "stale.json"),
+		[]byte(`{"version":5,"record":{"v":5}}`), 0o600); err != nil {
+		t.Fatalf("write stale: %v", err)
+	}
+	tables, _, err = unit.LoadAll()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if _, ok := tables["things"]["stale"]; ok {
+		t.Fatalf("stale v5 record must read as absent: %v", tables["things"])
+	}
+}
+
+func TestPerRecordUnitBackupRecordMovesDocumentAside(t *testing.T) {
+	root := t.TempDir()
+	unit, err := OpenPerRecordUnit(testDescriptor(storagedomain.LayoutPerRecord), root, nil)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer unit.Close()
+	if err := unit.PutRecord("things", "doomed", json.RawMessage(`{"bad":true}`)); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	moved, err := unit.BackupRecord("things", "doomed")
+	if err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+	if !strings.Contains(filepath.Base(moved), "doomed.json.bak.") {
+		t.Fatalf("moved path = %q, want a .bak. stamp", moved)
+	}
+	if _, err := os.Stat(moved); err != nil {
+		t.Fatalf("backup file must survive: %v", err)
+	}
+	tables, _, err := unit.LoadAll()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if _, ok := tables["things"]["doomed"]; ok {
+		t.Fatalf("backed-up record must read as absent: %v", tables["things"])
+	}
+}

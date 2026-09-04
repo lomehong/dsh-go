@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"dshgo/storagedomain"
 )
@@ -93,6 +94,32 @@ func (u *PerRecordJsonUnit) DeleteRecord(table string, key string) error {
 	return nil
 }
 
+// BackupRecord moves one record's document aside as
+// `<key>.json.bak.<YYYYMMDDHHmm>` (official KvUnit.backupRecord): the moved
+// file no longer ends in `.json`, so every later read ignores it while the
+// bytes stay on disk for inspection. A same-minute backup of the same key
+// replaces the previous backup.
+func (u *PerRecordJsonUnit) BackupRecord(table string, key string) (string, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if err := u.assertOpen(); err != nil {
+		return "", err
+	}
+	dir, err := u.tableDir(table)
+	if err != nil {
+		return "", err
+	}
+	if err := assertSafeKey(u.descriptor.Name, key); err != nil {
+		return "", err
+	}
+	stamp := time.Now().Format("200601021504")
+	target := filepath.Join(dir, key+".json.bak."+stamp)
+	if err := os.Rename(filepath.Join(dir, key+".json"), target); err != nil {
+		return "", err
+	}
+	return target, nil
+}
+
 // SetGlobal durably replaces the global singleton; only valid when declared.
 func (u *PerRecordJsonUnit) SetGlobal(value json.RawMessage) error {
 	u.mu.Lock()
@@ -157,6 +184,7 @@ func (u *PerRecordJsonUnit) writeDocument(path string, value json.RawMessage) er
 // version) reads as absent, per the per-record contract. An empty tree
 // bootstraps from a legacy whole-unit file when present.
 func (u *PerRecordJsonUnit) loadState() (UnitState, error) {
+	versions := u.acceptedVersions()
 	state := UnitState{
 		Version: u.descriptor.Version,
 		Global:  nil,
@@ -181,7 +209,7 @@ func (u *PerRecordJsonUnit) loadState() (UnitState, error) {
 	for _, entry := range entries {
 		if entry.IsDir() {
 			if _, declared := state.Tables[entry.Name()]; declared {
-				loaded, err := u.loadTableRecords(u.descriptor.Version, filepath.Join(u.dir, entry.Name()))
+				loaded, err := u.loadTableRecords(versions, filepath.Join(u.dir, entry.Name()))
 				if err != nil {
 					return UnitState{}, err
 				}
@@ -193,7 +221,7 @@ func (u *PerRecordJsonUnit) loadState() (UnitState, error) {
 			}
 		}
 		if entry.Name() == "global.json" && u.descriptor.HasGlobal {
-			if global, ok := u.readRecord(filepath.Join(u.dir, entry.Name()), u.descriptor.Version); ok {
+			if global, ok := u.readRecord(filepath.Join(u.dir, entry.Name()), versions); ok {
 				state.Global = global
 			}
 			hasNewDocuments = true
@@ -260,7 +288,7 @@ func (u *PerRecordJsonUnit) bootstrapLegacy(state *UnitState) error {
 // loadTableRecords reads one declared table's record documents. It reports
 // whether the table had any state: a directory with no documents reads as
 // absent for the has-new-documents check.
-func (u *PerRecordJsonUnit) loadTableRecords(version int, dir string) (map[string]json.RawMessage, error) {
+func (u *PerRecordJsonUnit) loadTableRecords(versions []int, dir string) (map[string]json.RawMessage, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -278,21 +306,30 @@ func (u *PerRecordJsonUnit) loadTableRecords(version int, dir string) (map[strin
 		if !safeKeyPattern.MatchString(key) {
 			continue
 		}
-		if record, ok := u.readRecord(filepath.Join(dir, name), version); ok {
+		if record, ok := u.readRecord(filepath.Join(dir, name), versions); ok {
 			records[key] = record
 		}
 	}
 	return records, nil
 }
 
+// acceptedVersions is the stamp set this unit reads as its own: the
+// descriptor's current version plus any declared compatible versions.
+func (u *PerRecordJsonUnit) acceptedVersions() []int {
+	versions := make([]int, 0, 1+len(u.descriptor.CompatibleVersions))
+	versions = append(versions, u.descriptor.Version)
+	versions = append(versions, u.descriptor.CompatibleVersions...)
+	return versions
+}
+
 // readRecord reads one record document; a foreign (unreadable or stale) one
 // reads as absent.
-func (u *PerRecordJsonUnit) readRecord(path string, version int) (json.RawMessage, bool) {
+func (u *PerRecordJsonUnit) readRecord(path string, versions []int) (json.RawMessage, bool) {
 	text, err := os.ReadFile(path)
 	if err != nil {
 		return nil, false
 	}
-	return ParseRecord(text, version)
+	return ParseRecord(text, versions)
 }
 
 // assertSafeKey rejects a record key that would be unsafe as a path segment.

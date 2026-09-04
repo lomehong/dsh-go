@@ -59,6 +59,18 @@ type KvUnit interface {
 	Close() error
 }
 
+// RecordBackuper is the optional seam a backend whose medium has a
+// per-record document can move aside (official KvUnit.backupRecord): the
+// invalid-record backup-and-skip policy needs it. Backends without the seam
+// (single layout, a row store) keep the reject-loud path.
+type RecordBackuper interface {
+	// BackupRecord moves one record's stored document out of the unit's
+	// readable set, preserving its bytes for inspection instead of deleting
+	// them. Returns the medium location the document moved to. A later read
+	// sees the key as missing.
+	BackupRecord(table string, key string) (string, error)
+}
+
 // MemoryUnit is the in-memory KvUnit used by tests and composition bundles.
 // It enforces the descriptor contract (unknown table/key-value shape, closed
 // unit, double-open) exactly like a file backend would.
@@ -66,6 +78,7 @@ type MemoryUnit struct {
 	mu         sync.Mutex
 	descriptor KvUnitDescriptor
 	records    map[string]map[string]json.RawMessage
+	backups    map[string]map[string]json.RawMessage
 	global     json.RawMessage
 	closed     bool
 }
@@ -83,6 +96,7 @@ func OpenMemoryUnit(descriptor KvUnitDescriptor, openUnits map[string]struct{}) 
 	unit := &MemoryUnit{
 		descriptor: descriptor,
 		records:    map[string]map[string]json.RawMessage{},
+	backups:    map[string]map[string]json.RawMessage{},
 	}
 	for _, table := range descriptor.Tables {
 		unit.records[table] = map[string]json.RawMessage{}
@@ -151,6 +165,32 @@ func (u *MemoryUnit) DeleteRecord(table string, key string) error {
 	}
 	delete(u.records[table], key)
 	return nil
+}
+
+// BackupRecord moves one record into the backup slot, mirroring the json
+// backend's `<key>.json.bak.<stamp>` move so the record reads as absent.
+func (u *MemoryUnit) BackupRecord(table string, key string) (string, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if err := u.assertOpen(); err != nil {
+		return "", err
+	}
+	tableRecords, declared := u.records[table]
+	if !declared {
+		return "", NewUnitError(CodeMalformedMedium, "unit '%s' has no declared table '%s'", u.descriptor.Name, table)
+	}
+	value, present := tableRecords[key]
+	if !present {
+		return "", nil
+	}
+	slot := u.backups[table]
+	if slot == nil {
+		slot = map[string]json.RawMessage{}
+		u.backups[table] = slot
+	}
+	slot[key] = value
+	delete(tableRecords, key)
+	return fmt.Sprintf("memory://%s/%s.bak", table, key), nil
 }
 
 // SetGlobal writes the global singleton durably.

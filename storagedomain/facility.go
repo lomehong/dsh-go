@@ -127,6 +127,22 @@ func (f *Facility) Open(spec DomainSpec) (*Domain, error) {
 			if err := validateStored(spec.Name, table, key, raw, func(value json.RawMessage) error {
 				return spec.ValidateRecord(table, key, value)
 			}); err != nil {
+				// Backup-and-skip policy (disposable derived data): move the
+				// failing record's document aside, log the concrete cause,
+				// and open without the record. Backends that cannot move a
+				// document keep the loud path.
+				if spec.InvalidRecordPolicy == InvalidRecordsBackupAndSkip {
+					if backuper, ok := unit.(RecordBackuper); ok {
+						if moved, backupErr := backuper.BackupRecord(table, key); backupErr == nil {
+							if f.logger != nil {
+								f.logger.Warn(fmt.Sprintf(
+									"domain '%s': stored record '%s' in table '%s' failed schema validation; moved to '%s' and treated as absent: %v",
+									spec.Name, key, table, moved, err))
+							}
+							continue
+						}
+					}
+				}
 				_ = unit.Close()
 				return failure(err)
 			}
