@@ -397,21 +397,48 @@ var builders = map[string]pluginBuilder{
 			// Shell, Agent Loop, and Web Search cards render. Without the
 			// schema registrations the served-namespace intersection is
 			// empty and the tab renders nothing.
-			shellEnvelope := json.RawMessage(`{"type":"object","properties":{"timeoutMs":{"type":"integer","description":"Foreground command timeout in milliseconds"},"maxOutputBytes":{"type":"integer","description":"Per-stream in-memory output cap in bytes"}}}`)
+			shellEnvelope, err := json.Marshal(map[string]any{
+				"type": "object",
+				"dict": map[string]any{
+					"timeoutMs":     map[string]any{"type": "number", "meta": map[string]any{"description": "Foreground command timeout in milliseconds"}},
+					"maxOutputBytes": map[string]any{"type": "number", "meta": map[string]any{"description": "Per-stream in-memory output cap in bytes"}},
+				},
+			})
+			if err != nil {
+				return err
+			}
 			if _, err := store.Register("shell", &settings.Schema{
 				Envelope: shellEnvelope,
 				Defaults: func() map[string]any { return map[string]any{} },
 			}, map[string]any{}); err != nil {
 				return err
 			}
-			agentLoopEnvelope := json.RawMessage(`{"type":"object","properties":{"maxParallelToolCalls":{"type":"integer","description":"Upper bound on parallel-safe tool calls per step"}}}`)
+			agentLoopEnvelope, err := json.Marshal(map[string]any{
+				"type": "object",
+				"dict": map[string]any{
+					"maxParallelToolCalls": map[string]any{"type": "number", "meta": map[string]any{"description": "Upper bound on parallel-safe tool calls per step"}},
+				},
+			})
+			if err != nil {
+				return err
+			}
 			if _, err := store.Register("agent-loop", &settings.Schema{
 				Envelope: agentLoopEnvelope,
 				Defaults: func() map[string]any { return map[string]any{} },
 			}, map[string]any{}); err != nil {
 				return err
 			}
-			webSearchEnvelope := json.RawMessage(`{"type":"object","properties":{"apiKeyEnv":{"type":"string","description":"Key reference naming the environment variable"},"baseURL":{"type":"string","description":"Provider endpoint"},"maxUses":{"type":"integer","description":"Maximum searches per request"}}}`)
+			webSearchEnvelope, err := json.Marshal(map[string]any{
+				"type": "object",
+				"dict": map[string]any{
+					"apiKeyEnv": map[string]any{"type": "string", "meta": map[string]any{"description": "Key reference naming the environment variable"}},
+					"baseURL":   map[string]any{"type": "string", "meta": map[string]any{"description": "Provider endpoint"}},
+					"maxUses":   map[string]any{"type": "number", "meta": map[string]any{"description": "Maximum searches per request"}},
+				},
+			})
+			if err != nil {
+				return err
+			}
 			if _, err := store.Register("web-search-deepseek", &settings.Schema{
 				Envelope: webSearchEnvelope,
 				Defaults: func() map[string]any { return map[string]any{} },
