@@ -6,6 +6,7 @@ import (
 	"dshgo/agent"
 	"dshgo/agentdefaultmodel"
 	"dshgo/llm"
+	"dshgo/session/projectioncache"
 	"dshgo/sessionquery"
 	"dshgo/typert"
 )
@@ -15,15 +16,19 @@ import (
 // list and the model catalog the conversation selector renders.
 type SessionController struct {
 	engineLookup  func() any
+	cacheLookup   func() any
 	llmLookup     func() any
 	defaultLookup func() any
 }
 
 // NewSessionController builds the namespace host. Lookups resolve per call —
 // nil services answer honest empty values.
-func NewSessionController(engineLookup func() any, llmLookup func() any, defaultLookup func() any) *SessionController {
+func NewSessionController(engineLookup func() any, cacheLookup func() any, llmLookup func() any, defaultLookup func() any) *SessionController {
 	if engineLookup == nil {
 		engineLookup = func() any { return nil }
+	}
+	if cacheLookup == nil {
+		cacheLookup = func() any { return nil }
 	}
 	if llmLookup == nil {
 		llmLookup = func() any { return nil }
@@ -31,13 +36,22 @@ func NewSessionController(engineLookup func() any, llmLookup func() any, default
 	if defaultLookup == nil {
 		defaultLookup = func() any { return nil }
 	}
-	return &SessionController{engineLookup: engineLookup, llmLookup: llmLookup, defaultLookup: defaultLookup}
+	return &SessionController{engineLookup: engineLookup, cacheLookup: cacheLookup, llmLookup: llmLookup, defaultLookup: defaultLookup}
 }
 
 // engine resolves the composed session query engine, or nil when absent.
 func (c *SessionController) engine() *sessionquery.Engine {
 	if e, ok := c.engineLookup().(*sessionquery.Engine); ok && e != nil {
 		return e
+	}
+	return nil
+}
+
+// projectionCache resolves the composed persisted projection cache, or nil
+// when absent (headless profiles answer the honest cache-miss posture).
+func (c *SessionController) projectionCache() *projectioncache.Service {
+	if cache, ok := c.cacheLookup().(*projectioncache.Service); ok && cache != nil {
+		return cache
 	}
 	return nil
 }
@@ -138,9 +152,10 @@ func (c *SessionController) ModelCatalog(ctx context.Context) (any, error) {
 // List answers the session list (official session/list): every session in
 // the corpus (live + persisted merged), newest first, with the fields the
 // session sidebar renders. running stays false (the Go host tracks no live
-// agent turn today); updatedAt falls back to the header's creation stamp
-// until per-session activity projections land; blank is false for any
-// materialized session.
+// agent turn today). updatedAt prefers the sessionListMetadata projection's
+// lastPromptAt over the header's creation stamp; blank reflects the same
+// projection, falling back to false (visible) when no usable cache row
+// exists for the session lifecycle.
 func (c *SessionController) List(ctx context.Context, request map[string]any) (any, error) {
 	engine := c.engine()
 	if engine == nil {
@@ -153,11 +168,23 @@ func (c *SessionController) List(ctx context.Context, request map[string]any) (a
 	items := make([]any, 0, len(records))
 	for _, record := range records {
 		header := record.Header
+		blank := false
+		updatedAt := header.CreatedAt
+		if cache := c.projectionCache(); cache != nil {
+			if snapshot, ok := cache.CachedSnapshot(header, SessionListMetadataKey); ok {
+				if metadata, ok := snapshot.Values[SessionListMetadataKey].(SessionListMetadata); ok {
+					blank = metadata.Blank
+					if metadata.LastPromptAt != nil && *metadata.LastPromptAt > updatedAt {
+						updatedAt = *metadata.LastPromptAt
+					}
+				}
+			}
+		}
 		item := map[string]any{
 			"sessionId": string(header.ID),
-			"updatedAt": float64(header.CreatedAt),
+			"updatedAt": float64(updatedAt),
 			"running":   false,
-			"blank":     false,
+			"blank":     blank,
 		}
 		if header.CWD != "" {
 			item["cwd"] = header.CWD

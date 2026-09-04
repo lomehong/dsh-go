@@ -621,6 +621,40 @@ func TestCatalogAssemblesTypertGateway(t *testing.T) {
 		t.Fatalf("shutdown: %v", err)
 	}
 }
+func TestCatalogRegistersSessionListMetadataProjection(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "typert", Name: "@deepseek-ai/dsh-typert-registry"},
+		{ID: "projections", Name: "@deepseek-ai/dsh-session-projection"},
+		{ID: "sessions", Name: "@deepseek-ai/dsh-session"},
+		{ID: "api-gateway", Name: "@deepseek-ai/dsh-api-gateway"},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	registryValue := root.Get(ServiceProjections)
+	if registryValue == nil {
+		t.Fatal("projections service missing after assembly")
+	}
+	registry, ok := registryValue.(*projection.Registry)
+	if !ok {
+		t.Fatalf("projections service has type %T", registryValue)
+	}
+	// The api-gateway entry registers the sessionListMetadata unit through
+	// the delayed projection injection. A duplicate registration of the
+	// same key at the same stateVersion succeeds (ref-counted), while a
+	// version mismatch would fail loud.
+	undo, err := registry.Register(gateway.SessionListMetadataUnit().Definition())
+	if err != nil {
+		t.Fatalf("sessionListMetadata unit not registered by api-gateway: %v", err)
+	}
+	undo()
+	if err := app.Shutdown(); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
 
 func TestCatalogStorageHubDomainAndSpillRoundTrip(t *testing.T) {
 	home := t.TempDir()

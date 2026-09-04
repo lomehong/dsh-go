@@ -1004,10 +1004,34 @@ var builders = map[string]pluginBuilder{
 				})
 				sessionController := gateway.NewSessionController(
 					func() any { return ctx.Get(ServiceSessionQuery) },
+					func() any { return ctx.Get(ServiceProjectionCache) },
 					func() any { return ctx.Get(ServiceLlm) },
 					func() any { return ctx.Get(ServiceAgentDefaultModel) },
 				)
 				ctx.Provide("sessionController", sessionController)
+				// The sessionListMetadata projection unit (official
+				// api-session-controller list projection) registers only
+				// when a projection registry is composed: the delayed
+				// injection defers until the registry provides (goal's
+				// identical seam), so headless and minimal profiles that
+				// mount api-gateway without dsh-session-projection stay
+				// unaffected.
+				if err := ctx.Inject([]string{ServiceProjections}, func(c *cordis.Context) error {
+					registry, ok := c.Get(ServiceProjections).(*projection.Registry)
+					if !ok {
+						return errors.New("api-gateway: session-list metadata projection: service \"projections\" is not a projection registry")
+					}
+					dispose, err := registry.Register(gateway.SessionListMetadataUnit().Definition())
+					if err != nil {
+						return err
+					}
+					if err := ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(dispose), nil }); err != nil {
+						return err
+					}
+					return nil
+				}); err != nil {
+					return fmt.Errorf("api-gateway: session-list metadata projection: %w", err)
+				}
 				if _, exists := registry.GetPackage("session-controller", typert.FaceHost); !exists {
 					if _, err := registry.Register(sessionController.Contribution()); err != nil {
 						return fmt.Errorf("api-gateway: session controller: %w", err)
