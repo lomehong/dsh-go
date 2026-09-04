@@ -436,3 +436,52 @@ func lastTurnEnd(t *testing.T, a *agent.Agent) session.TurnEndData {
 	}
 	return data
 }
+
+// wakeState reads the driver's pending-wake set under its lock.
+func wakeState(d *ReactLoopAgent) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.pendingWakes)
+}
+
+// TestPendingWakeSurvivesACleanExitReplaysLostInput: a follow-up that lost
+// the race with a cleanly closing turn (its send saw a live driver, so no
+// wake was latched) must start a fresh driver via the pending-wake set —
+// the B3 narrowing replaces the source's cleanExit flag.
+func TestPendingWakeSurvivesCleanExitReplays(t *testing.T) {
+	h := newHarness(t)
+	h.adapter.script(scriptCall{chunks: textChunks("first")})
+	a := h.startAgent("wake-clean-exit")
+	driver := a.Driver().(*ReactLoopAgent)
+
+	h.run(a, "hello")
+
+	// A clean driver exit with inbox content latches no wakeRequested; a
+	// follow-up sent while that driver was still closing would otherwise be
+	// parked. Send one and let the driver restart on the pending wake.
+	h.send(a, "follow-up", true)
+	h.awaitIdle(a)
+	if wakeState(driver) != 0 {
+		t.Fatalf("pending wakes = %d after delivery, want 0", wakeState(driver))
+	}
+}
+
+// TestCancelClearsPendingWakes: cancellation consumes the wake bookkeeping
+// even when inbox input is kept, so retained work parks until the next
+// waking send.
+func TestCancelClearsPendingWakes(t *testing.T) {
+	h := newHarness(t)
+	h.adapter.script(scriptCall{chunks: textChunks("first")})
+	a := h.startAgent("wake-cancel")
+	driver := a.Driver().(*ReactLoopAgent)
+
+	h.run(a, "hello")
+
+	// Send a waking follow-up but cancel with KeepInbox before it is
+	// delivered: the wake bookkeeping clears while the input stays parked.
+	driver.Send(llm.NewUserMessage([]llm.ContentBlock{{Type: llm.BlockText, Text: "queued"}}, llm.MessageSource{Kind: llm.SourceUser}), agent.InboxNextTurn, true)
+	driver.Cancel(session.TurnEndCancelCause{Kind: "user"}, agent.CancelOptions{KeepInbox: true})
+	if wakeState(driver) != 0 {
+		t.Fatalf("pending wakes = %d after cancel, want 0", wakeState(driver))
+	}
+}

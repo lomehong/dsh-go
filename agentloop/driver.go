@@ -51,6 +51,13 @@ type ReactLoopAgent struct {
 	activity    chan struct{}
 	activityGen uint64
 
+	// pendingWakes holds the ids of waking sends still awaiting claim by a
+	// live driver (official pendingWakes). Cancel, rejection, and abnormal
+	// driver exit clear the set so retained inbox input parks; a clean exit
+	// with a non-empty set means a steer or follow-up lost the race with the
+	// closing turn and must start a fresh driver.
+	pendingWakes map[llm.MessageID]struct{}
+
 	// Whether this loop instance has appended its initial/resume request anchor.
 	requestHeaderLogged bool
 	// Surface generation of the preceding built request.
@@ -80,6 +87,7 @@ func NewReactLoopAgent(loop *AgentLoop, a *agent.Agent) *ReactLoopAgent {
 	}
 	driver.phase.lastTurn = lastTurn
 	driver.activity = closedChannel()
+	driver.pendingWakes = map[llm.MessageID]struct{}{}
 	driver.runtimeContext = NewRuntimeContextProjection(a.Session)
 	a.SetDriver(driver)
 	return driver
@@ -124,8 +132,15 @@ func (d *ReactLoopAgent) Send(message llm.Message, target agent.InboxTarget, wak
 	if wakingAfterAbort {
 		resolvedTarget = agent.InboxNextTurn
 	}
+	if wakeup {
+		d.pendingWakes[message.ID] = struct{}{}
+	}
 	d.mu.Unlock()
 	if _, err := d.Inbox.Splice(resolvedTarget, math.MaxInt64, 0, []llm.Message{message}); err != nil {
+		// A refused splice never leaves a pending wake behind.
+		d.mu.Lock()
+		delete(d.pendingWakes, message.ID)
+		d.mu.Unlock()
 		d.emitLoopError(err)
 		return
 	}
@@ -158,13 +173,14 @@ func (d *ReactLoopAgent) Cancel(cause session.TurnEndCancelCause, options agent.
 			d.emitLoopError(err)
 			return
 		}
-		d.mu.Lock()
-		if d.phase.kind != phaseIdle {
-			d.phase.wakeRequested = false
-		}
-		d.mu.Unlock()
 	}
+	// Cancellation consumes the wake bookkeeping even when inbox input is
+	// kept: retained work parks until the next waking send resumes the queue.
 	d.mu.Lock()
+	d.pendingWakes = map[llm.MessageID]struct{}{}
+	if !options.KeepInbox && d.phase.kind != phaseIdle {
+		d.phase.wakeRequested = false
+	}
 	phase := d.phase
 	cancel := phase.cancel
 	d.mu.Unlock()
@@ -282,10 +298,12 @@ func (d *ReactLoopAgent) wakeDriver(wakeAfterAbort bool) {
 		defer close(done)
 		// The whole driver chain runs inside one initiator boundary; the
 		// follow-up turn reuses the same boundary context.
+		var kicked error
 		if err := d.loop.Registry.WithInitiator(goCtx, d.Agent, func(ctx context.Context) error {
-			d.kick(ctx)
+			kicked = d.kick(ctx)
 			return nil
 		}); err != nil {
+			kicked = err
 			d.emitLoopError(err)
 		}
 		d.mu.Lock()
@@ -294,9 +312,15 @@ func (d *ReactLoopAgent) wakeDriver(wakeAfterAbort bool) {
 			d.mu.Unlock()
 			return
 		}
+		// An abnormal exit (a failing or aborted turn) consumes the wake
+		// bookkeeping: retained inbox input parks until the next waking send,
+		// exactly like the source's catch-branch clear.
+		if kicked != nil {
+			d.pendingWakes = map[llm.MessageID]struct{}{}
+		}
 		wakeRequested := d.phase.wakeRequested
 		d.phase = driverPhase{kind: phaseIdle, lastTurn: d.phase.turn}
-		wake := wakeRequested && d.Inbox.HasPending()
+		wake := (wakeRequested || len(d.pendingWakes) > 0) && d.Inbox.HasPending()
 		d.setPhaseLocked(d.phase)
 		d.mu.Unlock()
 		if wake {
@@ -318,12 +342,17 @@ func (d *ReactLoopAgent) throwError(turn, step int64, err error) error {
 }
 
 // kick drives turns until the session quiesces. Reported failures and
-// cancellation are contained at the driver boundary.
-func (d *ReactLoopAgent) kick(signal context.Context) {
+// cancellation are contained at the driver boundary; a non-nil return means
+// the driver exited abnormally (a failing or aborted turn), which consumes
+// the wake bookkeeping so retained inbox input parks.
+func (d *ReactLoopAgent) kick(signal context.Context) error {
 	for {
 		cont, err := d.turn(signal)
-		if err != nil || !cont {
-			break
+		if err != nil {
+			return err
+		}
+		if !cont {
+			return nil
 		}
 	}
 }
@@ -393,6 +422,10 @@ func (d *ReactLoopAgent) turn(goCtx context.Context) (cont bool, retErr error) {
 			return fail(err, turnStep)
 		}
 		if decision.reject {
+			// The rejecting listener owns resumption; later input stays parked.
+			d.mu.Lock()
+			d.pendingWakes = map[llm.MessageID]struct{}{}
+			d.mu.Unlock()
 			turnEnds = &session.TurnEndReason{Kind: session.TurnEndBlocked}
 			return false, nil
 		}
@@ -520,6 +553,15 @@ func (d *ReactLoopAgent) preStep(signal context.Context, target agent.InboxTarge
 	claimed, err := d.Inbox.Claim(target, turn)
 	if err != nil {
 		return preparedStep{}, err
+	}
+	if len(claimed) > 0 {
+		// A claimed wake is delivered; prune its bookkeeping so a later
+		// closing-turn exit does not replay it as lost.
+		d.mu.Lock()
+		for _, message := range claimed {
+			delete(d.pendingWakes, message.ID)
+		}
+		d.mu.Unlock()
 	}
 	assembly, err := d.loop.Prompt.Assemble(d.AssembleContextFor(signal))
 	if err != nil {
