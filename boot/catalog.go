@@ -451,20 +451,17 @@ var builders = map[string]pluginBuilder{
 				"type": "object",
 				"dict": map[string]any{
 					"providers": map[string]any{
-						"type": "dict",
-						"inner": map[string]any{
-							"type": "object",
-							"dict": map[string]any{
-								"\u0000probe": map[string]any{
-									"type": "object",
-									"dict": map[string]any{
-										"api": map[string]any{
-											"type": "union",
-											"list": []any{
-												map[string]any{"type": "const", "value": "openai-completions"},
-												map[string]any{"type": "const", "value": "openai-responses"},
-												map[string]any{"type": "const", "value": "anthropic-messages"},
-											},
+						"type": "object",
+						"dict": map[string]any{
+							"\u0000probe": map[string]any{
+								"type": "object",
+								"dict": map[string]any{
+									"api": map[string]any{
+										"type": "union",
+										"list": []any{
+											map[string]any{"type": "const", "value": "openai-completions"},
+											map[string]any{"type": "const", "value": "openai-responses"},
+											map[string]any{"type": "const", "value": "anthropic-messages"},
 										},
 									},
 								},
