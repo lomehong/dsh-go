@@ -14,14 +14,17 @@ import (
 )
 
 // DomainSpec is the validated session-projcache domain declaration
-// (name session_projcache, version 4, per-record layout).
+// (name session_projcache, version 4, per-record layout). The cache rows
+// are disposable derived data, so a stored record that fails validation at
+// open is backed up and skipped instead of refusing the plugin tree.
 func DomainSpec() (storagedomain.DomainSpec, error) {
 	return storagedomain.DefineDomain(storagedomain.DomainSpec{
-		Name:           "session_projcache",
-		Version:        4,
-		Layout:         storagedomain.LayoutPerRecord,
-		Tables:         []string{"sessions"},
-		ValidateRecord: validateCheckpointRecord,
+		Name:                "session_projcache",
+		Version:             4,
+		InvalidRecordPolicy: storagedomain.InvalidRecordsBackupAndSkip,
+		Layout:              storagedomain.LayoutPerRecord,
+		Tables:              []string{"sessions"},
+		ValidateRecord:      validateCheckpointRecord,
 	})
 }
 

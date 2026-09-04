@@ -136,3 +136,47 @@ func TestDomainSpecValidatesRecordsAtOpen(t *testing.T) {
 	}
 	_ = errors.Is
 }
+
+// TestDomainSpecSalvagesInvalidRecordsAtOpen: the cache rows are disposable
+// derived data, so a stored record failing validation at open is backed up
+// and skipped (rc.1 backup-and-skip) instead of refusing the plugin tree.
+func TestDomainSpecSalvagesInvalidRecordsAtOpen(t *testing.T) {
+	spec, err := DomainSpec()
+	if err != nil {
+		t.Fatalf("DomainSpec: %v", err)
+	}
+	if spec.InvalidRecordPolicy != storagedomain.InvalidRecordsBackupAndSkip {
+		t.Fatalf("policy = %q, want backup-and-skip", spec.InvalidRecordPolicy)
+	}
+	unit, release, err := storagedomain.OpenMemoryUnit(storagedomain.DescriptorOf(spec), nil)
+	if err != nil {
+		t.Fatalf("OpenMemoryUnit: %v", err)
+	}
+	t.Cleanup(release)
+	// Seed one corrupt record plus one good one: the open must succeed with
+	// the corrupt record backed up and skipped.
+	if err := unit.PutRecord("sessions", "good", json.RawMessage(validRecordJSON("good"))); err != nil {
+		t.Fatalf("seed good: %v", err)
+	}
+	if err := unit.PutRecord("sessions", "bad", json.RawMessage(`{"identity":{"createdAt":-1},"rows":{}}`)); err != nil {
+		t.Fatalf("seed bad: %v", err)
+	}
+	facility := storagedomain.NewFacility(storagedomain.Config{Backend: "memory"}, map[string]storagedomain.Backend{
+		"memory": &memoryBackend{unit: unit},
+	}, cordis.Discard{})
+	t.Cleanup(facility.CloseAll)
+	domain, err := facility.Open(spec)
+	if err != nil {
+		t.Fatalf("open with a corrupt cached record must succeed via backup-and-skip: %v", err)
+	}
+	store, err := NewDomainStore(domain)
+	if err != nil {
+		t.Fatalf("NewDomainStore: %v", err)
+	}
+	if record, ok := store.Get("good"); !ok || record == nil {
+		t.Fatalf("good record must be served, ok=%v", ok)
+	}
+	if _, ok := store.Get("bad"); ok {
+		t.Fatalf("backed-up corrupt record must read as absent")
+	}
+}
