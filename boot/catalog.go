@@ -392,6 +392,32 @@ var builders = map[string]pluginBuilder{
 			}, map[string]any{"preference": "system", "fontSize": 14}); err != nil {
 				return err
 			}
+			// The Settings Plugins tab's configurable cards each bind a
+			// settings namespace; the Go host serves these three so the
+			// Shell, Agent Loop, and Web Search cards render. Without the
+			// schema registrations the served-namespace intersection is
+			// empty and the tab renders nothing.
+			shellEnvelope := json.RawMessage(`{"type":"object","properties":{"timeoutMs":{"type":"integer","description":"Foreground command timeout in milliseconds"},"maxOutputBytes":{"type":"integer","description":"Per-stream in-memory output cap in bytes"}}}`)
+			if _, err := store.Register("shell", &settings.Schema{
+				Envelope: shellEnvelope,
+				Defaults: func() map[string]any { return map[string]any{} },
+			}, map[string]any{}); err != nil {
+				return err
+			}
+			agentLoopEnvelope := json.RawMessage(`{"type":"object","properties":{"maxParallelToolCalls":{"type":"integer","description":"Upper bound on parallel-safe tool calls per step"}}}`)
+			if _, err := store.Register("agent-loop", &settings.Schema{
+				Envelope: agentLoopEnvelope,
+				Defaults: func() map[string]any { return map[string]any{} },
+			}, map[string]any{}); err != nil {
+				return err
+			}
+			webSearchEnvelope := json.RawMessage(`{"type":"object","properties":{"apiKeyEnv":{"type":"string","description":"Key reference naming the environment variable"},"baseURL":{"type":"string","description":"Provider endpoint"},"maxUses":{"type":"integer","description":"Maximum searches per request"}}}`)
+			if _, err := store.Register("web-search-deepseek", &settings.Schema{
+				Envelope: webSearchEnvelope,
+				Defaults: func() map[string]any { return map[string]any{} },
+			}, map[string]any{}); err != nil {
+				return err
+			}
 			ctx.Provide(ServiceSettings, store)
 				if err := ctx.Effect(func() (cordis.Disposer, error) {
 					return cordis.Disposer(func() { _ = f.Close() }), nil
