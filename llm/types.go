@@ -295,6 +295,60 @@ type StreamChunk struct {
 	ReplayState *ReplayEnvelope `json:"replayState,omitempty"`
 }
 
+// MarshalJSON renders the official discriminated-union wire: each variant
+// carries exactly its own members, with `index` (and the variant's payload
+// members, even when empty) always present — never the omitempty flat
+// projection. Unknown kinds keep the flat shape so forward extensions pass
+// through losslessly.
+func (c StreamChunk) MarshalJSON() ([]byte, error) {
+	switch c.Type {
+	case ChunkBlockStart:
+		return json.Marshal(struct {
+			Type      string `json:"type"`
+			Index     int    `json:"index"`
+			BlockType string `json:"blockType"`
+		}{c.Type, c.Index, c.BlockType})
+	case ChunkTextDelta, ChunkReasoningDelta:
+		return json.Marshal(struct {
+			Type  string `json:"type"`
+			Index int    `json:"index"`
+			Text  string `json:"text"`
+		}{c.Type, c.Index, c.Text})
+	case ChunkToolCallDelta:
+		wire := struct {
+			Type           string     `json:"type"`
+			Index          int        `json:"index"`
+			ID             ToolCallID `json:"id"`
+			Name           string     `json:"name,omitempty"`
+			ArgumentsDelta string     `json:"argumentsDelta"`
+		}{c.Type, c.Index, c.ID, c.Name, c.ArgumentsDelta}
+		if c.Name != "" {
+			wire.Name = c.Name
+		}
+		return json.Marshal(wire)
+	case ChunkBlockEnd:
+		return json.Marshal(struct {
+			Type  string        `json:"type"`
+			Index int           `json:"index"`
+			Block *ContentBlock `json:"block"`
+		}{c.Type, c.Index, c.Block})
+	case ChunkUsage:
+		return json.Marshal(struct {
+			Type  string      `json:"type"`
+			Usage *TokenUsage `json:"usage"`
+		}{c.Type, c.Usage})
+	case ChunkFinish:
+		return json.Marshal(struct {
+			Type        string          `json:"type"`
+			Reason      *FinishReason   `json:"reason"`
+			ReplayState *ReplayEnvelope `json:"replayState,omitempty"`
+		}{c.Type, c.Reason, c.ReplayState})
+	default:
+		type streamChunkFlat StreamChunk
+		return json.Marshal(streamChunkFlat(c))
+	}
+}
+
 // ToolSchema is the JSON-schema description of a tool, as sent to the model.
 type ToolSchema struct {
 	Name        string         `json:"name"`

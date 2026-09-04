@@ -203,6 +203,29 @@ workflow / typert / sdk / boot / jobs / interaction / guard 的 src 在 alpha.2 
 | catalog 接线 | ✅ dsh-session-telemetry-otel 条目（三模式 + ServiceTelemetry） |
 | OTel Go SDK 依赖族 | ✅ 引入（决策入账，见 DECISIONS.md） |
 | sandbox 家族 | ⏳ 下一批（sandbox-local + windows-acl + bash/pwsh-sandbox，OS 原生执法层） |
+# 0.1.3-alpha.1 对齐路线（2026-09-05 起，基线 rc.1-99 → d347e70390）
+
+> 上游增量 229 提交 / 1672 文件 / +43229-14149。核心主题：released Session format migrations
+> （v0→v1 identity + v1→v2 内嵌 assistant 流）、通用文件附件、live assistant-stream 帧、
+> subprocess Windows 子窗隐藏、workspace 盘根/限定路径、fs 未读变更诊断、jsonl 跨进程写权租约。
+
+## 已落地轮次
+
+| 轮 | 内容 | 状态 |
+|---|---|---|
+| r116 | `llm` AssistantStreamAccumulator + Parse/Expand + PushRaw + LlmAttemptId + StreamChunk 逐 variant wire 保真（index 恒在/空串保留；Name 折叠 absent/空串为已记录偏差） | ✅ |
+| r117 | `sessionformat` 核心：lossless 值纪律/快照验证/Chain 编译/Catalog 四态分发/规范文件名 | ✅ |
+| r118 | `sessionformatv01` released v0→v1 边全量（47 类型清单、载荷语义验证、跨事件关系、v0/v1 物理 codec 含 packed rows/区间 provenance/可恢复解码、legacy 归一化迁移） | ✅ |
+| r119 | `sessionformatv12` released v1→v2 边全量（attempt 分组/稠密重映射/被消费引用拒绝/seed 标记割点/流重组三重一致性验证/v2 物理 codec）；**集成测试：Go 宿主真实日志整链迁移到 v2 通过** | ✅ |
+
+## 待续轮次（依赖序）
+
+1. **r120 jsonl provider**：规范代文件名发现（session.vN.jsonl 最高代当选）、open 时 ensure-current（可恢复解码→内存迁移→同目录临时 stage→源指纹复查→不覆盖发布→重开）、stat/list 仅头翻译、create 按文件名独立保留 id；Go 写路径暂只 plain jsonl（zstd 变体维持缓议）。
+2. **r121 session v2 核心**：SESSION_FORMAT_VERSION→2、v2 头（isSeeded 必在、割点走 end-seed {inherited:true} 标记）、assistant/attempt 词汇注册、seeded 构造器追标记、装词汇 restoreCurrent（catalog 接线）。
+3. **r122 agentloop v2 live writer**：停写顶层 assistant/chunk；settlement 前置于 committed end（`agent/assistant-stream` 帧 start/chunk/end、attemptId=`<sessionId>:<n>`、dense index、revision）；中断有可见前缀→message(interrupted)、否则 attempt；finish error/aborted→attempt+request-error 瀑布。
+4. **r123 消费方**：surface/sessionquery 提取/sessionstats/tokenmeter 折叠/sessiontelemetry/projectioncache（checkpoint 绑 format 世代）对 assistant/attempt+内嵌流适配；gateway journal-stream + session-controller assistant-stream（web follow 光标无帧 FIFO）。
+5. **r124+ 增量其余件**：attachment 通用文件族（store/project/admit + file-upload 包）、agent terminate live assistant attempts、session cold listing body-free、surface replacement 端点/compaction span 验证、subprocess Windows 子窗隐藏（cc8099dc5f/a05b5fbe79）、workspace 盘根+限定路径（d33fe767c1/e609fd73a3）、fs 未读变更诊断（18635905aa）、jsonl 跨进程写权租约（c58097a826）、session-persistence canonical basename 共享、T3 处置行收尾、前端 fork+webassets 同步 0.1.3-alpha.1。
+
 ## 轮 8 执行状态（2026-08-31）
 
 | 项 | 结果 |
