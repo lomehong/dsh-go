@@ -978,7 +978,9 @@ var builders = map[string]pluginBuilder{
 						return fmt.Errorf("api-gateway: agent presets controller: %w", err)
 					}
 				}
-				llmController := gateway.NewLlmController()
+				llmController := gateway.NewLlmController(func() any {
+    return ctx.Get(ServiceLlm)
+})
 				ctx.Provide("llmController", llmController)
 				if _, exists := registry.GetPackage("llm-controller", typert.FaceHost); !exists {
 					if _, err := registry.Register(llmController.Contribution()); err != nil {
@@ -1001,7 +1003,7 @@ var builders = map[string]pluginBuilder{
 						})
 					}
 					return rows
-				})
+				}, func() any { return ctx.Get(ServiceAgentPresets) })
 				sessionController := gateway.NewSessionController(
 					func() any { return ctx.Get(ServiceSessionQuery) },
 					func() any { return ctx.Get(ServiceProjectionCache) },

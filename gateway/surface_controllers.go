@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 
+	"dshgo/llm"
 	"dshgo/preset"
 	"dshgo/typert"
 )
@@ -87,26 +88,60 @@ func (c *AgentPresetsController) Contribution() typert.Contribution {
 	}
 }
 
-// LlmController hosts the llm Remote namespace (official dsh-llm). The Go
-// host runs model configuration through the settings surface, not this
-// discovery namespace; the catalog polls answer honest empty rosters so the
-// Settings Models panel renders instead of failing schema validation.
-type LlmController struct{}
+// LlmController hosts the llm Remote namespace (official dsh-llm).
+type LlmController struct {
+	runtimeLookup func() any
+}
 
 // NewLlmController builds the namespace host.
-func NewLlmController() *LlmController { return &LlmController{} }
+func NewLlmController(runtimeLookup func() any) *LlmController {
+	if runtimeLookup == nil {
+		runtimeLookup = func() any { return nil }
+	}
+	return &LlmController{runtimeLookup: runtimeLookup}
+}
+
+func (c *LlmController) runtime() *llm.Runtime {
+	if v, ok := c.runtimeLookup().(*llm.Runtime); ok && v != nil {
+		return v
+	}
+	return nil
+}
 
 // ListProviders answers the configured-provider roster (official
 // llm/listProviders): array of {id,name}, empty until a provider registers.
 func (c *LlmController) ListProviders(ctx context.Context) (any, error) {
-	return []any{}, nil
+	rt := c.runtime()
+	if rt == nil {
+		return []any{}, nil
+	}
+	infos := rt.ListProviders()
+	out := make([]any, 0, len(infos))
+	for _, info := range infos {
+		out = append(out, map[string]any{"id": info.ID, "name": info.Name})
+	}
+	return out, nil
 }
 
 // ListConfigurableProviders answers the configurable-provider catalog
 // (official llm/listConfigurableProviders): array of {provider,displayName,
 // settingsNs,settingsPath}, empty until provider settings namespaces exist.
 func (c *LlmController) ListConfigurableProviders(ctx context.Context) (any, error) {
-	return []any{}, nil
+	rt := c.runtime()
+	if rt == nil {
+		return []any{}, nil
+	}
+	entries := rt.ListConfigurableProviders()
+	out := make([]any, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, map[string]any{
+			"provider":     e.Provider,
+			"displayName":  e.DisplayName,
+			"settingsNs":   e.SettingsNs,
+			"settingsPath": e.SettingsPath,
+		})
+	}
+	return out, nil
 }
 
 // Contribution is the strict typert definition of the llm namespace.
@@ -153,16 +188,20 @@ type PluginInventoryRow struct {
 // (official dsh-host-plugin-inventory): a read-only projection of the
 // composed profile rows.
 type PluginInventoryController struct {
-	rows func() []PluginInventoryRow
+	rows   func() []PluginInventoryRow
+	presets func() any
 }
 
 // NewPluginInventoryController builds the namespace host over the composed
 // entry snapshot.
-func NewPluginInventoryController(rows func() []PluginInventoryRow) *PluginInventoryController {
+func NewPluginInventoryController(rows func() []PluginInventoryRow, presets func() any) *PluginInventoryController {
 	if rows == nil {
 		rows = func() []PluginInventoryRow { return nil }
 	}
-	return &PluginInventoryController{rows: rows}
+	if presets == nil {
+		presets = func() any { return nil }
+	}
+	return &PluginInventoryController{rows: rows, presets: presets}
 }
 
 // List answers the loader-entry snapshot (official pluginInventory/list):
@@ -174,7 +213,18 @@ func (c *PluginInventoryController) List(ctx context.Context) (any, error) {
 	for _, row := range rows {
 		entries = append(entries, row)
 	}
-	return map[string]any{"entries": entries}, nil
+	result := map[string]any{"entries": entries}
+	if m, ok := c.presets().(*preset.Mounts); ok && m != nil {
+		list, err := m.List()
+		if err == nil {
+			presets := make([]any, 0, len(list))
+			for _, p := range list {
+				presets = append(presets, p)
+			}
+			result["agentPresets"] = presets
+		}
+	}
+	return result, nil
 }
 
 // Contribution is the strict typert definition of the pluginInventory namespace.
