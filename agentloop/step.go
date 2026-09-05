@@ -161,7 +161,7 @@ func (d *ReactLoopAgent) step(signal context.Context, turn, step int64, assembly
 		if len(toolCalls) == 0 {
 			return stepEndReason{Kind: session.TurnEndCompleted}, nil
 		}
-		scheduler := &toolScheduler{tools: d.loop.Tools, session: d.Session, maxParallel: d.loop.maxParallelToolCalls}
+		scheduler := &toolScheduler{tools: d.loop.Tools, session: d.Session, maxParallel: int(d.loop.maxParallelToolCalls.Load())}
 		// The initiator boundary rides the signal context (bound by the
 		// driver's kick loop).
 		concluded, err := executeToolCalls(scheduler, signal, turn, step, toolCalls, signal, func(context llm.Message) {

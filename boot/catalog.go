@@ -441,7 +441,16 @@ var builders = map[string]pluginBuilder{
 				}
 				if _, err := store.Register("agent-loop", &settings.Schema{
 					Envelope: agentLoopEnvelope,
-					Defaults: func() map[string]any { return map[string]any{} },
+					Defaults: func() map[string]any {
+						return map[string]any{"maxParallelToolCalls": float64(agentloop.DefaultMaxParallelToolCalls)}
+					},
+					Validate: func(value map[string]any) error {
+						raw, ok := value["maxParallelToolCalls"].(float64)
+						if !ok || raw != float64(int(raw)) || raw < 1 {
+							return errors.New("maxParallelToolCalls must be a positive integer")
+						}
+						return nil
+					},
 				}, map[string]any{}); err != nil {
 					return err
 				}
@@ -2534,9 +2543,38 @@ var builders = map[string]pluginBuilder{
 	// registries. This is also the manager's child create/resume seam.
 	"@deepseek-ai/dsh-agent-loop": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
-			Inject:  []string{ServiceAgents, ServiceLlm, ServiceTools, ServiceSystemPrompt, ServiceProjections, ServiceSessions},
+			Inject:  []string{ServiceAgents, ServiceLlm, ServiceTools, ServiceSystemPrompt, ServiceProjections, ServiceSessions, ServiceSettings},
 			Provide: []string{ServiceAgentLoop},
 			Apply: func(ctx *cordis.Context, config any) error {
+				loopConfig := agentloop.AgentLoopConfig{}
+				// The config-start failure emitter (official
+				// agent-loop/config-start-failed): contained declarative-start
+				// failures surface on the bus instead of logger-only.
+				if agents, ok := ctx.Get(ServiceAgents).(*agent.AgentRegistry); ok && agents != nil {
+					bus := agents.Events()
+					loopConfig.ConfigStartFailed = func(sessionID session.SessionID, err error) {
+						bus.Emit("agent-loop/config-start-failed", nil, map[string]any{
+							"sessionId": string(sessionID),
+							"error":     err.Error(),
+						})
+					}
+				}
+				// The settings section read-through: the initial cap resolves
+				// through the schema's defaults → base → user fold.
+				var settingsScope *settings.Scope
+				var settingsStore *settings.Store
+				if store, ok := ctx.Get(ServiceSettings).(*settings.Store); ok && store != nil {
+					settingsStore = store
+					settingsScope = store.Scope("agent-loop")
+				}
+				if settingsScope != nil {
+					if section := settingsScope.Get(); section != nil {
+						if raw, ok := section["maxParallelToolCalls"].(float64); ok && raw >= 1 {
+							value := int(raw)
+							loopConfig.MaxParallelToolCalls = &value
+						}
+					}
+				}
 				loop, err := agentloop.NewAgentLoop(
 					ctx,
 					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
@@ -2545,13 +2583,31 @@ var builders = map[string]pluginBuilder{
 					ctx.Get(ServiceTools).(*tools.ToolRuntime),
 					ctx.Get(ServiceSystemPrompt).(*systemprompt.SystemPrompt),
 					ctx.Get(ServiceProjections).(*projection.Registry),
-					agentloop.AgentLoopConfig{},
+					loopConfig,
 				)
 				if err != nil {
 					return err
 				}
 				if store, ok := ctx.Get(ServiceSessions).(*session.Store); ok && store != nil {
 					loop.Sessions = store
+				}
+				// Live re-cap: a committed settings change re-caps the next
+				// tool group (official setSource read-through).
+				if settingsScope != nil && settingsStore != nil {
+					dispose := settingsStore.OnUpdated(func(event *settings.UpdateEvent) {
+						if event.Namespace != "agent-loop" {
+							return
+						}
+						if raw, ok := event.Next["maxParallelToolCalls"].(float64); ok && raw >= 1 {
+							_ = loop.SetMaxParallelToolCalls(int(raw))
+						}
+					})
+					if err := ctx.Effect(func() (cordis.Disposer, error) {
+						dispose()
+						return cordis.Disposer(func() {}), nil
+					}); err != nil {
+						return err
+					}
 				}
 				ctx.Provide(ServiceAgentLoop, loop)
 				return nil

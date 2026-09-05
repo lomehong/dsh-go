@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"dshgo/agent"
 	"dshgo/cordis"
@@ -30,11 +31,14 @@ import (
 // AgentLoopConfig is the agent-loop plugin configuration.
 type AgentLoopConfig struct {
 	// MaxParallelToolCalls caps in-flight parallel-safe calls per agent step.
-	// 1 is serial; nil defaults to DefaultMaxParallelToolCalls. Read per
-	// scheduler group, so a committed change caps the next group.
+	// 1 is serial; nil defaults to DefaultMaxParallelToolCalls. The settings
+	// wiring re-caps live via SetMaxParallelToolCalls.
 	MaxParallelToolCalls *int
 	// Agents are created or resumed at service construction.
 	Agents []ConfiguredAgent
+	// ConfigStartFailed observes a contained declarative-start failure
+	// (official agent-loop/config-start-failed); nil = logger only.
+	ConfigStartFailed func(sessionID session.SessionID, err error)
 }
 
 // ConfiguredAgent is one declarative agent entry.
@@ -209,10 +213,26 @@ type AgentLoop struct {
 	// baseCtx is the cancellation root for driver signals.
 	baseCtx context.Context
 
-	maxParallelToolCalls int
+	// maxParallelToolCalls is the live scheduler cap: re-cappable through
+	// SetMaxParallelToolCalls (the settings section's setSource read-through).
+	maxParallelToolCalls atomic.Int64
 	ownership            *factoryOwnership
+	// configStartFailed observes contained declarative-start failures.
+	configStartFailed func(sessionID session.SessionID, err error)
 
 	publishMu sync.Mutex
+}
+
+// SetMaxParallelToolCalls re-caps the per-step parallel scheduler: the
+// in-flight group is undisturbed, the next group reads the new cap
+// (official getter read-through semantics). Validation matches construction.
+func (l *AgentLoop) SetMaxParallelToolCalls(value int) error {
+	maxParallel, err := resolveMaxParallelToolCalls(&value)
+	if err != nil {
+		return err
+	}
+	l.maxParallelToolCalls.Store(int64(maxParallel))
+	return nil
 }
 
 // NewAgentLoop validates the configuration, registers the factory on the
@@ -245,9 +265,10 @@ func NewAgentLoop(ctx *cordis.Context, registry *agent.AgentRegistry, logger cor
 		Registry:             registry,
 		Logger:               logger,
 		baseCtx:              context.Background(),
-		maxParallelToolCalls: maxParallel,
+		configStartFailed:    config.ConfigStartFailed,
 		ownership:            newFactoryOwnership(),
 	}
+	loop.maxParallelToolCalls.Store(int64(maxParallel))
 	if err := ctx.Effect(func() (cordis.Disposer, error) {
 		return func() { _ = loop.ownership.dispose() }, nil
 	}); err != nil {
@@ -330,12 +351,17 @@ func (l *AgentLoop) startConfiguredAgents(entries []ConfiguredAgent) error {
 	return nil
 }
 
-// reportConfiguredStartupFailure logs a contained declarative-start failure.
+// reportConfiguredStartupFailure logs a contained declarative-start failure
+// and emits the agent-loop/config-start-failed cordis event (logger-only
+// before the settings/boot wiring landed).
 func (l *AgentLoop) reportConfiguredStartupFailure(configID, action string, sessionID session.SessionID, err error) {
 	if !l.ownership.isActive() {
 		return
 	}
 	l.Logger.Warn(fmt.Sprintf("agent %q: config-driven %s of %q failed: %s", configID, action, sessionID, errorChainText(err)))
+	if l.configStartFailed != nil {
+		l.configStartFailed(sessionID, err)
+	}
 }
 
 func errorChainText(err error) string {
