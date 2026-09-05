@@ -25,7 +25,14 @@ type SessionController struct {
 	// createDeps carries the session/create seams; nil until EnableCreate
 	// runs, which also gates whether the create invocation is advertised.
 	createDeps *SessionCreateDeps
+	// emitAdded forwards the api-session/added lifecycle event (wired by the
+	// composition; nil = no forwarding).
+	emitAdded func(created any)
 }
+
+// SetAddedEmitter installs the api-session/added forwarder. The composition
+// bridges it onto the agent bus so the $events allowlist carries it.
+func (c *SessionController) SetAddedEmitter(emit func(created any)) { c.emitAdded = emit }
 
 // NewSessionController builds the namespace host. Lookups resolve per call —
 // nil services answer honest empty values.

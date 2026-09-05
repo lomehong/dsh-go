@@ -341,6 +341,9 @@ func (c *SessionController) Create(ctx context.Context, request map[string]any) 
 				"session %q was created but could not attach to workspace %q", sessionID, workspaceID)
 		}
 	}
+	if c.emitAdded != nil {
+		c.emitAdded(createValue(sessionID, presetID))
+	}
 	return createValue(sessionID, presetID), nil
 }
 

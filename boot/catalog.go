@@ -1157,6 +1157,69 @@ var builders = map[string]pluginBuilder{
 				// keeps the prompt's honest file-part refusal.
 				if err := ctx.Inject([]string{ServiceAgents}, func(c *cordis.Context) error {
 					agents := c.Get(ServiceAgents).(*agent.AgentRegistry)
+					bus := agents.Events()
+					if controllerValue := ctx.Get("sessionController"); controllerValue != nil {
+						if controller, ok := controllerValue.(*gateway.SessionController); ok {
+							controller.SetAddedEmitter(func(created any) {
+								bus.Emit("api-session/added", nil, created)
+							})
+						}
+					}
+					// agent/status maps onto the api-session vocabulary: the
+					// sidebar's running column follows every live agent.
+					bus.OnEmit("agent/status", nil, func(payload any) error {
+						if status, ok := payload.(agent.AgentStatusPayload); ok {
+							bus.Emit("api-session/status", nil, []any{
+								string(status.Agent.ID), status.Status == agent.AgentRunning,
+							})
+						}
+						return nil
+					})
+					// The last user prompt per session feeds the sidebar's
+					// activity ordering.
+					ctx.On("session/event", func(value any, next func(any) any) any {
+						if payload, ok := value.(*projection.SessionEventPayload); ok &&
+							payload.Event.Type == session.EventUserMessage {
+							bus.Emit("api-session/activity", nil, []any{
+								string(payload.Session.ID()), float64(payload.Event.Time),
+							})
+						}
+						return next(value)
+					})
+					return nil
+				}); err != nil {
+					return fmt.Errorf("api-gateway: session lifecycle events: %w", err)
+				}
+				// settings/document-updated: the user settings document's
+				// namespace changes forward so open settings pages refresh.
+				if err := ctx.Inject([]string{ServiceAgents, ServiceSettings}, func(c *cordis.Context) error {
+					store, ok := c.Get(ServiceSettings).(*settings.Store)
+					if !ok {
+						return nil
+					}
+					agentsValue := c.Get(ServiceAgents)
+					agents, ok := agentsValue.(*agent.AgentRegistry)
+					if !ok || agents == nil {
+						return nil
+					}
+					bus := agents.Events()
+					dispose := store.OnUpdated(func(event *settings.UpdateEvent) {
+						bus.Emit("settings/document-updated", nil, []any{event.Namespace})
+					})
+					return ctx.Effect(func() (cordis.Disposer, error) {
+						dispose()
+						return cordis.Disposer(func() {}), nil
+					})
+				}); err != nil {
+					return fmt.Errorf("api-gateway: settings events: %w", err)
+				}
+				// The staged file-upload service + the fileReferences Remote
+				// namespace: both need the live agent plane, so they compose
+				// through the delayed agent injection. The file store is an
+				// optional read — a profile without dsh-attachment-local
+				// keeps the prompt's honest file-part refusal.
+				if err := ctx.Inject([]string{ServiceAgents}, func(c *cordis.Context) error {
+					agents := c.Get(ServiceAgents).(*agent.AgentRegistry)
 					var fileStore attachment.FileStore
 					if storeValue := c.Get(ServiceAttachments); storeValue != nil {
 						if store, ok := storeValue.(attachment.FileStore); ok {
