@@ -13,9 +13,9 @@
 | R4 | 低 | planmode Set | append 失败被吞成 queued | ✅ 已修（返回 error，pending 保留可重试） |
 | R5 | 中 | planmode SectionText | `pending?.active ?? fold` 语义误读，pending 窗口 section 多显示 | ✅ 已修 + 测试 |
 | R6 | 中高 | storagedomain emitLocked | 持锁派发监听器 = Go 死锁面（JS 单线程天然安全） | ✅ 已修（锁内提交入队、锁外按序派发 + 重入测试） |
-| R7 | 低 | commands ImageAdmitter | admission 错误分类未保两分支 | 开放（attachment 轮接线时对齐） |
+| R7 | 低 | commands ImageAdmitter | admission 错误分类未保两分支 | ✅ 分类面已修（`commands/runtime.go` 官方 AttachmentError 词汇 + caller-correctable/settleThrown 两分支，admission_test 钉住）；**残余**：生产组合从未调 `SetImageAdmitter`（真实 /命令带图仍结算 unavailable 文案）——随 web 组装轮接线 |
 | R8 | 低 | workspace Create | `??` 不捕空串被误读为 `== ""`（TS `??` 语义系统性误读第二例） | ✅ 已入账（全局 `??` 映射约定，见 DECISIONS.md） |
-| R9 | 低中 | subagent continuation-manager | ListSnapshots 失败静默跳过 vs 官方抛错 | 开放（低优先） |
+| R9 | 低中 | subagent continuation-manager | ListSnapshots 失败静默跳过 vs 官方抛错 | ✅ 已修（`assertChildIDAvailable` fail loud，提交 7c2a1cb） |
 | R10 | 低中 | workflow engine | 引擎已交付但 README 决策记录缺失 | ✅ 已入账（Go 原生脚本域决策） |
 | R11 | 低中 | hookprotocol | 竞态根因（重构轮 2 修复族） | ✅ 已修 |
 
@@ -34,4 +34,5 @@
 | F9 | 环境 | 本机 TEMP 8.3 短路径（`HZ0704~1`）与 canonical 化冲突 → 6 包预存失败 | ✅ 已修（用户级 TEMP/TMP 改长路径；DECISIONS.md 入账） |
 | F10 | 工具链 | gcc 8.1.0 与 go1.26 race runtime 不兼容（0xc0000139） | ✅ 已修（WinLibs gcc 16.1.0；README 构建节已更正） |
 | F11 | jobs/local.go Read | 修复轮引入的回归（terminal+readOutput 分支漏调 producer 读） | ✅ 已修（忠实原语义重写） |
-| R7/R9 | — | 随 attachment 轮 / 低优先处理 | 开放 |
+| R7 残余 | — | SetImageAdmitter 生产接线 | 随 commands 组装轮 | 开放 |
+| R9 | — | — | 已闭环 | ✅ |

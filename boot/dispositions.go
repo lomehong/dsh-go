@@ -58,7 +58,7 @@ var Dispositions = map[string]string{
 	"@deepseek-ai/dsh-client-ui-user-questions":            "frontend-domain",
 	"@deepseek-ai/dsh-client-ui-workflow-run":              "frontend-domain",
 	"@deepseek-ai/dsh-client-hmr":                          "frontend-domain (client-side package; host cannot import)",
-	"@deepseek-ai/dsh-client-file-upload":                  "frontend-domain (client half; host admission is the session-controller upload path)",
+	"@deepseek-ai/dsh-client-file-upload":                  "frontend-domain (client half; the host upload wire — /api/session/uploadFileBinary + fileUploads remote — is NOT composed yet; r139 audit)",
 	"@deepseek-ai/dsh-client-ui-schedule":                  "frontend-domain",
 	"@deepseek-ai/cordis-plugin-hmr":                       "T2-disposition (upstream base yml disabled:true; node-specific HMR)",
 

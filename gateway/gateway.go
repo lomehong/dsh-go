@@ -10,9 +10,13 @@
 // Go resolves strict registered definitions only, and unknown endpoints
 // fail invocation-unavailable exactly as the official empty-candidate path.
 // The typertRemote binding marker check is likewise unnecessary: the strict
-// descriptor registration is itself the binding. Stream Remotes, the
-// forwarded-event source, and the WebSocket mux land with the stream
-// carrier round.
+// descriptor registration is itself the binding. Stream Remotes (the
+// WebSocket mux over gatewaystream), the forwarded-event transport bridge
+// (remote_events.go + the apiremotes allowlist), and the journal/follow
+// stream endpoints are landed (r61-r130); the open residual is the
+// $events/result answer path (browser answers back into the approval /
+// user-questions waterfalls) and event-source coverage for the remaining
+// whitelisted bus events.
 package gateway
 
 import (
