@@ -105,8 +105,8 @@ type RegistrationHandle struct {
 // Dispose releases every route this registration currently holds.
 func (h *RegistrationHandle) Dispose() {
 	h.rt.mu.Lock()
-	defer h.rt.mu.Unlock()
 	if h.disposed {
+		h.rt.mu.Unlock()
 		return
 	}
 	h.disposed = true
@@ -115,6 +115,8 @@ func (h *RegistrationHandle) Dispose() {
 		h.rt.removeFromOrder(provider)
 	}
 	h.owned = map[string]bool{}
+	h.rt.mu.Unlock()
+	h.rt.notifyAdaptersUpdated()
 }
 
 // Replace swaps this registration's routes in one synchronous section. The
@@ -124,15 +126,18 @@ func (h *RegistrationHandle) Dispose() {
 // REGISTRATION_DISPOSED.
 func (h *RegistrationHandle) Replace(providers []string) error {
 	h.rt.mu.Lock()
-	defer h.rt.mu.Unlock()
 	if h.disposed {
+		h.rt.mu.Unlock()
 		return NewLlmError("a disposed adapter registration cannot replace its routes", "REGISTRATION_DISPOSED", LlmFailure{})
 	}
 	registrations, err := h.rt.prepareRoutes(providers, h.adapter, h.owned)
 	if err != nil {
+		h.rt.mu.Unlock()
 		return err
 	}
 	h.rt.commitRoutes(h.owned, registrations)
+	h.rt.mu.Unlock()
+	h.rt.notifyAdaptersUpdated()
 	return nil
 }
 
@@ -182,6 +187,10 @@ type Runtime struct {
 	adapters map[string]*adapterRegistration
 	order    []string
 	hooks    []*streamHookEntry
+	// adapterWatchers observe route-set changes (the llm/adapters-updated
+	// forwarded event source); notified outside the runtime lock.
+	adapterWatchers   map[int]func()
+	nextWatcherID     int
 	// configurable holds discovery-facing provider entries (the
 	// `registerConfigurableProviders` table: which provider routes expose a
 	// user settings section).
@@ -193,6 +202,41 @@ type Runtime struct {
 	// composed at the wiring layer; nil degrades every occurrence to the
 	// no-path handle).
 	fileReadPath func(attachmentID string) string
+}
+
+// OnAdaptersUpdated registers one adapter-set change observer: register,
+// replace, and dispose all notify. The disposer removes the observer.
+func (rt *Runtime) OnAdaptersUpdated(fn func()) func() {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if rt.adapterWatchers == nil {
+		rt.adapterWatchers = map[int]func(){}
+	}
+	id := rt.nextWatcherID
+	rt.nextWatcherID++
+	rt.adapterWatchers[id] = fn
+	return func() {
+		rt.mu.Lock()
+		defer rt.mu.Unlock()
+		delete(rt.adapterWatchers, id)
+	}
+}
+
+// notifyAdaptersUpdated runs every watcher outside the runtime lock, each
+// contained: an observer failure can never break a completed route swap.
+func (rt *Runtime) notifyAdaptersUpdated() {
+	rt.mu.Lock()
+	watchers := make([]func(), 0, len(rt.adapterWatchers))
+	for _, watcher := range rt.adapterWatchers {
+		watchers = append(watchers, watcher)
+	}
+	rt.mu.Unlock()
+	for _, watcher := range watchers {
+		func() {
+			defer func() { _ = recover() }()
+			watcher()
+		}()
+	}
 }
 
 // SetFileReadPathResolver installs the execution-world file read-path
@@ -339,13 +383,15 @@ func (rt *Runtime) RegisterAdapter(providers []string, adapter Adapter) (*Regist
 		return nil, NewLlmError("an adapter must register at least one provider", CodeInvalidAdapter, LlmFailure{})
 	}
 	rt.mu.Lock()
-	defer rt.mu.Unlock()
 	registrations, err := rt.prepareRoutes(providers, adapter, nil)
 	if err != nil {
+		rt.mu.Unlock()
 		return nil, err
 	}
 	handle := &RegistrationHandle{owned: map[string]bool{}, adapter: adapter, rt: rt}
 	rt.commitRoutes(handle.owned, registrations)
+	rt.mu.Unlock()
+	rt.notifyAdaptersUpdated()
 	return handle, nil
 }
 

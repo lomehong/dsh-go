@@ -1213,6 +1213,45 @@ var builders = map[string]pluginBuilder{
 				}); err != nil {
 					return fmt.Errorf("api-gateway: settings events: %w", err)
 				}
+				// llm/adapters-updated + credentials/reference-updated: the
+				// Models page's live refresh sources (adapter route changes
+				// and managed credential writes).
+				if err := ctx.Inject([]string{ServiceAgents, ServiceLlm, ServiceCredential}, func(c *cordis.Context) error {
+					agents := c.Get(ServiceAgents).(*agent.AgentRegistry)
+					bus := agents.Events()
+					if runtimeValue := c.Get(ServiceLlm); runtimeValue != nil {
+						if rt, ok := runtimeValue.(*llm.Runtime); ok && rt != nil {
+							dispose := rt.OnAdaptersUpdated(func() {
+								bus.Emit("llm/adapters-updated", nil, []any{})
+							})
+							if err := ctx.Effect(func() (cordis.Disposer, error) {
+								dispose()
+								return cordis.Disposer(func() {}), nil
+							}); err != nil {
+								return err
+							}
+						}
+					}
+					if providerValue := c.Get(ServiceCredential); providerValue != nil {
+						if provider, ok := providerValue.(credentials.Provider); ok {
+							if notifier := provider.Notifier(); notifier != nil {
+								dispose := notifier.On(func(subject string) error {
+									bus.Emit("credentials/reference-updated", nil, []any{subject})
+									return nil
+								})
+								if err := ctx.Effect(func() (cordis.Disposer, error) {
+									dispose()
+									return cordis.Disposer(func() {}), nil
+								}); err != nil {
+									return err
+								}
+							}
+						}
+					}
+					return nil
+				}); err != nil {
+					return fmt.Errorf("api-gateway: model refresh events: %w", err)
+				}
 				// The staged file-upload service + the fileReferences Remote
 				// namespace: both need the live agent plane, so they compose
 				// through the delayed agent injection. The file store is an

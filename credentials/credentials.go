@@ -180,6 +180,10 @@ type RecordEntry struct {
 // cache across operations. All writes commit before Notifier fans out, so a
 // broken observer can never make a durable change look failed.
 type Provider interface {
+	// Notifier exposes the provider's change fan-out (the
+	// credentials/reference-updated forwarded event source); providers
+	// without a notifier return nil.
+	Notifier() *Notifier
 	// Resolve resolves one reference to its current value. A nil result with
 	// a nil error means unconfigured.
 	Resolve(ref Ref) (*Resolved, error)
