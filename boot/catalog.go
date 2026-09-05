@@ -2097,7 +2097,12 @@ var builders = map[string]pluginBuilder{
 				if err != nil {
 					return err
 				}
-				return headless.Run(ctx, parsed)
+				// The run is asynchronous (r139): the synchronous Apply used
+				// to block the entire composition for the task's lifetime
+				// and interacted with the driver lifecycle mid-stream. The
+				// launcher waits on the provided done channel.
+				ctx.Provide("headlessRunDone", headless.StartRun(ctx, parsed))
+				return nil
 			},
 		}
 	},

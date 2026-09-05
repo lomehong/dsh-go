@@ -73,39 +73,84 @@ func DecodeRunnerConfig(config any) (RunnerConfig, error) {
 	return parsed, nil
 }
 
-// Run drives one task through a freshly created Agent and requests the
-// process exit. Port of the official run(): await the complete application
-// (Go composition is synchronous — a no-op), create the Agent with the
-// default model selection, submit the task as a followup, wait for idle,
-// flush the Session, print the final assistant text, and report the outcome
-// code.
+// RunDeps carries the composition-resolved faces the run needs. They are
+// captured eagerly at Apply time so the async run never races a later row
+// apply for a ctx.Get.
+type RunDeps struct {
+	Host         *cordis.Context
+	Agents       *agent.AgentRegistry
+	DefaultModel *agentdefaultmodel.Config
+	Store        *session.Store
+	Flusher      interface {
+		FlushSession(sess *session.Session) error
+	}
+}
+
+// StartRun resolves the composition faces eagerly and runs the task on its
+// own goroutine (r139 async-run round): the synchronous Apply used to block
+// the entire composition for the task's lifetime and interacted with the
+// driver lifecycle mid-stream (the diagnosed 流中段 context canceled). The
+// returned channel yields the run error exactly once.
+func StartRun(ctx *cordis.Context, config RunnerConfig) <-chan error {
+	deps := resolveRunDeps(ctx)
+	done := make(chan error, 1)
+	go func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				done <- fmt.Errorf("headless-runner: %v", rec)
+			}
+		}()
+		done <- run(deps, config)
+	}()
+	return done
+}
+
+// resolveRunDeps captures the runner faces from the composition.
+func resolveRunDeps(ctx *cordis.Context) RunDeps {
+	deps := RunDeps{Host: ctx}
+	if registry, ok := ctx.Get("agents").(*agent.AgentRegistry); ok {
+		deps.Agents = registry
+	}
+	if model, ok := ctx.Get("agentDefaultModel").(*agentdefaultmodel.Config); ok {
+		deps.DefaultModel = model
+	}
+	if store, ok := ctx.Get("sessions").(*session.Store); ok {
+		deps.Store = store
+	}
+	if persistAny := ctx.Get("sessionPersistence"); persistAny != nil {
+		if coordinator, ok := persistAny.(*persistence.Coordinator); ok {
+			deps.Flusher = coordinator
+		}
+	}
+	return deps
+}
+
+// Run drives one task synchronously (test/compat entry): resolve the
+// composition faces, then execute the task end to end.
 func Run(ctx *cordis.Context, config RunnerConfig) error {
-	agentsAny := ctx.Get("agents")
-	registry, ok := agentsAny.(*agent.AgentRegistry)
-	if !ok || registry == nil {
+	return run(resolveRunDeps(ctx), config)
+}
+
+// run executes the task (official run()): create the Agent with the default
+// model selection, submit the task as a followup, wait for idle, flush the
+// Session, print the final assistant text, and report the outcome code.
+func run(deps RunDeps, config RunnerConfig) error {
+	if deps.Agents == nil {
 		return fmt.Errorf("headless-runner: no agent registry is composed")
 	}
-	defaultModelAny := ctx.Get("agentDefaultModel")
-	defaultModel, ok := defaultModelAny.(*agentdefaultmodel.Config)
-	if !ok || defaultModel == nil {
+	if deps.DefaultModel == nil {
 		return fmt.Errorf("headless-runner: no agent-default-model service is composed")
 	}
-	sessionsAny := ctx.Get("sessions")
-	store, ok := sessionsAny.(*session.Store)
-	if !ok || store == nil {
+	if deps.Store == nil {
 		return fmt.Errorf("headless-runner: no session store is composed")
 	}
 	var flusher interface {
 		FlushSession(sess *session.Session) error
 	}
-	if persistAny := ctx.Get("sessionPersistence"); persistAny != nil {
-		if coordinator, ok := persistAny.(*persistence.Coordinator); ok {
-			flusher = coordinator
-		}
-	}
-	selection := defaultModel.CurrentSelection()
+	flusher = deps.Flusher
+	selection := deps.DefaultModel.CurrentSelection()
 
-	handle, err := registry.Create(context.Background(), agent.CreateAgentOptions{
+	handle, err := deps.Agents.Create(context.Background(), agent.CreateAgentOptions{
 		SessionID: session.SessionID(generateSessionID()),
 		Meta: agent.CreateAgentMeta{
 			CWD: cwdOrEmpty(),
@@ -124,7 +169,7 @@ func Run(ctx *cordis.Context, config RunnerConfig) error {
 	// The reasoning relay: provider-reported reasoning streams to stderr
 	// while the durable log stays the outcome authority (official
 	// streamReasoning over the agent/assistant-stream feed).
-	stopRelay := relayReasoning(ctx, created, Stderr)
+	stopRelay := relayReasoning(deps.Host, created, Stderr)
 	defer stopRelay()
 
 	baseline := int64(created.Session.Seq()) - 1

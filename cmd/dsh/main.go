@@ -178,8 +178,25 @@ func run() error {
 	}
 
 	if *profile == "headless" {
-		// The one-shot driver owns the run: it requests the exit code
-		// through the appExit host value once its output is written.
+		// The one-shot driver runs asynchronously since r139: the launcher
+		// waits for task completion (or an interrupt) before shutdown, so
+		// the exit code reflects the task outcome. The exit request is a
+		// host value written by the run once its output is done.
+		if doneValue := app.Root().Get("headlessRunDone"); doneValue != nil {
+			if done, ok := doneValue.(<-chan error); ok {
+				stop := make(chan os.Signal, 1)
+				signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+				select {
+				case runErr := <-done:
+					if runErr != nil {
+						fmt.Fprintf(os.Stderr, "dsh: %v\n", runErr)
+					}
+				case <-stop:
+					fmt.Println("dsh: interrupted")
+				}
+				signal.Stop(stop)
+			}
+		}
 		if err := app.Shutdown(); err != nil {
 			return err
 		}
