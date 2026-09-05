@@ -70,6 +70,7 @@ import (
 	"dshgo/session/projectioncache"
 	"dshgo/sessionlog"
 	"dshgo/sessionquery"
+	"dshgo/sessionturnoutline"
 	"dshgo/sessionquerysqlite"
 	"dshgo/sessiontelemetry"
 	"dshgo/sessiontelemetryotel"
@@ -1124,6 +1125,16 @@ var builders = map[string]pluginBuilder{
 						return err
 					}
 					if err := ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(dispose), nil }); err != nil {
+						return err
+					}
+					// The turnOutline unit (official dsh-session-turn-outline)
+					// serves the chat rail's whole-log turn list: turn
+					// numbers, turn/start seqs, and bounded previews.
+					turnOutline, err := registry.Register(sessionturnoutline.Projection.Definition())
+					if err != nil {
+						return err
+					}
+					if err := ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(turnOutline), nil }); err != nil {
 						return err
 					}
 					return nil

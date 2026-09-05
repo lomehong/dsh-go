@@ -220,10 +220,15 @@ workflow / typert / sdk / boot / jobs / interaction / guard 的 src 在 alpha.2 
 | r121 | SESSION_FORMAT_VERSION 0→2：assistant/attempt 词汇、end-seed 标记 {inherited:true}、AssistantMessageData.Stream/AssistantAttemptData 载荷、store.Create 未戳头部缺省盖当前版 | ✅ |
 | r122 | agentloop v2 live writer：AssistantStreamAttempt（accumulator+assembler 双喂、start/chunk/end 帧、settle 前置于 committed end、append 失败 abandon）；中断有可见前缀→message(interrupted)+stream、否则 attempt；finish error/aborted→attempt+request-error 瀑布；assistant/message 不再携 sourceEventSeqs；agent/assistant-stream 作用域事件+TypedEmit.Publish | ✅ |
 | r120a | jsonl 代文件名：LogPath 按 SESSION_FORMAT_VERSION 产 session.v2.jsonl（v0 裸名保留）、SelectGenerationLog 最高代当选、findByID/List/ListSnapshots 走代选择 | ✅ |
+| r120b | sessionformatcatalog 静态编目 + jsonl EnsureCurrent：recoverable 解码→整链内存迁移→同目录临时 stage→不覆盖发布（hardlink/O_EXCL，竞胜者仅字节全等接受）→源指纹复查→目录 sync 尽力；LoadStored 旧代先迁移再读；header-only 翻译不发布；扫描器 v2 割点自末位 inherited 标记推导；Create 按规范代名保留 id | ✅ |
+| r123 | 消费方 v2 适配：tokenmeter 内嵌流重装配定价；sessionstats attempt 分支+message 流首帧推导；projectioncache 检查点绑定 formatVersion（无世代/异代不可播种，日志权威重折） | ✅ |
+| r124a | 上游小修复批：subprocess Windows 子窗隐藏（HideWindow+CREATE_NO_WINDOW，taskkill 助手同）；workspace fully-qualified 守卫+盘根标题；toolfs FS_NOT_OBSERVED 模型面诊断统一（策略/提供方同归一，原始措辞下沉 cause） | ✅ |
+| r124b | attachment 通用文件族：FileStore 服务面+AdmitEncodedFile+local file-store（FileLeafName 双分隔符净化/设备名/UTF-8 预算；sha256 object+展示名 alias；流式分块哈希；读取端完整性裁决）+ llm BlockFile/ProjectFilesToText/Runtime 投影缝 | ✅ |
+| r125 | sessionturnoutline 投影单元（turn/start 锚点+有界 prompt/response 预览+draft turn/end 提交+序守卫+DecodeState 序校验）接线 apiGateway 组合；处置表三 api-controller 行 T2-resolved（gateway 控制器承载）+ turn-outline T2-resolved | ✅ |
 
 ## 待续轮次（依赖序）
 
-1. **r120b ensure-current 发布**：open 时对 v0/v1 历史代执行 可恢复解码→内存迁移（链已可用）→同目录临时 stage→源指纹复查→不覆盖发布 session.v2.jsonl→重开；stat/list 仅头翻译（现 refusal 直通为过渡态——迁移链集成测试已证明可迁移，仅发布生命周期待接）；zstd 变体维持缓议。
+1. **r126 前端 fork/webassets 重同步 0.1.3-alpha.1**（sync-frontend.ps1 + sync-webassets.ps1 需 npm 可用）；tokenmeter file 节点定价缝（随 gateway 文件上传端点轮——上传→日志→计价一条链）；session-reference/session-stats/session-log-export 三行 catalog 接线（包已移植，待读上游 cordis 条目后挂）；jsonl 跨进程写权租约（c58097a826）；agent terminate live assistant attempts；session cold listing body-free。
 2. **r121 session v2 核心**：SESSION_FORMAT_VERSION→2、v2 头（isSeeded 必在、割点走 end-seed {inherited:true} 标记）、assistant/attempt 词汇注册、seeded 构造器追标记、装词汇 restoreCurrent（catalog 接线）。
 3. **r122 agentloop v2 live writer**：停写顶层 assistant/chunk；settlement 前置于 committed end（`agent/assistant-stream` 帧 start/chunk/end、attemptId=`<sessionId>:<n>`、dense index、revision）；中断有可见前缀→message(interrupted)、否则 attempt；finish error/aborted→attempt+request-error 瀑布。
 4. **r123 消费方**：surface/sessionquery 提取/sessionstats/tokenmeter 折叠/sessiontelemetry/projectioncache（checkpoint 绑 format 世代）对 assistant/attempt+内嵌流适配；gateway journal-stream + session-controller assistant-stream（web follow 光标无帧 FIFO）。

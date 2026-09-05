@@ -77,8 +77,13 @@ var Dispositions = map[string]string{
 	"@deepseek-ai/dsh-session-reference":          "T3-planned (sessionreference ported; catalog row pending)",
 	"@deepseek-ai/dsh-session-stats":              "T3-planned (sessionstats ported; catalog row pending)",
 	"@deepseek-ai/dsh-session-log-export":         "T3-planned (sessionlog ported; catalog row pending)",
-	"@deepseek-ai/dsh-session-turn-outline":       "T3-planned (session turn outline)",
-	"@deepseek-ai/dsh-api-session-controller":     "T3-planned (api session controller)",
-	"@deepseek-ai/dsh-api-settings-controller":    "T3-planned (api settings controller)",
-	"@deepseek-ai/dsh-api-workspace-controller":   "T3-planned (api workspace controller)",
+	// Delivered under Go packaging: the api-controller rows' Remote
+	// controllers live in the gateway package and compose through the
+	// apiGateway bundle row (r96d/e + r105-r112); the turn-outline
+	// projection unit ports as sessionturnoutline and registers inside the
+	// apiGateway composition.
+	"@deepseek-ai/dsh-session-turn-outline":     "T2-resolved (sessionturnoutline unit, apiGateway-composed)",
+	"@deepseek-ai/dsh-api-session-controller":   "T2-resolved (gateway session controller)",
+	"@deepseek-ai/dsh-api-settings-controller":  "T2-resolved (gateway settings controller)",
+	"@deepseek-ai/dsh-api-workspace-controller": "T2-resolved (gateway workspace controller)",
 }
