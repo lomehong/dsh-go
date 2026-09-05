@@ -13,6 +13,8 @@ const (
 	CodeImagesTooLarge        = "IMAGES_TOO_LARGE"
 	CodeUnsupportedImgType    = "UNSUPPORTED_IMAGE_TYPE"
 	CodeInvalidImageBase64    = "INVALID_IMAGE_BASE64"
+	CodeInvalidFileBase64     = "INVALID_FILE_BASE64"
+	CodeFilesUnsupported      = "ATTACHMENT_FILES_UNSUPPORTED"
 	CodeInvalidImage          = "INVALID_IMAGE"
 	CodeImageTypeMismatch     = "IMAGE_TYPE_MISMATCH"
 	CodeImageTooLarge         = "IMAGE_TOO_LARGE"

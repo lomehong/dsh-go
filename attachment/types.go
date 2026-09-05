@@ -3,6 +3,8 @@
 // projection, and the session log's image references.
 package attachment
 
+import "io"
+
 // ImageMediaType names the raster formats accepted by the version-one
 // attachment path.
 const (
@@ -117,4 +119,48 @@ type RequestImageAttachment struct {
 	// HasAlpha reports whether the encoded request version retains an
 	// alpha channel.
 	HasAlpha bool
+}
+
+
+// FileAttachmentRef is a durable, serializable reference to one verbatim
+// stored file. Files are stored byte-for-byte with no normalization;
+// AttachmentID is the sha256 digest of exactly those bytes (official
+// FileAttachmentRef, 0.1.3-alpha.1).
+type FileAttachmentRef struct {
+	// AttachmentID is an opaque content-addressed storage identifier —
+	// never a filesystem path or bearer URL.
+	AttachmentID string `json:"attachmentId"`
+	// Name is the sanitized display filename, also the stored object's
+	// leaf name.
+	Name string `json:"name"`
+	// Bytes is the exact byte length.
+	Bytes int `json:"bytes"`
+}
+
+// EncodedFileAttachment is a base64-encoded file upload accompanying one
+// wire request.
+type EncodedFileAttachment struct {
+	// Data is the canonical base64 encoding of the file bytes.
+	Data string `json:"data"`
+	// Name is an optional display name; it is never interpreted as a path.
+	Name string `json:"name,omitempty"`
+}
+
+// SaveFileAttachment is a request to durably commit one file verbatim.
+type SaveFileAttachment struct {
+	// Data holds the exact file bytes.
+	Data []byte `json:"-"`
+	// Name is an optional browser/provider display name; it is never
+	// interpreted as a path.
+	Name string `json:"name,omitempty"`
+}
+
+// SaveFileStreamAttachment is a request to durably commit one file from
+// bounded byte chunks. Providers must not retain the complete sequence in
+// memory (Go adaptation: the Node AsyncIterable becomes an io.Reader).
+type SaveFileStreamAttachment struct {
+	// Data streams the exact file bytes in order.
+	Data io.Reader `json:"-"`
+	// Name is an optional display name; it is never interpreted as a path.
+	Name string `json:"name,omitempty"`
 }

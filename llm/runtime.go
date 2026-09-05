@@ -187,6 +187,20 @@ type Runtime struct {
 	// user settings section).
 	configurable      map[string]ConfigurableProvider
 	configurableOrder []string
+	// fileReadPath resolves one durable file reference's current
+	// execution-world read path for handle-text projection (official
+	// ctx.get('attachments').fileHostPath + fs.processPathFromHostPath,
+	// composed at the wiring layer; nil degrades every occurrence to the
+	// no-path handle).
+	fileReadPath func(attachmentID string) string
+}
+
+// SetFileReadPathResolver installs the execution-world file read-path
+// resolver used by handle-text projection.
+func (rt *Runtime) SetFileReadPathResolver(resolver func(attachmentID string) string) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.fileReadPath = resolver
 }
 
 // ConfigurableProvider declares one provider route whose connection facts
@@ -586,6 +600,20 @@ func (rt *Runtime) runHooks(options GenerateOptions, prepared *PreparedCall) ite
 	return next(options)
 }
 
+// projectFiles replaces every durable file occurrence with deterministic
+// handle text before adapter dispatch (unconditional: no provider receives
+// files natively).
+func (rt *Runtime) projectFiles(options GenerateOptions) GenerateOptions {
+	if !ContentHasFileInMessages(options.Messages) {
+		return options
+	}
+	rt.mu.Lock()
+	resolver := rt.fileReadPath
+	rt.mu.Unlock()
+	options.Messages = ProjectFilesToText(options.Messages, resolver)
+	return options
+}
+
 // adapterStream is the final adapter boundary: adapter selection, dispatch,
 // and iteration failures become one terminal failure chunk; a consumer
 // stopping iteration (yield false) ends the sequence without a terminal
@@ -593,6 +621,7 @@ func (rt *Runtime) runHooks(options GenerateOptions, prepared *PreparedCall) ite
 func (rt *Runtime) adapterStream(options GenerateOptions, prepared *PreparedCall) iter.Seq[StreamChunk] {
 	return func(yield func(StreamChunk) bool) {
 		aborted := options.aborted()
+		options = rt.projectFiles(options)
 		if prepared != nil {
 			if err := prepared.claim(options); err != nil {
 				yield(adapterFailureChunk(err, aborted))

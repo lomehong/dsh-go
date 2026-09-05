@@ -35,6 +35,23 @@ type Store interface {
 	ReadImageRequest(ref ImageAttachmentRef, policy ImageRequestPolicy) (RequestImageAttachment, error)
 }
 
+// FileStore is the verbatim generic-file face of the attachment service
+// (official AttachmentStore file half, 0.1.3-alpha.1). Files carry no
+// admission limits: any byte content and length is admissible, because the
+// file's bytes are exactly what was uploaded.
+type FileStore interface {
+	// SaveFile durably commits one file byte-for-byte before its owning
+	// session event is appended.
+	SaveFile(input SaveFileAttachment) (FileAttachmentRef, error)
+	// SaveFileStream commits one file from bounded chunks without retaining
+	// the whole sequence in memory.
+	SaveFileStream(input SaveFileStreamAttachment) (FileAttachmentRef, error)
+	// FileHostPath locates the verbatim stored object in the harness host
+	// filesystem; ok is false when this backend is not host-file-backed. An
+	// invalid durable reference fails loud.
+	FileHostPath(ref FileAttachmentRef) (path string, ok bool, err error)
+}
+
 // ValidateImageBatch enforces the base-store batch admission policy: count
 // and aggregate-byte limits, then media-type membership per member.
 func ValidateImageBatch(limits ImageAttachmentLimits, inputs []SaveImageAttachment) error {
@@ -65,6 +82,33 @@ func ValidateImageBatch(limits ImageAttachmentLimits, inputs []SaveImageAttachme
 
 // decodeBase64 decodes one upload payload while rejecting non-canonical
 // base64 forms.
+// decodeCanonicalBase64 decodes one upload payload while rejecting
+// non-canonical base64 forms; the empty policy distinguishes images
+// (reject) from files (a zero-byte upload is valid).
+func decodeCanonicalBase64(data, empty, code string) ([]byte, error) {
+	decoded, err := base64.StdEncoding.DecodeString(data)
+	if (len(data) == 0 && empty == "reject") || err != nil || base64.StdEncoding.EncodeToString(decoded) != data {
+		message := "Image upload is not canonical base64."
+		if code == CodeInvalidFileBase64 {
+			message = "File upload is not canonical base64."
+		}
+		return nil, NewAttachmentError(message, code)
+	}
+	return decoded, nil
+}
+
+// AdmitEncodedFile admits one wire file upload: enforce canonical base64
+// (an empty file is a valid zero-byte payload), then delegate verbatim
+// commit to Store.SaveFile. The shared entry for every RPC endpoint
+// accepting browser file uploads (official admitEncodedFile).
+func AdmitEncodedFile(attachments FileStore, file EncodedFileAttachment) (FileAttachmentRef, error) {
+	data, err := decodeCanonicalBase64(file.Data, "accept", CodeInvalidFileBase64)
+	if err != nil {
+		return FileAttachmentRef{}, err
+	}
+	return attachments.SaveFile(SaveFileAttachment{Data: data, Name: file.Name})
+}
+
 func decodeBase64(data string) ([]byte, error) {
 	decoded, err := base64.StdEncoding.DecodeString(data)
 	if err != nil || len(data) == 0 || base64.StdEncoding.EncodeToString(decoded) != data {
