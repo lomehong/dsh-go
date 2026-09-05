@@ -7,6 +7,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -230,6 +231,21 @@ func serveWeb(app *boot.App, anchor string, host string, port string, logger cor
 		return err
 	}
 	mounted.SetUnaryHandler(gw.UnaryHandler())
+
+	// The raw-byte file upload route (official /api/session/uploadFileBinary,
+	// owned by the composed file-upload service): the exact claim beats the
+	// frontend fallback for this path.
+	if uploadsValue := app.Root().Get("fileUploads"); uploadsValue != nil {
+		if uploads, ok := uploadsValue.(*gateway.FileUploads); ok {
+			handler := uploads.HandleHTTP()
+			if _, err := registry.Register(webserver.Route{
+				Kind: webserver.KindExact, Path: "/api/session/uploadFileBinary",
+				Handler: func(w http.ResponseWriter, r *http.Request) error { handler(w, r); return nil },
+			}); err != nil {
+				return err
+			}
+		}
+	}
 
 	// The browser handoff fires only after mount+listen: a mid-composition
 	// open hits the unmounted router (404). The web-app startup row records

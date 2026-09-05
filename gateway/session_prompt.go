@@ -194,8 +194,20 @@ func (c *SessionController) Prompt(ctx context.Context, request map[string]any) 
 			}
 			blocks = append(blocks, admitted...)
 		case "file":
-			return nil, wrapGatewayError("session/attachment-invalid", "session/prompt", "", nil,
-				"file uploads are not composed on this deployment")
+			uploads := c.uploads()
+			if uploads == nil {
+				return nil, wrapGatewayError("session/attachment-invalid", "session/prompt", "", nil,
+					"file uploads are not composed on this deployment")
+			}
+			ref, resolveErr := uploads.Resolve(live, part.ReceiptID)
+			if resolveErr != nil {
+				return nil, wrapGatewayError("session/attachment-invalid", "session/prompt", "", resolveErr, "%v", resolveErr)
+			}
+			// The durable file block: name/bytes ride the reference (the
+			// provider-side projection turns it into read-handle text).
+			blocks = append(blocks, llm.ContentBlock{Type: llm.BlockFile, Attachment: map[string]any{
+				"attachmentId": ref.AttachmentID, "name": ref.Name, "bytes": ref.Bytes,
+			}})
 		}
 	}
 

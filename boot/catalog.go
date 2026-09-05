@@ -1141,8 +1141,46 @@ var builders = map[string]pluginBuilder{
 					Sessions:    func() any { return ctx.Get(ServiceSessions) },
 					Titles:      func() any { return ctx.Get(ServiceSessionTitle) },
 					Attachments: func() any { return ctx.Get(ServiceAttachments) },
+					Uploads:     func() any { return ctx.Get("fileUploads") },
 					DefaultCwd:  defaultCwd,
 				})
+				// The staged file-upload service + the fileReferences Remote
+				// namespace: both need the live agent plane, so they compose
+				// through the delayed agent injection. The file store is an
+				// optional read — a profile without dsh-attachment-local
+				// keeps the prompt's honest file-part refusal.
+				if err := ctx.Inject([]string{ServiceAgents}, func(c *cordis.Context) error {
+					agents := c.Get(ServiceAgents).(*agent.AgentRegistry)
+					var fileStore attachment.FileStore
+					if storeValue := c.Get(ServiceAttachments); storeValue != nil {
+						if store, ok := storeValue.(attachment.FileStore); ok {
+							fileStore = store
+						}
+					}
+					if fileStore != nil {
+						uploads := gateway.NewFileUploads(fileStore, agents)
+						ctx.Provide("fileUploads", uploads)
+						if _, exists := registry.GetPackage("file-uploads", typert.FaceHost); !exists {
+							if _, err := registry.Register(uploads.Contribution()); err != nil {
+								return fmt.Errorf("api-gateway: file uploads controller: %w", err)
+							}
+						}
+					}
+					if references, ok := c.Get(ServiceFileReference).(*filereference.Service); ok && references != nil {
+						referencesController := gateway.NewSessionFileReferences(
+							func() any { return ctx.Get(ServiceFileReference) },
+							func() *agent.AgentRegistry { return ctx.Get(ServiceAgents).(*agent.AgentRegistry) },
+						)
+						if _, exists := registry.GetPackage("session-file-references", typert.FaceHost); !exists {
+							if _, err := registry.Register(referencesController.Contribution()); err != nil {
+								return fmt.Errorf("api-gateway: file references controller: %w", err)
+							}
+						}
+					}
+					return nil
+				}); err != nil {
+					return fmt.Errorf("api-gateway: file uploads wiring: %w", err)
+				}
 				ctx.Provide("sessionController", sessionController)
 				// The sessionListMetadata projection unit (official
 				// api-session-controller list projection) registers only

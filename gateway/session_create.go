@@ -47,6 +47,9 @@ type SessionCreateDeps struct {
 	// Attachments admits prompt image content (session/prompt); an absent
 	// store answers the honest attachment-invalid wording.
 	Attachments func() any
+	// Uploads resolves staged file-upload receipts for prompt file parts;
+	// an absent service answers the honest attachment-invalid wording.
+	Uploads func() any
 	// DefaultCwd is the project directory used when create names neither a
 	// workspace nor a cwd (official ApiSessionCommands defaultCwd).
 	DefaultCwd string
@@ -74,7 +77,22 @@ func (c *SessionController) EnableCreate(deps SessionCreateDeps) {
 	if deps.Attachments == nil {
 		deps.Attachments = func() any { return nil }
 	}
+	if deps.Uploads == nil {
+		deps.Uploads = func() any { return nil }
+	}
 	c.createDeps = &deps
+}
+
+// uploads resolves the composed staged-file-upload service, or nil when
+// absent (prompt file parts then answer the honest refusal).
+func (c *SessionController) uploads() *FileUploads {
+	if c.createDeps == nil {
+		return nil
+	}
+	if uploads, ok := c.createDeps.Uploads().(*FileUploads); ok && uploads != nil {
+		return uploads
+	}
+	return nil
 }
 
 // attachmentStore resolves the composed attachment store, or nil when
