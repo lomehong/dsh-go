@@ -23,7 +23,7 @@ func newHarness(t testingTB, rgPath string) (*tools.ToolRuntime, *systemprompt.S
 	}
 	caps := DefaultCaps()
 	caps.RGPath = rgPath
-	undo, err := Register(runtime, prompt, root, caps)
+	undo, err := Register(runtime, prompt, root, caps, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

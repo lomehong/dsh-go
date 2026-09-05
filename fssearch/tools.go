@@ -1,6 +1,8 @@
 package fssearch
 
 import (
+	"strings"
+
 	"dshgo/cordis"
 	"dshgo/llm"
 	"dshgo/systemprompt"
@@ -27,11 +29,27 @@ func toString(value any) string {
 	return ""
 }
 
+// savedToFromOutcome reads the canonical spill locator the execute body
+// persisted for an over-cap result.
+func savedToFromOutcome(outcome map[string]any) *SpillRef {
+	raw, ok := outcome["savedTo"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	locator, _ := raw["locator"].(string)
+	hint, _ := raw["retrievalHint"].(string)
+	if locator == "" {
+		return nil
+	}
+	return &SpillRef{Locator: locator, RetrievalHint: hint}
+}
+
 // Register installs the glob and grep tools (and their system-prompt
 // guidance) on the composed registries. Execution uses the ctx's
-// subprocess service. The returned undo unregisters both tools and
-// disposes the prompt sections.
-func Register(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt, ctx *cordis.Context, caps SearchCaps) (func(), error) {
+// subprocess service. The spill sink persists oversized complete results
+// (nil keeps the could-not-save recovery wording). The returned undo
+// unregisters both tools and disposes the prompt sections.
+func Register(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt, ctx *cordis.Context, caps SearchCaps, sink *SpillSink) (func(), error) {
 	if caps.GlobMaxResults <= 0 {
 		return nil, errArgs("globMaxResults must be positive")
 	}
@@ -50,11 +68,11 @@ func Register(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt, ctx
 	if caps.TimeoutMs <= 0 {
 		return nil, errArgs("timeoutMs must be positive")
 	}
-	undoGlob, err := registerGlob(runtime, prompt, ctx, caps)
+	undoGlob, err := registerGlob(runtime, prompt, ctx, caps, sink)
 	if err != nil {
 		return nil, err
 	}
-	undoGrep, err := registerGrep(runtime, prompt, ctx, caps)
+	undoGrep, err := registerGrep(runtime, prompt, ctx, caps, sink)
 	if err != nil {
 		undoGlob()
 		return nil, err
@@ -97,7 +115,7 @@ func sectionOrUndo(prompt *systemprompt.SystemPrompt, section systemprompt.Promp
 	return undo, undo, nil
 }
 
-func registerGlob(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt, ctx *cordis.Context, caps SearchCaps) (func(), error) {
+func registerGlob(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt, ctx *cordis.Context, caps SearchCaps, sink *SpillSink) (func(), error) {
 	undo, rollback, err := sectionOrUndo(prompt, systemprompt.PromptSection{
 		Name:  "tool:glob",
 		Order: systemprompt.OrderToolGlob,
@@ -127,6 +145,14 @@ func registerGlob(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt,
 				Properties: map[string]tools.PropSpec{
 					"root":  {ValueSchemaSpec: tools.ValueSchemaSpec{Type: "string"}, Required: true},
 					"paths": {ValueSchemaSpec: tools.ValueSchemaSpec{Type: "array", Items: &tools.ValueSchemaSpec{Type: "string"}}, Required: true},
+					"savedTo": {ValueSchemaSpec: tools.ValueSchemaSpec{
+						Type:                 "object",
+						AdditionalProperties: boolPtr(false),
+						Properties: map[string]tools.PropSpec{
+							"locator":       {ValueSchemaSpec: tools.ValueSchemaSpec{Type: "string"}, Required: true},
+							"retrievalHint": {ValueSchemaSpec: tools.ValueSchemaSpec{Type: "string"}, Required: true},
+						},
+					}},
 				},
 			},
 			Render: func(args map[string]any, value any) []llm.ContentBlock {
@@ -143,7 +169,7 @@ func registerGlob(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt,
 						}
 					}
 				}
-				return textBlocks(RenderGlobPaths(paths, caps, root, nil))
+				return textBlocks(RenderGlobPaths(paths, caps, root, savedToFromOutcome(outcome)))
 			},
 		},
 		Execute: func(args map[string]any, exec *tools.ToolRunContext) (any, error) {
@@ -167,7 +193,15 @@ func registerGlob(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt,
 			for _, path := range paths {
 				canonical = append(canonical, path)
 			}
-			return map[string]any{"root": root, "paths": canonical}, nil
+			outcome := map[string]any{"root": root, "paths": canonical}
+			// Over-cap results persist their complete sorted list: the render
+			// footer reports the recovery locator instead of could-not-save.
+			if len(paths) > caps.GlobMaxResults {
+				if savedTo := sink.SaveFullResult(exec.Signal, exec, "glob", "glob-result.txt", strings.Join(paths, "\n")); savedTo != nil {
+					outcome["savedTo"] = map[string]any{"locator": savedTo.Locator, "retrievalHint": savedTo.RetrievalHint}
+				}
+			}
+			return outcome, nil
 		},
 	})
 	if err != nil {
@@ -188,7 +222,7 @@ func grepDescription(caps SearchCaps) string {
 		"Use read on a matched file for surrounding context."
 }
 
-func registerGrep(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt, ctx *cordis.Context, caps SearchCaps) (func(), error) {
+func registerGrep(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt, ctx *cordis.Context, caps SearchCaps, sink *SpillSink) (func(), error) {
 	undo, rollback, err := sectionOrUndo(prompt, systemprompt.PromptSection{
 		Name:  "tool:grep",
 		Order: systemprompt.OrderToolGrep,
@@ -231,6 +265,14 @@ func registerGrep(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt,
 							},
 						},
 					}, Required: true},
+					"savedTo": {ValueSchemaSpec: tools.ValueSchemaSpec{
+						Type:                 "object",
+						AdditionalProperties: boolPtr(false),
+						Properties: map[string]tools.PropSpec{
+							"locator":       {ValueSchemaSpec: tools.ValueSchemaSpec{Type: "string"}, Required: true},
+							"retrievalHint": {ValueSchemaSpec: tools.ValueSchemaSpec{Type: "string"}, Required: true},
+						},
+					}},
 				},
 			},
 			Render: func(args map[string]any, value any) []llm.ContentBlock {
@@ -239,7 +281,7 @@ func registerGrep(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt,
 					return textBlocks(toString(value))
 				}
 				kept, seen, truncated := retainFromValue(outcome, caps)
-				return textBlocks(FormatRetainedGrep(kept, seen, truncated, nil))
+				return textBlocks(FormatRetainedGrep(kept, seen, truncated, savedToFromOutcome(outcome)))
 			},
 		},
 		Execute: func(args map[string]any, exec *tools.ToolRunContext) (any, error) {
@@ -266,7 +308,19 @@ func registerGrep(runtime *tools.ToolRuntime, prompt *systemprompt.SystemPrompt,
 					"line":       raw.Line,
 				})
 			}
-			return map[string]any{"matches": matches}, nil
+			outcome := map[string]any{"matches": matches}
+			// A capped result persists its complete formatted match list: the
+			// footer reports the recovery locator instead of could-not-save.
+			if len(parsed) > caps.GrepMaxMatches {
+				full := make([]GrepMatch, 0, len(parsed))
+				for _, raw := range parsed {
+					full = append(full, GrepMatch{Path: toWorkdirRelative(raw.Path, run.Workdir), LineNumber: raw.LineNumber, Line: raw.Line})
+				}
+				if savedTo := sink.SaveFullResult(exec.Signal, exec, "grep", "grep-result.txt", FormatGrepOutput(full, len(full), false, nil)); savedTo != nil {
+					outcome["savedTo"] = map[string]any{"locator": savedTo.Locator, "retrievalHint": savedTo.RetrievalHint}
+				}
+			}
+			return outcome, nil
 		},
 	})
 	if err != nil {

@@ -3719,7 +3719,17 @@ var batchThreeBuilders = map[string]pluginBuilder{
 				if candidate := ctx.Get(ServiceSystemPrompt); candidate != nil {
 					prompt = candidate.(*systemprompt.SystemPrompt)
 				}
-				undo, err := fssearch.Register(ctx.Get(ServiceTools).(*tools.ToolRuntime), prompt, ctx, caps)
+				// The complete-result spill sink: overflow results persist to
+				// the composed spill store and the footer reports the
+				// recovery locator; without the store the could-not-save
+				// wording renders (optional read).
+				var sink *fssearch.SpillSink
+				if spillValue := ctx.Get("spillStore"); spillValue != nil {
+					if spillStore, ok := spillValue.(spill.Store); ok && spillStore != nil {
+						sink = fssearch.NewSpillSink(spillStore, nil)
+					}
+				}
+				undo, err := fssearch.Register(ctx.Get(ServiceTools).(*tools.ToolRuntime), prompt, ctx, caps, sink)
 				if err != nil {
 					return err
 				}
