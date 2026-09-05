@@ -13,7 +13,7 @@ clone the sync ran against.
 
 ## Regenerate
 
-    pwsh scripts/sync-frontend.ps1 -Monorepo E:\code\nodejs\deepseek-harness
+    pwsh scripts/sync-frontend.ps1 -Monorepo E:\Development\Code\nodejs\deepseek-harness
 
 The sync copies apps/web and every @deepseek-ai package in the web-app
 dependency closure (source only: lib/, dist/, node_modules stripped), then

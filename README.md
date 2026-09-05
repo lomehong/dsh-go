@@ -30,7 +30,7 @@ TEMP/TMP 必须为长路径（8.3 短路径会破坏 canonical 化断言，用�
 
 前端保留官方 TypeScript 栈（Owner 裁决），Go 宿主只消费 wire。两条同步路径：
 
-1. **源码 fork**（`frontend/`，随本仓走）：`scripts/sync-frontend.ps1 -Monorepo E:\code\nodejs\deepseek-harness`
+1. **源码 fork**（`frontend/`，随本仓走）：`scripts/sync-frontend.ps1 -Monorepo E:\Development\Code\nodejs\deepseek-harness`
    拷贝官方 apps/web + web-app 依赖闭包源码（84 包 @deepseek-ai，去 node_modules/lib/dist），
    写 `frontend/UPSTREAM.md` 钉版（上游 commit + tag + 时间戳 + 包数）。
 2. **构建产物**（`webassets/`，Go 服务直接读）：`scripts/sync-webassets.ps1 -Monorepo …`

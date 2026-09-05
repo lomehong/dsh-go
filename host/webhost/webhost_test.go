@@ -2,6 +2,7 @@ package webhost
 
 import (
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -86,9 +87,23 @@ func TestServeStaticAssetWithMime(t *testing.T) {
 	if rec.Body.String() != "console.log(1)" {
 		t.Fatalf("body = %q", rec.Body.String())
 	}
-	if !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/javascript") {
-		t.Fatalf("mime = %q", rec.Header().Get("Content-Type"))
+	// The asset must carry exactly the platform MIME registry's verdict for
+	// the extension — contentType forwards mime.TypeByExtension verbatim.
+	// The registry itself evolves (the Go builtin moved .js from
+	// application/javascript to text/javascript in Go 1.20; Windows adds
+	// per-machine overrides), so the honest contract is registry parity,
+	// never a pinned string.
+	if got, want := rec.Header().Get("Content-Type"), platformMime(".js"); got != want {
+		t.Fatalf("mime = %q, want the platform registry verdict %q", got, want)
 	}
+}
+
+// platformMime mirrors webhost.contentType's lookup for one extension.
+func platformMime(ext string) string {
+	if t := mime.TypeByExtension(ext); t != "" {
+		return t
+	}
+	return "application/octet-stream"
 }
 
 func TestSpaFallbackReturnsIndexForExtensionlessPaths(t *testing.T) {

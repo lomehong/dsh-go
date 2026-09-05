@@ -20,7 +20,12 @@ func upstreamCloneCandidates() []string {
 	if override := os.Getenv("DSH_UPSTREAM_CLONE"); override != "" {
 		return []string{override}
 	}
-	return []string{`E:\code\nodejs\deepseek-harness`}
+	return []string{
+		// The clone moved from the historical E:\code layout; both homes stay
+		// candidates so a checkout at either location keeps the guard live.
+		`E:\Development\Code\nodejs\deepseek-harness`,
+		`E:\code\nodejs\deepseek-harness`,
+	}
 }
 
 // upstreamHead returns the clone's current HEAD commit, or "" when no clone

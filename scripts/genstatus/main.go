@@ -70,10 +70,25 @@ func run() error {
 		}
 	}
 
-	// baseCatalogTotal is the official base cordis.patch.yml unique-name
-	// count the wired figure is reported against; it moves only when the
-	// upstream base roster moves.
-	const baseCatalogTotal = 85
+	// Official base roster facts come from the guard's testdata copy — the
+	// same file the composition guard parses — so the ledger and the guard
+	// can never disagree about the upstream roster. The retired "wired / 85"
+	// fraction mixed a full-catalog numerator with a base denominator; the
+	// coverage authority is the composition guard, the ledger reports the
+	// raw sets.
+	rosterData, readErr := os.ReadFile(filepath.Join(root, "boot", "testdata", "official-base.cordis.patch.yml"))
+	if readErr != nil {
+		return readErr
+	}
+	rosterNameRe := regexp.MustCompile(`^\s*name:\s+['"]?(@deepseek-ai/[^'"\s]+)`)
+	rosterRows := 0
+	rosterNames := map[string]bool{}
+	for _, line := range strings.Split(string(rosterData), "\n") {
+		if m := rosterNameRe.FindStringSubmatch(line); m != nil {
+			rosterRows++
+			rosterNames[m[1]] = true
+		}
+	}
 	catalogData, readErr := os.ReadFile(filepath.Join(root, "boot", "catalog.go"))
 	if readErr != nil {
 		return readErr
@@ -93,7 +108,8 @@ func run() error {
 		fmt.Sprintf("- 工具链：%s / %s", runtime.Version(), runtime.GOOS+"/"+runtime.GOARCH),
 		fmt.Sprintf("- 包：%d（含测试 %d，cmd 入口不计测试）", packages, withTests),
 		fmt.Sprintf("- 行为测试函数：%d", tests),
-		fmt.Sprintf("- catalog 接线：%d / %d（base cordis.patch.yml 唯一名为分母）", wired, baseCatalogTotal),
+		fmt.Sprintf("- catalog 接线键：%d（boot/catalog.go 顶层 builder 键，@deepseek-ai/ 前缀）", wired),
+		fmt.Sprintf("- 官方 base 名册：%d 行 / %d 唯一名（boot/testdata 逐字随上游 bundle 同步）", rosterRows, len(rosterNames)),
 		fmt.Sprintf("- 生成时间：见 git log（由 `go run ./scripts/genstatus` 生成）"),
 	}, "\n")
 
