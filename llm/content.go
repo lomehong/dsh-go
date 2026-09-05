@@ -188,3 +188,12 @@ func ContentHasFileInMessages(messages []Message) bool {
 	}
 	return false
 }
+
+// FileAttachmentRef is the typed durable file reference shape the
+// attachment service publishes (mirrored here so the meter and runtime need
+// no attachment dependency).
+type FileAttachmentRef struct {
+	AttachmentID string `json:"attachmentId"`
+	Name         string `json:"name"`
+	Bytes        int    `json:"bytes"`
+}

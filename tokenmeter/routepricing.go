@@ -46,39 +46,75 @@ type PricedSurface struct {
 // price, so provider-neutral behavior is unchanged. A pricing that answers a
 // different occurrence count than it was asked fails loud — misalignment
 // would silently misprice nodes.
-func PriceSurface(nodes []MeterSurfaceNode, pricing ImageRequestPricing) (PricedSurface, error) {
-	if pricing == nil {
+func PriceSurface(nodes []MeterSurfaceNode, pricing ImageRequestPricing, fileText func(ref any) string) (PricedSurface, error) {
+	if pricing == nil && fileText == nil {
 		return heuristicSurface(nodes), nil
 	}
+	hasFiles := fileText != nil && nodesSomeFiles(nodes)
 	var images []any
+	if pricing != nil {
+		for _, node := range nodes {
+			images = append(images, node.Images...)
+		}
+		if len(images) == 0 {
+			return fileAwareSurface(nodes, fileText, hasFiles), nil
+		}
+		prices := pricing.PriceImages(images)
+		if len(prices) != len(images) {
+			return PricedSurface{}, fmt.Errorf(
+				"token meter: route image pricing answered %d prices for %d occurrences", len(prices), len(images))
+		}
+		cursor := 0
+		surfaceTokens := int64(0)
+		publicNodes := make([]TokenSurfaceNode, 0, len(nodes))
+		for _, node := range nodes {
+			tokens := node.HeuristicTokens
+			if len(node.Images) > 0 {
+				tokens = node.ImageFreeTokens
+				for range node.Images {
+					price := prices[cursor]
+					cursor++
+					tokens += price.VisualTokens + EstimateContent([]llm.ContentBlock{{Type: "text", Text: price.Text}})
+				}
+			}
+			if hasFiles && len(node.Files) > 0 {
+				for _, file := range node.Files {
+					tokens += EstimateContent([]llm.ContentBlock{{Type: "text", Text: fileText(file)}})
+				}
+			}
+			surfaceTokens += tokens
+			publicNodes = append(publicNodes, TokenSurfaceNode{Seq: node.Seq, Tokens: tokens, HeuristicTokens: node.HeuristicTokens})
+		}
+		return PricedSurface{Nodes: publicNodes, SurfaceTokens: surfaceTokens}, nil
+	}
+	return fileAwareSurface(nodes, fileText, hasFiles), nil
+}
+
+func nodesSomeFiles(nodes []MeterSurfaceNode) bool {
 	for _, node := range nodes {
-		images = append(images, node.Images...)
+		if len(node.Files) > 0 {
+			return true
+		}
 	}
-	if len(images) == 0 {
-		return heuristicSurface(nodes), nil
-	}
-	prices := pricing.PriceImages(images)
-	if len(prices) != len(images) {
-		return PricedSurface{}, fmt.Errorf(
-			"token meter: route image pricing answered %d prices for %d occurrences", len(prices), len(images))
-	}
-	cursor := 0
+	return false
+}
+
+// fileAwareSurface prices file occurrences over the fixed heuristics when
+// only the file projection is mounted.
+func fileAwareSurface(nodes []MeterSurfaceNode, fileText func(ref any) string, hasFiles bool) PricedSurface {
 	surfaceTokens := int64(0)
 	publicNodes := make([]TokenSurfaceNode, 0, len(nodes))
 	for _, node := range nodes {
 		tokens := node.HeuristicTokens
-		if len(node.Images) > 0 {
-			tokens = node.ImageFreeTokens
-			for range node.Images {
-				price := prices[cursor]
-				cursor++
-				tokens += price.VisualTokens + EstimateContent([]llm.ContentBlock{{Type: "text", Text: price.Text}})
+		if hasFiles && len(node.Files) > 0 {
+			for _, file := range node.Files {
+				tokens += EstimateContent([]llm.ContentBlock{{Type: "text", Text: fileText(file)}})
 			}
 		}
 		surfaceTokens += tokens
 		publicNodes = append(publicNodes, TokenSurfaceNode{Seq: node.Seq, Tokens: tokens, HeuristicTokens: node.HeuristicTokens})
 	}
-	return PricedSurface{Nodes: publicNodes, SurfaceTokens: surfaceTokens}, nil
+	return PricedSurface{Nodes: publicNodes, SurfaceTokens: surfaceTokens}
 }
 
 // heuristicSurface is the no-pricing fast path: every node at its fixed

@@ -203,6 +203,48 @@ func (rt *Runtime) SetFileReadPathResolver(resolver func(attachmentID string) st
 	rt.fileReadPath = resolver
 }
 
+// FileRequestText resolves the exact text one durable file occurrence
+// contributes to every provider request in the current execution
+// environment (official fileRequestText): the same deterministic handle
+// text used at adapter dispatch. A reference is (attachmentId, name,
+// bytes); unknown shapes degrade to the no-path handle.
+func (rt *Runtime) FileRequestText(ref any) string {
+	rt.mu.Lock()
+	resolver := rt.fileReadPath
+	rt.mu.Unlock()
+	id, name, size, ok := fileRefParts(ref)
+	var path string
+	if ok && resolver != nil {
+		path = resolver(id)
+	}
+	return FileHandleText(id, name, size, path)
+}
+
+// fileRefParts decodes one durable file reference from the generic
+// attachment payload (map form rides the content blocks; typed form rides
+// the attachment service).
+func fileRefParts(ref any) (attachmentID, name string, bytes int, ok bool) {
+	switch typed := ref.(type) {
+	case map[string]any:
+		id, _ := typed["attachmentId"].(string)
+		display, _ := typed["name"].(string)
+		size := 0
+		if number, isNumber := typed["bytes"]; isNumber {
+			if parsed, err := numberToInt(number); err == nil {
+				size = parsed
+			}
+		}
+		if id == "" {
+			return "", "", 0, false
+		}
+		return id, display, size, true
+	case FileAttachmentRef:
+		return typed.AttachmentID, typed.Name, typed.Bytes, true
+	default:
+		return "", "", 0, false
+	}
+}
+
 // ConfigurableProvider declares one provider route whose connection facts
 // users configure through a settings section.
 type ConfigurableProvider struct {

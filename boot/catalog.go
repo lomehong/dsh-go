@@ -70,6 +70,7 @@ import (
 	"dshgo/session/projectioncache"
 	"dshgo/sessionlog"
 	"dshgo/sessionquery"
+	"dshgo/sessionstats"
 	"dshgo/sessionquerysqlite"
 	"dshgo/sessiontelemetry"
 	"dshgo/sessiontelemetryotel"
@@ -1135,6 +1136,16 @@ var builders = map[string]pluginBuilder{
 						return err
 					}
 					if err := ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(turnOutline), nil }); err != nil {
+						return err
+					}
+					// The sessionStats unit (official dsh-session-stats)
+					// folds whole-log turn/step counts and model wall-clock
+					// windows for the chat stats strip.
+					stats, err := registry.Register(sessionstats.SessionStatsProjection.Definition())
+					if err != nil {
+						return err
+					}
+					if err := ctx.Effect(func() (cordis.Disposer, error) { return cordis.Disposer(stats), nil }); err != nil {
 						return err
 					}
 					return nil
@@ -2801,7 +2812,18 @@ var batchThreeBuilders = map[string]pluginBuilder{
 						return err
 					}
 				}
-				ctx.Provide(ServiceTokenMeter, tokenmeter.NewMeter(nil))
+				meter := tokenmeter.NewMeter(nil)
+				// The request-time file projection rides the mounted llm
+				// runtime (official _fileRequestText over ctx.get('llm'));
+				// absent runtime keeps the heuristic price.
+				if runtimeAny := ctx.Get(ServiceLlm); runtimeAny != nil {
+					if runtime, ok := runtimeAny.(*llm.Runtime); ok {
+						meter.SetFileTextResolver(func(ref any) string {
+							return runtime.FileRequestText(ref)
+						})
+					}
+				}
+				ctx.Provide(ServiceTokenMeter, meter)
 				return nil
 			},
 		}

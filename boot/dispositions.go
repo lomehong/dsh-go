@@ -81,7 +81,7 @@ var Dispositions = map[string]string{
 	"@deepseek-ai/dsh-code-runtime-worker-thread": "T3-planned-skip (web-mode PTC code execution deferred; see DECISIONS)",
 	"@deepseek-ai/dsh-session-reference":          "T3-planned (sessionreference ported; catalog row pending)",
 	"@deepseek-ai/dsh-session-stats":              "T3-planned (sessionstats ported; catalog row pending)",
-	"@deepseek-ai/dsh-session-log-export":         "T3-planned (sessionlog ported; catalog row pending)",
+	"@deepseek-ai/dsh-session-log-export":         "frontend-domain (browser /export command + download dialog; the shared archive helpers port as sessionlog)",
 	// Delivered under Go packaging: the api-controller rows' Remote
 	// controllers live in the gateway package and compose through the
 	// apiGateway bundle row (r96d/e + r105-r112); the turn-outline

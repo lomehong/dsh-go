@@ -52,10 +52,17 @@ type Meter struct {
 	// routePricing resolves the routed model's image pricing, when the
 	// routed adapter declares one.
 	routePricing func(provider string, model string) ImageRequestPricing
+	// fileText resolves one durable file reference to its request-time
+	// handle text (nil: file occurrences keep their heuristic price).
+	fileText func(ref any) string
 }
 
 // NewMeter builds the meter. routePricing may be nil: every surface then
 // keeps its fixed heuristic price.
+// SetFileTextResolver installs the request-time file projection resolver
+// (official _fileRequestText over the mounted LLM service).
+func (m *Meter) SetFileTextResolver(resolver func(ref any) string) { m.fileText = resolver }
+
 func NewMeter(routePricing func(provider string, model string) ImageRequestPricing) *Meter {
 	return &Meter{
 		states:       map[*session.Session]*replayState{},
@@ -90,7 +97,7 @@ func (m *Meter) Measure(sess *session.Session, requestHeader *session.EpochHeade
 	if header != nil && m.routePricing != nil {
 		pricing = m.routePricing(header.Config.Provider, header.Config.Model)
 	}
-	surface, err := PriceSurface(state.surface, pricing)
+	surface, err := PriceSurface(state.surface, pricing, m.fileText)
 	if err != nil {
 		return Measurement{}, err
 	}
@@ -103,7 +110,7 @@ func (m *Meter) Measure(sess *session.Session, requestHeader *session.EpochHeade
 		// Matching headers share one route, so the anchored snapshot
 		// reprices under the same pricing as the current surface and the
 		// signed delta compares like with like.
-		anchorPriced, err := PriceSurface(anchor.nodes, pricing)
+		anchorPriced, err := PriceSurface(anchor.nodes, pricing, m.fileText)
 		if err != nil {
 			return Measurement{}, err
 		}

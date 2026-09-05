@@ -16,7 +16,7 @@ func TestPriceSurfaceWithoutPricingKeepsHeuristic(t *testing.T) {
 		t.Fatal("pricing must not be consulted without image occurrences")
 		return nil
 	})} {
-		surface, err := PriceSurface(nodes, pricing)
+		surface, err := PriceSurface(nodes, pricing, nil)
 		if err != nil {
 			t.Fatalf("price failed: %v", err)
 		}
@@ -46,7 +46,7 @@ func TestPriceSurfaceReplacesImageOccurrences(t *testing.T) {
 			{VisualTokens: 300, Text: "image two b"},
 		}
 	})
-	surface, err := PriceSurface(nodes, pricing)
+	surface, err := PriceSurface(nodes, pricing, nil)
 	if err != nil {
 		t.Fatalf("price failed: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestPriceSurfaceCountMismatchFailsLoud(t *testing.T) {
 	pricing := ImageRequestPricingFunc(func([]any) []ImagePrice {
 		return []ImagePrice{{VisualTokens: 1}}
 	})
-	_, err := PriceSurface(nodes, pricing)
+	_, err := PriceSurface(nodes, pricing, nil)
 	if err == nil || !strings.Contains(err.Error(), "answered 1 prices for 2 occurrences") {
 		t.Fatalf("count mismatch must fail loud, got %v", err)
 	}

@@ -21,6 +21,9 @@ type MeterSurfaceNode struct {
 	// Images are the durable image occurrences in message order; empty for
 	// image-free nodes.
 	Images []any
+	// Files are the durable file occurrences in message order; empty for
+	// file-free nodes.
+	Files []any
 }
 
 // SurfaceTokenPlan is one validated surface transition that has not mutated
@@ -62,11 +65,27 @@ func analyzeNode(seq int64, message *llm.Message) MeterSurfaceNode {
 	heuristicTokens := EstimateMessage(*message)
 	var images []any
 	imageStructuralTokens := collectImages(message.Content, &images)
+	var files []any
+	collectFiles(message.Content, &files)
 	return MeterSurfaceNode{
 		Seq:             seq,
 		HeuristicTokens: heuristicTokens,
 		ImageFreeTokens: heuristicTokens - imageStructuralTokens,
 		Images:          images,
+		Files:           files,
+	}
+}
+
+// collectFiles gathers durable file occurrences recursively (official
+// collectFiles: file blocks and nested tool-result content alike).
+func collectFiles(blocks []llm.ContentBlock, files *[]any) {
+	for _, block := range blocks {
+		switch block.Type {
+		case "file":
+			*files = append(*files, block.Attachment)
+		case "tool-result":
+			collectFiles(block.Content, files)
+		}
 	}
 }
 
