@@ -162,7 +162,15 @@ func (a *Adapter) Stream(options llm.GenerateOptions) iter.Seq[llm.StreamChunk] 
 			fail(err)
 			return
 		}
-		payload, err := json.Marshal(buildRequest(options, facts))
+		body, err := buildRequest(options, facts)
+		if err != nil {
+			// Projection failures (unsupported content, partial tool-call
+			// JSON) surface as the request's terminal failure — the honest
+			// request the model answers is never a silently-trimmed one.
+			fail(err)
+			return
+		}
+		payload, err := json.Marshal(body)
 		if err != nil {
 			fail(llm.NewLlmError("anthropic: request serialization failed", "INVALID_REQUEST", llm.LlmFailure{}))
 			return

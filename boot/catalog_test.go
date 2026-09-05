@@ -1,9 +1,13 @@
 package boot
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +18,7 @@ import (
 
 	"dshgo/agent"
 	"dshgo/agentloop"
+	"dshgo/attachment"
 	"dshgo/commands"
 	"dshgo/cordis"
 	"dshgo/cordis/loader"
@@ -1226,5 +1231,86 @@ func TestCatalogToolGoalRegistersControls(t *testing.T) {
 	}
 	if err := app.Shutdown(); err != nil {
 		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+// The commands row binds the composed attachment store to the composer-image
+// admission seam: a command declaring input.images admits encoded uploads
+// into durable references (the R7 residual — the production composition
+// never called SetImageAdmitter, so real image commands always settled the
+// unavailable wording). Caller-correctable admission failures settle as
+// gentle error results.
+func TestCommandsRowWiresImageAdmission(t *testing.T) {
+	home := t.TempDir()
+	root := cordis.NewRoot(cordis.Discard{})
+	app, err := Assemble(root, []loader.Entry{
+		{ID: "attachment-local", Name: "@deepseek-ai/dsh-attachment-local"},
+		{ID: "commands", Name: "@deepseek-ai/dsh-commands"},
+	}, NewCatalog(CatalogDeps{Logger: cordis.Discard{}, Home: home}))
+	if err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	defer func() {
+		if err := app.Shutdown(); err != nil {
+			t.Fatalf("shutdown: %v", err)
+		}
+	}()
+
+	if root.Get(ServiceAttachments) == nil {
+		t.Fatal("attachments service missing")
+	}
+	runtime := root.Get(ServiceCommands).(*commands.CommandRuntime)
+	var seen []commands.ImageAttachment
+	if _, err := runtime.Register(nil, commands.CommandDefinition{
+		Name:        "auditimg",
+		Description: "d",
+		Input:       &commands.CommandInputDescriptor{Hint: "describe", Images: true},
+		Handler: func(invocation commands.Invocation) (commands.CommandResult, error) {
+			seen = invocation.Attachments
+			return commands.CommandResult{Kind: commands.ResultSuccess}, nil
+		},
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	sess, err := session.NewDetached(session.SessionID("sess-cmd-image"), nil,
+		&session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, ID: session.SessionID("sess-cmd-image")}, 0)
+	if err != nil {
+		t.Fatalf("session: %v", err)
+	}
+
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatalf("encode fixture: %v", err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(buffer.Bytes())
+
+	execution, err := runtime.Execute(context.Background(), nil, sess, "/auditimg",
+		[]any{map[string]any{"mediaType": "image/png", "data": encoded}})
+	if err != nil || execution == nil {
+		t.Fatalf("execute = %v %v", execution, err)
+	}
+	if execution.Result.Kind != commands.ResultSuccess {
+		t.Fatalf("result = %+v", execution.Result)
+	}
+	if len(seen) != 1 {
+		t.Fatalf("attachments = %+v, want one admitted upload", seen)
+	}
+	ref, ok := seen[0].Reference.(attachment.ImageAttachmentRef)
+	if !ok || ref.MediaType != "image/png" || ref.Bytes == 0 || ref.Width != 2 {
+		t.Fatalf("reference = %#v", seen[0].Reference)
+	}
+	if seen[0].Block == nil || seen[0].Block.Type != llm.BlockImage {
+		t.Fatalf("block = %+v", seen[0].Block)
+	}
+
+	// A malformed upload shape settles as the caller-correctable gentle
+	// error result, never a thrown invocation.
+	execution, err = runtime.Execute(context.Background(), nil, sess, "/auditimg", []any{"img"})
+	if err != nil || execution == nil {
+		t.Fatalf("malformed execute = %v %v", execution, err)
+	}
+	if execution.Result.Kind != commands.ResultError || !strings.Contains(execution.Result.Text, "image 0") {
+		t.Fatalf("malformed result = %+v", execution.Result)
 	}
 }

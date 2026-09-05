@@ -9,6 +9,7 @@ package boot
 import (
 	"context"
 	"dshgo/agentdefaultmodel"
+	"dshgo/attachment"
 	"dshgo/attachment/local"
 	"encoding/json"
 	"errors"
@@ -329,12 +330,23 @@ var builders = map[string]pluginBuilder{
 		}
 	},
 
-	// The commands runtime: /commands register into it likewise.
+	// The commands runtime: /commands register into it likewise. The
+	// composer-image admission seam binds the composed attachment store
+	// (official: the commands entry reads ctx.attachments; the optional
+	// read keeps commands usable in attachment-less compositions — base
+	// order puts dsh-attachment-local ahead of this row, so the wired
+	// profiles always bind).
 	"@deepseek-ai/dsh-commands": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
 			Provide: []string{ServiceCommands},
 			Apply: func(ctx *cordis.Context, config any) error {
-				ctx.Provide(ServiceCommands, commands.NewCommandRuntime(deps.Logger))
+				runtime := commands.NewCommandRuntime(deps.Logger)
+				if storeValue := ctx.Get(ServiceAttachments); storeValue != nil {
+					if store, ok := storeValue.(attachment.Store); ok {
+						runtime.SetImageAdmitter(commandImageAdmitter(store))
+					}
+				}
+				ctx.Provide(ServiceCommands, runtime)
 				return nil
 			},
 		}
@@ -2640,6 +2652,75 @@ func decodeConfigBool(config any, key string, fallback bool) bool {
 		}
 	}
 	return fallback
+}
+
+// commandImageAdmitter binds the durable attachment store to the commands
+// runtime's composer-image seam (the official composition admits encoded
+// composer uploads through the shared batch admission). Caller-correctable
+// failures — an unparseable upload shape or an image admission rejection —
+// surface as commands.ImageAdmissionError so the invocation settles as a
+// gentle error result; storage faults stay loud.
+func commandImageAdmitter(store attachment.Store) commands.ImageAdmitter {
+	return func(images []any) ([]commands.ImageAttachment, error) {
+		uploads := make([]attachment.EncodedImageAttachment, 0, len(images))
+		for index, image := range images {
+			mediaType, data, name, err := decodeComposerImage(image)
+			if err != nil {
+				return nil, &commands.ImageAdmissionError{
+					Message: fmt.Sprintf("image %d: %v", index, err),
+					Code:    commands.AdmissionInvalidImage,
+				}
+			}
+			uploads = append(uploads, attachment.EncodedImageAttachment{MediaType: mediaType, Data: data, Name: name})
+		}
+		refs, err := attachment.AdmitEncodedImages(store, uploads)
+		if err != nil {
+			if attachment.IsImageAdmissionError(err) {
+				var attachmentErr *attachment.AttachmentError
+				if errors.As(err, &attachmentErr) {
+					return nil, &commands.ImageAdmissionError{Message: attachmentErr.Message, Code: commands.ImageAdmissionErrorCode(attachmentErr.Code)}
+				}
+			}
+			return nil, err
+		}
+		admitted := make([]commands.ImageAttachment, 0, len(refs))
+		for _, ref := range refs {
+			ref := ref
+			admitted = append(admitted, commands.ImageAttachment{
+				Reference: ref,
+				Block:     &llm.ContentBlock{Type: llm.BlockImage, Attachment: ref},
+			})
+		}
+		return admitted, nil
+	}
+}
+
+// decodeComposerImage reads one wire composer upload: mediaType (official
+// camelCase, snake_case/mimeType tolerated), base64 data, optional display
+// name.
+func decodeComposerImage(image any) (mediaType string, data string, name string, err error) {
+	fields, ok := image.(map[string]any)
+	if !ok {
+		return "", "", "", fmt.Errorf("image upload must be an object, got %T", image)
+	}
+	for _, key := range []string{"mediaType", "media_type", "mimeType"} {
+		if value, ok := fields[key].(string); ok && value != "" {
+			mediaType = value
+			break
+		}
+	}
+	if mediaType == "" {
+		return "", "", "", fmt.Errorf("missing mediaType")
+	}
+	if value, ok := fields["data"].(string); ok && value != "" {
+		data = value
+	} else {
+		return "", "", "", fmt.Errorf("missing data")
+	}
+	if value, ok := fields["name"].(string); ok {
+		name = value
+	}
+	return mediaType, data, name, nil
 }
 
 var batchThreeBuilders = map[string]pluginBuilder{

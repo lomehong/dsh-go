@@ -34,8 +34,10 @@ type wireRequest struct {
 
 // buildRequest projects the harness GenerateOptions onto the anthropic
 // messages wire: system rendered top-level, tool calls as tool_use blocks,
-// tool results as tool_result blocks.
-func buildRequest(options llm.GenerateOptions, facts *Options) wireRequest {
+// tool results as tool_result blocks. Projection failures (unsupported
+// content, partial tool-call JSON) fail the request — never a silent
+// message drop.
+func buildRequest(options llm.GenerateOptions, facts *Options) (wireRequest, error) {
 	maxTokens := facts.MaxTokens
 	if options.MaxTokens != nil && *options.MaxTokens > 0 {
 		maxTokens = *options.MaxTokens
@@ -56,7 +58,7 @@ func buildRequest(options llm.GenerateOptions, facts *Options) wireRequest {
 		}
 		wire, err := projectMessage(message)
 		if err != nil {
-			continue
+			return wireRequest{}, err
 		}
 		messages = append(messages, wire)
 	}
@@ -72,5 +74,5 @@ func buildRequest(options llm.GenerateOptions, facts *Options) wireRequest {
 		}
 		request.Tools = tools
 	}
-	return request
+	return request, nil
 }

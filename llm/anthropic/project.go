@@ -104,6 +104,24 @@ func projectMessage(message llm.Message) (wireMessage, error) {
 			blocks = append(blocks, projected)
 		case llm.BlockToolResult:
 			blocks = append(blocks, toolResultBlock(block))
+		case llm.BlockImage:
+			// Fail loud, never silently drop: a silent drop would replay a
+			// history the model never saw while read_image keeps producing
+			// durable image blocks (r139 audit finding over r137).
+			return wireMessage{}, llm.NewLlmError(
+				"The Anthropic messages adapter does not support image content yet; the multi-provider round landed the text/tool wire only.",
+				"UNSUPPORTED_CONTENT", llm.LlmFailure{})
+		case llm.BlockFile:
+			// File blocks must project to text (ProjectFilesToText) before
+			// adapter dispatch; reaching here means the projection seam was
+			// bypassed — refuse rather than erase.
+			return wireMessage{}, llm.NewLlmError(
+				"The Anthropic messages adapter does not accept file blocks; file content must project to text before dispatch.",
+				"UNSUPPORTED_CONTENT", llm.LlmFailure{})
+		default:
+			return wireMessage{}, llm.NewLlmError(
+				fmt.Sprintf("The Anthropic messages adapter does not support content block type %q.", block.Type),
+				"UNSUPPORTED_CONTENT", llm.LlmFailure{})
 		}
 	}
 	if len(blocks) == 0 {
