@@ -59,7 +59,15 @@ func (f *createFakeFactory) Create(ctx context.Context, options agent.CreateAgen
 	}
 	f.lastMeta = options.Meta
 	sess, err := f.store.Create(options.SessionID, session.CreateOptions{
-		HeaderMetadata: session.SessionHeader{Version: session.SESSION_FORMAT_VERSION, CWD: options.Meta.CWD, AgentPreset: options.Meta.AgentPreset},
+		Seed: options.Seed,
+		HeaderMetadata: session.SessionHeader{
+			Version:             session.SESSION_FORMAT_VERSION,
+			CWD:                 options.Meta.CWD,
+			AgentPreset:         options.Meta.AgentPreset,
+			ParentSession:       options.Meta.ParentSession,
+			IsSeeded:            options.Meta.IsSeeded,
+			InheritedEventCount: options.Meta.InheritedEventCount,
+		},
 	})
 	if err != nil {
 		return agent.AgentHandle{}, err
