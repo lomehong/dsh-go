@@ -238,6 +238,7 @@ workflow / typert / sdk / boot / jobs / interaction / guard 的 src 在 alpha.2 
 | r136 | llm-pi-ai providers 节点改 schemastery dict——修复"添加提供方"无法解析设置路径 | ✅ |
 | r137 | 多提供方适配器族——pi-ai 孪生行挂载 + anthropic-messages wire + providers dict schema 修正（+注册去重修复 ce91bde）；**遗留：anthropic 投影对 image/file 块静默丢弃（r139 审计发现，fail-loud 修复轮处理）** | ✅（遗留项入待续） |
 | r138 | pi-ai envelope 补 meta.default——修复 inheritedModels .meta.default 崩溃 | ✅ |
+| r139 | 审计修复轮（Owner 授权系统推进，a-d 四提交）：**a** 门禁可信——webhost MIME 断言改平台注册表对齐（test-rot）、守卫 v5 补 clone 新路径候选、guard 名册逐字同步上游 base+web-app（删自加 report 行、修 fetch 漂移与注释乱码）、genstatus 分母改程序化名册事实（85 行/84 唯一名）；**b** 账实复审清账——FINDINGS R7/R9、ROADMAP r48 清单标历史快照 + B6/B7 落地注 + r129-r138 补账、STATUS 过期行修正、处置/头注释如实化；**c** anthropic 投影 image/file/未知块 fail-loud（修 r137 静默丢图）+ R7 残余修复（commands 行挂生产 image admitter）+ acp/sdk/sdk-minimal 16 行处置（三档案从 import 响亮失败变带警组合）；**d** web 聊天回路核心——session.prompt（时区规范校验/回声去重/路由服务门/图片模态门与共享准入/steer-followup 分派/文件部分诚实拒绝）+ session.cancel（user cause + keepInbox）wire 注册 + 10 测 | ✅ |
 
 ## 待续轮次（依赖序，余量为增量特性而非对齐缺口；**r139 复审注**：第 1 条的"多提供方 pi-ai 孪生轮"已由 r135-r138 落地——picatalog 42 目录提供方 + openai-completions/responses + anthropic-messages wire + providers dict schema + envelope 修复）
 

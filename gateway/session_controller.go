@@ -276,6 +276,8 @@ func (c *SessionController) Contribution() typert.Contribution {
 			if c.createDeps != nil {
 				invocations = append(invocations,
 					descriptor("session.create", "create", "Create", requestParam),
+					descriptor("session.prompt", "prompt", "Prompt", requestParam),
+					descriptor("session.cancel", "cancel", "Cancel", requestParam),
 					descriptor("session.rename", "rename", "Rename", requestParam))
 			}
 			return invocations

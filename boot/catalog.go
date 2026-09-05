@@ -1135,12 +1135,13 @@ var builders = map[string]pluginBuilder{
 				)
 				defaultCwd, _ := os.Getwd()
 				sessionController.EnableCreate(gateway.SessionCreateDeps{
-					Workspaces: func() any { return ctx.Get(ServiceWorkspace) },
-					Agents:     func() any { return ctx.Get(ServiceAgents) },
-					Presets:    func() any { return ctx.Get(ServiceAgentPresets) },
-					Sessions:   func() any { return ctx.Get(ServiceSessions) },
-					Titles:     func() any { return ctx.Get(ServiceSessionTitle) },
-					DefaultCwd: defaultCwd,
+					Workspaces:  func() any { return ctx.Get(ServiceWorkspace) },
+					Agents:      func() any { return ctx.Get(ServiceAgents) },
+					Presets:     func() any { return ctx.Get(ServiceAgentPresets) },
+					Sessions:    func() any { return ctx.Get(ServiceSessions) },
+					Titles:      func() any { return ctx.Get(ServiceSessionTitle) },
+					Attachments: func() any { return ctx.Get(ServiceAttachments) },
+					DefaultCwd:  defaultCwd,
 				})
 				ctx.Provide("sessionController", sessionController)
 				// The sessionListMetadata projection unit (official

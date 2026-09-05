@@ -12,6 +12,7 @@ import (
 	"os"
 
 	"dshgo/agent"
+	"dshgo/attachment"
 	"dshgo/cordis"
 	"dshgo/identity"
 	"dshgo/llm"
@@ -43,6 +44,9 @@ type SessionCreateDeps struct {
 	Sessions func() any
 	// Titles renames a live session (the sessionTitle service).
 	Titles func() any
+	// Attachments admits prompt image content (session/prompt); an absent
+	// store answers the honest attachment-invalid wording.
+	Attachments func() any
 	// DefaultCwd is the project directory used when create names neither a
 	// workspace nor a cwd (official ApiSessionCommands defaultCwd).
 	DefaultCwd string
@@ -67,7 +71,22 @@ func (c *SessionController) EnableCreate(deps SessionCreateDeps) {
 	if deps.Titles == nil {
 		deps.Titles = func() any { return nil }
 	}
+	if deps.Attachments == nil {
+		deps.Attachments = func() any { return nil }
+	}
 	c.createDeps = &deps
+}
+
+// attachmentStore resolves the composed attachment store, or nil when
+// absent (the honest image-unavailable posture for session/prompt).
+func (c *SessionController) attachmentStore() attachment.Store {
+	if c.createDeps == nil {
+		return nil
+	}
+	if store, ok := c.createDeps.Attachments().(attachment.Store); ok && store != nil {
+		return store
+	}
+	return nil
 }
 
 // titles resolves the composed session-title service, or nil when absent.

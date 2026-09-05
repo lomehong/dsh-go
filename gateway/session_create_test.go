@@ -46,6 +46,9 @@ type createFakeFactory struct {
 	err      error
 	lastMeta agent.CreateAgentMeta
 	ids      []string
+	// driver overrides the installed driver when set (the prompt tests
+	// record deliveries through it).
+	driver agent.Driver
 }
 
 func (f *createFakeFactory) Create(ctx context.Context, options agent.CreateAgentOptions) (agent.AgentHandle, error) {
@@ -75,7 +78,11 @@ func (f *createFakeFactory) Create(ctx context.Context, options agent.CreateAgen
 			return agent.AgentHandle{}, err
 		}
 	}
-	built.SetDriver(createDriver{})
+	if f.driver != nil {
+		built.SetDriver(f.driver)
+	} else {
+		built.SetDriver(createDriver{})
+	}
 	f.ids = append(f.ids, string(options.SessionID))
 	if _, err := f.registry.Register(built); err != nil {
 		_ = agentCtx.Dispose()
