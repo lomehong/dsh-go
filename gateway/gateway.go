@@ -13,9 +13,10 @@
 // descriptor registration is itself the binding. Stream Remotes (the
 // WebSocket mux over gatewaystream), the forwarded-event transport bridge
 // (remote_events.go + the apiremotes allowlist), and the journal/follow
-// stream endpoints are landed (r61-r130); the open residual is the
-// $events/result answer path (browser answers back into the approval /
-// user-questions waterfalls) and event-source coverage for the remaining
+// stream endpoints are landed (r61-r130). The $events/result answer path is
+// landed (r139: the ResultRouter + the bridge's blocking answerers close the
+// loop from browser answer back into the approval / user-questions
+// waterfalls); the open residual is event-source coverage for the remaining
 // whitelisted bus events.
 package gateway
 
@@ -27,6 +28,7 @@ import (
 	"reflect"
 
 	"dshgo/cordis"
+	"dshgo/gatewaystream"
 	"dshgo/typert"
 )
 
@@ -115,6 +117,9 @@ type Gateway struct {
 	ctx      *cordis.Context
 	registry *typert.Registry
 	remote   remoteEventsState
+	// results routes the Client's $events/result answers to the pending
+	// waterfall deliveries (the bridge's blocking answerers).
+	results *gatewaystream.ResultRouter
 }
 
 // New binds the dispatcher to one Host context and its Typert registry.
@@ -122,11 +127,30 @@ func New(ctx *cordis.Context, registry *typert.Registry) *Gateway {
 	return &Gateway{
 		ctx:      ctx,
 		registry: registry,
+		results:  gatewaystream.NewResultRouter(),
 		remote: remoteEventsState{
 			clients: map[string]*RemoteEventClient{},
 			pending: map[string]*pendingRemoteEvent{},
 		},
 	}
+}
+
+// Results exposes the $events/result answer router for the event bridge.
+func (g *Gateway) Results() *gatewaystream.ResultRouter { return g.results }
+
+// HasEventClients reports whether any $events client generation is live:
+// the bridge's answer loop waits only when a browser can actually answer.
+func (g *Gateway) HasEventClients() bool {
+	g.remote.mu.Lock()
+	defer g.remote.mu.Unlock()
+	return len(g.remote.clients) > 0
+}
+
+// deliverEventResult routes one Client result to its pending waterfall
+// waiter. ok is false when the event is unknown (already settled or never
+// pending).
+func (g *Gateway) deliverEventResult(result gatewaystream.RemoteEventResult) bool {
+	return g.results.Deliver(result)
 }
 
 // Invoke resolves the current descriptor and Cordis Service for the call,

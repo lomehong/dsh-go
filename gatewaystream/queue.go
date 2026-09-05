@@ -69,6 +69,14 @@ func (q *RemoteEventQueue) End() {
 	q.mu.Unlock()
 }
 
+// Len reports the queued frame count without consuming: the drain-free
+// emptiness observation the bridge tests use.
+func (q *RemoteEventQueue) Len() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.frames)
+}
+
 // Next returns the next frame or a closed signal. The first bool reports a
 // frame; a false result with done=true means the queue ended.
 func (q *RemoteEventQueue) Next() (frame WireFrame, done bool) {

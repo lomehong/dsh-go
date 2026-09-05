@@ -199,6 +199,19 @@ func (g *Gateway) UnaryHandler() http.HandlerFunc {
 			// readiness gate consumes these host facts before any typert
 			// namespace resolves (official hostDescribeValueSchema).
 			value = legacyHostDescription()
+		} else if endpoint == gatewaystream.RemoteEventResultEndpoint {
+			// The Client answer to one pending $events waterfall (official
+			// gateway-internal unary endpoint): validate, route to the
+			// waiting bridge answerer, acknowledge.
+			result, parseErr := gatewaystream.ParseRemoteEventResult(args)
+			if parseErr != nil {
+				value, err = nil, wrapGatewayError("gateway/arguments-invalid", gatewaystream.RemoteEventResultEndpoint, "", parseErr, "%v", parseErr)
+			} else if g.deliverEventResult(result) {
+				value = map[string]any{"accepted": true}
+			} else {
+				value, err = nil, wrapGatewayError("gateway/not-found", gatewaystream.RemoteEventResultEndpoint, "eventId", nil,
+					"Remote event %q is not pending", result.EventID)
+			}
 		} else {
 			value, err = g.Invoke(r.Context(), InvokeRequest{
 				Namespace: namespace,

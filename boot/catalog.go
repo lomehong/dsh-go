@@ -1235,7 +1235,10 @@ var builders = map[string]pluginBuilder{
 				bus := agents.Events()
 				_, err := value.RegisterRemoteEvents(func(signal context.Context) gateway.RemoteEventDispatchIter {
 					queue := gatewaystream.NewRemoteEventQueue()
-					detach := gatewaystream.AttachForwardedEvents(queue, bus, agentScopeKey(agents))
+					detach := gatewaystream.AttachForwardedEventsWithOptions(queue, bus, agentScopeKey(agents), gatewaystream.BridgeExtras{
+						Router:     value.Results(),
+						HasClients: value.HasEventClients,
+					})
 					return &remoteEventBridgeIter{queue: queue, detach: detach, signal: signal}
 				}, gatewaystream.RemoteEventHostInfo{Home: dshHome()})
 				return err
