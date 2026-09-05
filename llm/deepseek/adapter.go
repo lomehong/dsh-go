@@ -240,7 +240,10 @@ func (a *Adapter) streamWithConnection(options llm.GenerateOptions, connection *
 			fail(err)
 			return
 		}
-		userID := a.config.ResolveUserID()
+		var userID string
+		if a.config.ResolveUserID != nil {
+			userID = a.config.ResolveUserID()
+		}
 		body, err := SerializeRequest(options, connection.Defaults)
 		if err != nil {
 			fail(err)

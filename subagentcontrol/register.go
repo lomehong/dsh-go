@@ -169,8 +169,12 @@ func renderEntries(rows []*listAgentsEntry) []llm.ContentBlock {
 	return []llm.ContentBlock{{Type: llm.BlockText, Text: string(encoded)}}
 }
 
-// Register installs send_message, interrupt_agent, and list_agents. The
-// returned disposer tears them down in reverse registration order.
+// Register installs send_message and interrupt_agent, plus list_agents when
+// a non-zero listing face is supplied. The upstream base mounts the control
+// row (send/interrupt) and the separate list-agents row as siblings, so the
+// combined registration must not double-claim the global list_agents name
+// when the dedicated row is present. The returned disposer tears the
+// registered tools down in reverse registration order.
 func Register(
 	runtime *tools.ToolRuntime,
 	subagents *subagent.SubagentRuntime,
@@ -315,14 +319,20 @@ func Register(
 		return nil, err
 	}
 
-	listUndo, err := RegisterListAgents(runtime, subagents, agents, listing)
-	if err != nil {
-		interruptUndo()
-		sendUndo()
-		return nil, err
+	var listUndo func()
+	if listing != (ListingDeps{}) {
+		undo, err := RegisterListAgents(runtime, subagents, agents, listing)
+		if err != nil {
+			interruptUndo()
+			sendUndo()
+			return nil, err
+		}
+		listUndo = undo
 	}
 	return func() {
-		listUndo()
+		if listUndo != nil {
+			listUndo()
+		}
 		interruptUndo()
 		sendUndo()
 	}, nil

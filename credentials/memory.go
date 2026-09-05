@@ -1,6 +1,7 @@
 package credentials
 
 import (
+	"os"
 	"errors"
 	"fmt"
 	"sort"
@@ -157,3 +158,61 @@ func (m *MemoryProvider) DeleteRecord(key Key) error {
 	}
 	return m.notifier.FanOut("credentials/record-updated", string(key))
 }
+
+// envWinsProvider layers the inherited process environment (read-only,
+// wins — official credentials-local trust order: `DEEPSEEK_API_KEY=… dsh`
+// is a CI user's explicit override) over a base provider-managed store.
+type envWinsProvider struct {
+	base *MemoryProvider
+}
+
+// NewEnvWinsProvider layers the process environment over the base memory
+// store with the official trust order: environment first, store second.
+func NewEnvWinsProvider(seed map[string]string) Provider {
+	return &envWinsProvider{base: NewMemoryProvider(seed)}
+}
+
+func (p *envWinsProvider) Resolve(ref Ref) (*Resolved, error) {
+	if ambient, ok := os.LookupEnv(string(ref)); ok && ambient != "" {
+		return &Resolved{Value: ambient, Source: "environment"}, nil
+	}
+	return p.base.Resolve(ref)
+}
+
+// Describe reports presence; the environment layer answers configured and
+// not writable (it is read-only and wins).
+func (p *envWinsProvider) Describe(ref Ref) (Info, error) {
+	if _, ok := os.LookupEnv(string(ref)); ok {
+		return Info{Configured: true, Source: "environment", Writable: false}, nil
+	}
+	return p.base.Describe(ref)
+}
+
+func (p *envWinsProvider) Set(ref Ref, value string) error {
+	if _, shadowed := os.LookupEnv(string(ref)); shadowed {
+		return NewCodedError("ENV_SHADOWED", fmt.Errorf("credential %q is shadowed by the inherited environment", string(ref)))
+	}
+	return p.base.Set(ref, value)
+}
+
+func (p *envWinsProvider) Unset(ref Ref) error { return p.base.Unset(ref) }
+
+func (p *envWinsProvider) ReadRecord(key Key) (Record, bool, error) {
+	return p.base.ReadRecord(key)
+}
+
+func (p *envWinsProvider) DescribeRecord(key Key) (RecordInfo, error) {
+	return p.base.DescribeRecord(key)
+}
+
+func (p *envWinsProvider) ListRecords() ([]RecordEntry, error) {
+	return p.base.ListRecords()
+}
+
+func (p *envWinsProvider) ModifyRecord(key Key, mutate func(current *Record) *Record) (*Record, error) {
+	return p.base.ModifyRecord(key, mutate)
+}
+
+func (p *envWinsProvider) DeleteRecord(key Key) error { return p.base.DeleteRecord(key) }
+
+func (p *envWinsProvider) Notifier() *Notifier { return p.base.Notifier() }

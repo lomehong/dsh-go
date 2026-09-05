@@ -721,6 +721,8 @@ func (rt *Runtime) drainPrepared(dispatch func(GenerateOptions) Seq, options Gen
 		}
 	}()
 	for chunk := range dispatch(options) {
+		if chunk.Type == ChunkFinish && chunk.Reason != nil {
+		}
 		if !yield(chunk) {
 			return
 		}

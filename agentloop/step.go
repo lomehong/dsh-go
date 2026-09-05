@@ -387,16 +387,21 @@ func (d *ReactLoopAgent) buildRequest(
 	}
 
 	request := llm.GenerateOptions{
-		Provider:    config.Provider,
-		Model:       config.Model,
-		Temperature: config.Temperature,
-		MaxTokens:   config.MaxTokens,
-		Stop:        config.Stop,
-		Messages:    boundaryMessages,
-		System:      header.System,
-		Tools:       header.Tools,
-		SessionID:   string(d.Session.ID()),
-		Context:     signal,
+		Provider: config.Provider,
+		Model:    config.Model,
+		// The adapter-resolved effort rides the request: the prepared-call
+		// claim compares the request's config against the resolved one, and
+		// dropping it would refuse every dispatch whose model declares a
+		// default effort.
+		ReasoningEffort: config.ReasoningEffort,
+		Temperature:     config.Temperature,
+		MaxTokens:       config.MaxTokens,
+		Stop:            config.Stop,
+		Messages:        boundaryMessages,
+		System:          header.System,
+		Tools:           header.Tools,
+		SessionID:       string(d.Session.ID()),
+		Context:         signal,
 	}
 	return request, preparedCall, nil
 }

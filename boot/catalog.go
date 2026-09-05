@@ -46,6 +46,7 @@ import (
 	"dshgo/goal"
 	"dshgo/goalrounddriver"
 	"dshgo/guard"
+	"dshgo/headless"
 	"dshgo/homepaths"
 	"dshgo/host/webserver"
 	"dshgo/interaction/permissionpresets"
@@ -498,7 +499,7 @@ var builders = map[string]pluginBuilder{
 		return PluginSpec{
 			Provide: []string{ServiceCredential},
 			Apply: func(ctx *cordis.Context, config any) error {
-				ctx.Provide(ServiceCredential, credentials.NewMemoryProvider(nil))
+				ctx.Provide(ServiceCredential, credentials.NewEnvWinsProvider(nil))
 				return nil
 			},
 		}
@@ -1848,6 +1849,40 @@ var builders = map[string]pluginBuilder{
 		}
 	},
 
+	// The one-shot app's command-line provider (official
+	// dsh-headless/startup): parses the task positional and --help, then
+	// provides the startup service the runner's lazy config waits for.
+	"@deepseek-ai/dsh-headless/startup": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{"cmdlineArgs"},
+			Provide: []string{headless.StartupService, headless.ExitService},
+			Apply: func(ctx *cordis.Context, config any) error {
+				// The launcher's exit request is a host value: provide it
+				// before the runner row's lazy config resolves.
+				ctx.Provide(headless.ExitService, headless.RequestExit)
+				return headless.ProvideStartup(ctx, config)
+			},
+		}
+	},
+
+	// The one-shot direct driver (official dsh-headless runner row): the
+	// task rides the startup service through the yml's
+	// `!!js ctx.headlessStartup.task`; the driver creates one Agent with
+	// the default model selection, drives the task to quiescence, flushes
+	// the Session, prints the final assistant text, and requests exit.
+	"@deepseek-ai/dsh-headless": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceAgentDefaultModel, ServiceAgents, ServiceSessions},
+			Apply: func(ctx *cordis.Context, config any) error {
+				parsed, err := headless.DecodeRunnerConfig(config)
+				if err != nil {
+					return err
+				}
+				return headless.Run(ctx, parsed)
+			},
+		}
+	},
+
 	// The projection registry: per-session derived-state units; Attach
 	// subscribes the registry's event handlers for the context's lifetime.
 	"@deepseek-ai/dsh-session-projection": func(deps CatalogDeps) PluginSpec {
@@ -1961,6 +1996,7 @@ var builders = map[string]pluginBuilder{
 					Runtime:     ctx.Get(ServiceLlm).(*llm.Runtime),
 					Settings:    ctx.Get(ServiceSettings).(*settings.Store),
 					Credentials: ctx.Get(ServiceCredential).(credentials.Provider),
+					Environment: func(name string) (string, bool) { return os.LookupEnv(name) },
 					Logger:      deps.Logger,
 				}
 				if candidate := ctx.Get(ServiceDeepseekExt); candidate != nil {
@@ -2952,11 +2988,7 @@ var batchThreeBuilders = map[string]pluginBuilder{
 					ctx.Get(ServiceTools).(*tools.ToolRuntime),
 					ctx.Get(ServiceSubagentRuntime).(*subagent.SubagentRuntime),
 					ctx.Get(ServiceAgents).(*agent.AgentRegistry),
-					subagentcontrol.ListingDeps{
-						Store:       ctx.Get(ServiceSessions).(*session.Store),
-						Projections: ctx.Get(ServiceProjections).(*projection.Registry),
-						Coordinator: ctx.Get(ServiceSessionPersist).(*persistence.Coordinator),
-					},
+					subagentcontrol.ListingDeps{},
 				)
 				return err
 			},

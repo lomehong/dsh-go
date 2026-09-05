@@ -17,6 +17,7 @@ import (
 	"dshgo/cordis"
 	"dshgo/gateway"
 	"dshgo/gatewaystream"
+	"dshgo/headless"
 	"dshgo/host/webhost"
 	"dshgo/host/webserver"
 )
@@ -129,10 +130,11 @@ func run() error {
 	var app *boot.App
 	var warnings []string
 	var err error
-	if *profile == "web" {
+	if *profile == "web" || *profile == "headless" {
 		// The web profile's web-startup row parses its own flag family
-		// (--host/--port/--dev/--trusted-host) from the launcher's inner
-		// arguments, so they reach the composition via cmdlineArgs.
+		// (--host/--port/--dev/--trusted-host) and the headless profile's
+		// startup row parses the task positional — both read the launcher's
+		// inner arguments via cmdlineArgs.
 		app, warnings, err = boot.AssembleProfileWithCmdline("dsh", *profile, anchorPath, *home, args, boot.CatalogDeps{
 			Logger: logger,
 			Home:   *home,
@@ -172,6 +174,15 @@ func run() error {
 
 	if *profile == "web" {
 		return serveWeb(app, anchorPath, *host, *port, logger)
+	}
+
+	if *profile == "headless" {
+		// The one-shot driver owns the run: it requests the exit code
+		// through the appExit host value once its output is written.
+		if err := app.Shutdown(); err != nil {
+			return err
+		}
+		os.Exit(headless.ExitCode())
 	}
 
 	stop := make(chan os.Signal, 1)

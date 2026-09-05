@@ -231,7 +231,7 @@ workflow / typert / sdk / boot / jobs / interaction / guard 的 src 在 alpha.2 
 
 ## 待续轮次（依赖序，余量为增量特性而非对齐缺口）
 
-1. session-reference 行（包已移植；行需要 pre-step mention→reference 深度接线：用户消息 @mention 解析、session-query surface 快照、retention 预算——独立功能轮）；dsh-host-directory-picker-auto（网关已答 unavailable 诊断）；文件上传 gateway 端点（attachment FileStore 已就位，缺 wire 端点）。
+1. headless E2E 遗留：流中段 context canceled（诊断线索已收集：非 Do/fail/watchdog/driver-cancel——疑似同步 Apply 阻塞组合与驱动生命周期交互，需异步 run + 生命周期专轮）；session-reference 行（pre-step mention→reference 深度接线）；dsh-host-directory-picker-auto（网关已答 unavailable）；文件上传 gateway 端点（FileStore 已就位，缺 wire 端点）。
 2. **r121 session v2 核心**：SESSION_FORMAT_VERSION→2、v2 头（isSeeded 必在、割点走 end-seed {inherited:true} 标记）、assistant/attempt 词汇注册、seeded 构造器追标记、装词汇 restoreCurrent（catalog 接线）。
 3. **r122 agentloop v2 live writer**：停写顶层 assistant/chunk；settlement 前置于 committed end（`agent/assistant-stream` 帧 start/chunk/end、attemptId=`<sessionId>:<n>`、dense index、revision）；中断有可见前缀→message(interrupted)、否则 attempt；finish error/aborted→attempt+request-error 瀑布。
 4. **r123 消费方**：surface/sessionquery 提取/sessionstats/tokenmeter 折叠/sessiontelemetry/projectioncache（checkpoint 绑 format 世代）对 assistant/attempt+内嵌流适配；gateway journal-stream + session-controller assistant-stream（web follow 光标无帧 FIFO）。

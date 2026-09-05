@@ -124,7 +124,7 @@ func (a *AssistantStreamAttempt) Abandon(revision int64) {
 	a.emit(agent.AssistantStreamFrame{
 		Type: "end", AttemptID: a.AttemptID, Revision: revision,
 		Turn: a.Turn, Step: a.Step,
-		Index: a.index,
+		Index:   a.index,
 		Outcome: &agent.AssistantStreamOutcome{Kind: "abandoned"},
 	})
 }
