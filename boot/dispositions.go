@@ -68,7 +68,6 @@ var Dispositions = map[string]string{
 	"@deepseek-ai/dsh-subagent-codex":                    "T2-disposition",
 	"@deepseek-ai/dsh-subagent-claude-code":              "T2-disposition",
 	"@deepseek-ai/dsh-typert-loader":                     "T2-disposition",
-	"@deepseek-ai/dsh-llm-pi-ai":                         "T2-disposition (external pi-ai SDK adapter; port on demand, ROADMAP record)",
 	"@deepseek-ai/dsh-tool-workflow":                     "T2-disposition (model-facing JS workflow tool; Go workflow engine stays a library face)",
 	"@deepseek-ai/dsh-workflow-worker-thread":            "T2-disposition (Node worker execution model; Go engine executes compiled scripts directly)",
 	"@deepseek-ai/dsh-cordis-host-runner":                "T2-disposition (host-side loader runner; no JS runtime)",

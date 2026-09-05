@@ -55,6 +55,7 @@ import (
 	"dshgo/jobs"
 	"dshgo/llm"
 	"dshgo/llm/deepseek"
+	"dshgo/llm/piai"
 	"dshgo/llmretry"
 	"dshgo/messagefeedback"
 	"dshgo/planmode"
@@ -360,6 +361,7 @@ var builders = map[string]pluginBuilder{
 				if err != nil {
 					return err
 				}
+				_ = f
 				// The web theme namespace ships no Go host half (ui-theme is a
 				// frontend-domain row), yet the browser scope rehydrates its
 				// schema from settings/describe before any preference resolves.
@@ -448,62 +450,13 @@ var builders = map[string]pluginBuilder{
 				}, map[string]any{}); err != nil {
 					return err
 				}
-				// The Models tab's custom-provider card opens only when its
-				// namespace carries a protocol union at providers.\0probe.api.
-								// The Models tab's custom-provider card resolves its schema at
-				// providers.<id>: the official namespace registers the
-				// providers map as a schemastery DICT (type dict + inner),
-				// whose inner names the profile fields the editor reads
-				// (api protocol union, models map, credential derivation).
-				piAiEnvelope, err := json.Marshal(map[string]any{
-					"type": "object",
-					"dict": map[string]any{
-						"providers": map[string]any{
-							"type": "dict",
-							"inner": map[string]any{
-								"type": "object",
-								"dict": map[string]any{
-									"api": map[string]any{
-										"type": "union",
-										"list": []any{
-											map[string]any{"type": "const", "value": "openai-completions"},
-											map[string]any{"type": "const", "value": "openai-responses"},
-											map[string]any{"type": "const", "value": "anthropic-messages"},
-										},
-									},
-									"baseUrl":   map[string]any{"type": "string"},
-									"apiKeyEnv": map[string]any{"type": "string"},
-									"models": map[string]any{
-										"type": "dict",
-										"inner": map[string]any{
-											"type": "object",
-											"dict": map[string]any{
-												"name":          map[string]any{"type": "string"},
-												"contextWindow": map[string]any{"type": "number"},
-												"maxTokens":     map[string]any{"type": "number"},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				})
-				if err != nil {
-					return err
-				}
 				if _, err := store.Register("llm-pi-ai", &settings.Schema{
-					Envelope: piAiEnvelope,
+					Envelope: piAiSettingsEnvelope(),
 					Defaults: func() map[string]any { return map[string]any{} },
 				}, map[string]any{}); err != nil {
 					return err
 				}
 				ctx.Provide(ServiceSettings, store)
-				if err := ctx.Effect(func() (cordis.Disposer, error) {
-					return cordis.Disposer(func() { _ = f.Close() }), nil
-				}); err != nil {
-					return err
-				}
 				return nil
 			},
 		}
@@ -517,6 +470,55 @@ var builders = map[string]pluginBuilder{
 			Apply: func(ctx *cordis.Context, config any) error {
 				ctx.Provide(ServiceCredential, credentials.NewEnvWinsProvider(nil))
 				return nil
+			},
+		}
+	},
+
+	// The multi-provider twin (official dsh-llm-pi-ai): owns the
+	// llm-pi-ai settings namespace (schema + user layer) and mounts one
+	// wire adapter per configured route. The Models page's addable
+	// catalog rides the api-gateway row; this row owns adapter mounting
+	// and the settings-driven re-sync.
+	"@deepseek-ai/dsh-llm-pi-ai": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject: []string{ServiceLlm, ServiceSettings},
+			Apply: func(ctx *cordis.Context, config any) error {
+				runtime := ctx.Get(ServiceLlm).(*llm.Runtime)
+				store := ctx.Get(ServiceSettings).(*settings.Store)
+				manager := piai.NewManager(piai.Deps{Runtime: runtime})
+				sync := func() {
+					section := store.Section("llm-pi-ai")
+					raw, ok := section["providers"]
+					if !ok {
+						return
+					}
+					encoded, err := json.Marshal(raw)
+					if err != nil {
+						return
+					}
+					var providers map[string]piai.Profile
+					if err := json.Unmarshal(encoded, &providers); err != nil {
+						return
+					}
+					for _, diagnostic := range manager.Sync(providers) {
+						deps.Logger.Warn("llm-pi-ai: " + diagnostic)
+					}
+				}
+				if _, err := store.Register("llm-pi-ai", &settings.Schema{
+					Envelope: piAiSettingsEnvelope(),
+					Defaults: func() map[string]any { return map[string]any{} },
+				}, map[string]any{}); err != nil {
+					return err
+				}
+				sync()
+				detach := store.OnUpdated(func(event *settings.UpdateEvent) {
+					if event.Namespace == "llm-pi-ai" {
+						sync()
+					}
+				})
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(detach), nil
+				})
 			},
 		}
 	},
@@ -4313,4 +4315,48 @@ func init() {
 		}
 		builders[alias] = build
 	}
+}
+
+// piAiSettingsEnvelope marshals the llm-pi-ai settings schema envelope:
+// providers is a schemastery DICT (type dict + inner profile shape) whose
+// inner names the profile fields the Models editor reads and writes.
+func piAiSettingsEnvelope() []byte {
+	encoded, err := json.Marshal(map[string]any{
+		"type": "object",
+		"dict": map[string]any{
+			"providers": map[string]any{
+				"type": "dict",
+				"inner": map[string]any{
+					"type": "object",
+					"dict": map[string]any{
+						"api": map[string]any{
+							"type": "union",
+							"list": []any{
+								map[string]any{"type": "const", "value": "openai-completions"},
+								map[string]any{"type": "const", "value": "openai-responses"},
+								map[string]any{"type": "const", "value": "anthropic-messages"},
+							},
+						},
+						"baseUrl":   map[string]any{"type": "string"},
+						"apiKeyEnv": map[string]any{"type": "string"},
+						"models": map[string]any{
+							"type": "dict",
+							"inner": map[string]any{
+								"type": "object",
+								"dict": map[string]any{
+									"name":          map[string]any{"type": "string"},
+									"contextWindow": map[string]any{"type": "number"},
+									"maxTokens":     map[string]any{"type": "number"},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return []byte(`{"type":"object","dict":{}}`)
+	}
+	return encoded
 }

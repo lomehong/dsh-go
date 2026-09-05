@@ -53,6 +53,9 @@ func attributionHeaders() map[string]string {
 
 // AdapterOptions are the operation-local resolution hooks the plugin owns.
 type AdapterOptions struct {
+	// DisplayName is the provider label ProviderInfo reports; empty
+	// defaults to DeepSeek.
+	DisplayName string
 	// Options returns the current validated connection facts; called once
 	// per operation.
 	Options func() (*ConnectionOptions, error)
@@ -81,6 +84,9 @@ type Adapter struct {
 	client *http.Client
 }
 
+// AdapterOptions gains DisplayName for generic reuse: an OpenAI-completions
+// route mounted for another provider reports that provider's label.
+
 // NewAdapter builds one adapter.
 func NewAdapter(config AdapterOptions) *Adapter {
 	client := config.HTTPClient
@@ -90,9 +96,15 @@ func NewAdapter(config AdapterOptions) *Adapter {
 	return &Adapter{config: config, client: client}
 }
 
-// ProviderInfo is the DeepSeek display metadata.
+// ProviderInfo is the route's display metadata: the configured display name
+// (generic reuse by other OpenAI-completions routes), defaulting to
+// DeepSeek.
 func (a *Adapter) ProviderInfo(provider string) llm.LlmProviderInfo {
-	return llm.LlmProviderInfo{ID: provider, Name: "DeepSeek"}
+	name := a.config.DisplayName
+	if name == "" {
+		name = "DeepSeek"
+	}
+	return llm.LlmProviderInfo{ID: provider, Name: name}
 }
 
 // ProviderRetryPolicy is the provider-owned retry policy from the current
