@@ -233,12 +233,12 @@ func parseGenerationFilename(raw string) (int64, bool) {
 // session header tagged as a `session` record. delegationDepth is always
 // serialized (0 default); absent optional fields are omitted, never null.
 type headerLine struct {
-	Type            string  `json:"type"`
-	Version         int64   `json:"version"`
-	ID              string  `json:"id"`
-	CreatedAt       int64   `json:"createdAt"`
-	CWD             *string `json:"cwd,omitempty"`
-	ParentSession   *string `json:"parentSession,omitempty"`
+	Type          string  `json:"type"`
+	Version       int64   `json:"version"`
+	ID            string  `json:"id"`
+	CreatedAt     int64   `json:"createdAt"`
+	CWD           *string `json:"cwd,omitempty"`
+	ParentSession *string `json:"parentSession,omitempty"`
 	// v0/v1 physical headers carry the numeric seedLength; the v2 physical
 	// header carries the boolean isSeeded and no cut (the cut derives from
 	// the last inherited end-seed marker at body-read time).

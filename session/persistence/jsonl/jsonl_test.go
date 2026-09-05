@@ -1,9 +1,9 @@
 package jsonl
 
 import (
-	"fmt"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"

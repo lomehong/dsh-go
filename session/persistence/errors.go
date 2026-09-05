@@ -44,6 +44,18 @@ func (e *CorruptionError) Error() string { return e.Message }
 // Unwrap exposes the original validation failure.
 func (e *CorruptionError) Unwrap() error { return e.Cause }
 
+// AlreadyOwnedError is one session's write ownership is held by another
+// active write handle (another process, or a wedged live one). The kernel
+// lease arbitrates: readers continue, writers refuse (official
+// SessionAlreadyOwnedError).
+type AlreadyOwnedError struct {
+	SessionID session.SessionID
+}
+
+func (e *AlreadyOwnedError) Error() string {
+	return fmt.Sprintf("session %q is already owned by an active write handle", e.SessionID)
+}
+
 // FormatUnsupportedError is the stored log is intact but this runtime
 // cannot faithfully interpret it: the header carries an unsupported format
 // version, or an event's type is unknown to this build. Distinct from

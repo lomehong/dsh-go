@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"dshgo/session"
 	"dshgo/session/persistence"
@@ -22,11 +23,47 @@ const BackendName = "jsonl"
 // Backend implements persistence.Backend over one Store root.
 type Backend struct {
 	Store *Store
+	// writeLeases holds one kernel write lock per session directory for the
+	// life of this backend's write handles: a second process's append
+	// refuses with AlreadyOwnedError while the holder lives (official
+	// SessionWriteLease; readers never touch the lock).
+	leaseMu     sync.Mutex
+	writeLeases map[string]*SessionWriteLease
 }
 
 // NewBackend builds the file backend over a session root directory.
 func NewBackend(root string, compression Compression) *Backend {
 	return &Backend{Store: &Store{Root: root, Compression: compression}}
+}
+
+// acquireLease takes (or reuses) this backend's kernel lock for one session
+// directory.
+func (b *Backend) acquireLease(cwd, id session.SessionID) error {
+	dir := SessionDir(b.Store.Root, cwd, string(id))
+	b.leaseMu.Lock()
+	defer b.leaseMu.Unlock()
+	if b.writeLeases == nil {
+		b.writeLeases = map[string]*SessionWriteLease{}
+	}
+	if _, held := b.writeLeases[dir]; held {
+		return nil
+	}
+	lease, err := AcquireWriteLease(dir, id)
+	if err != nil {
+		return err
+	}
+	b.writeLeases[dir] = lease
+	return nil
+}
+
+// releaseLeases drops every held kernel lock (backend dispose boundary).
+func (b *Backend) releaseLeases() {
+	b.leaseMu.Lock()
+	defer b.leaseMu.Unlock()
+	for _, lease := range b.writeLeases {
+		lease.Release()
+	}
+	b.writeLeases = map[string]*SessionWriteLease{}
 }
 
 // Name is the human-readable backend name.
@@ -196,10 +233,19 @@ func (b *Backend) ReadStoredRevision(id session.SessionID) (persistence.Revision
 }
 
 // AppendBatch durably appends one contiguous batch; when the artifact does
-// not exist yet, the header and the first batch commit in one write.
+// not exist yet, the header and the first batch commit in one write. The
+// write lease is acquired for an existing artifact at write-open and, for a
+// created session, right before its first materializing write — an
+// unmaterialized session has no filesystem footprint to lock ahead of.
 func (b *Backend) AppendBatch(meta session.SessionHeader, events []session.Event, materialized bool) error {
 	if !materialized {
+		if err := b.acquireLease(meta.CWD, meta.ID); err != nil {
+			return err
+		}
 		return b.Store.Create(meta, events)
+	}
+	if err := b.acquireLease(meta.CWD, meta.ID); err != nil {
+		return err
 	}
 	return b.Store.Append(meta.CWD, string(meta.ID), 0, events)
 }
@@ -208,6 +254,9 @@ func (b *Backend) AppendBatch(meta session.SessionHeader, events []session.Event
 // the marker is present) and append closers (iff any). Two durable steps,
 // not atomic — a file backend may truncate-then-append.
 func (b *Backend) CommitRepair(meta session.SessionHeader, tornMarker any, closers []session.Event) error {
+	if err := b.acquireLease(meta.CWD, meta.ID); err != nil {
+		return err
+	}
 	path := b.Store.PathOf(meta.CWD, string(meta.ID))
 	if tornMarker != nil {
 		truncateTo, ok := tornMarker.(int64)
@@ -267,8 +316,11 @@ func (b *Backend) ListSnapshots() ([]persistence.Snapshot, error) {
 	return out, nil
 }
 
-// Close releases backend resources; the file backend is stateless.
-func (b *Backend) Close() error { return nil }
+// Close releases backend resources: every held kernel write lock.
+func (b *Backend) Close() error {
+	b.releaseLeases()
+	return nil
+}
 
 // Locate points refusal diagnostics at the raw log.
 func (b *Backend) Locate(meta session.SessionHeader) *persistence.Location {
