@@ -588,7 +588,7 @@ var builders = map[string]pluginBuilder{
 					}
 					if cfg.openBrowser {
 						fmt.Println("dsh web: opening the default browser; pass --no-open to disable")
-						if err := openDefaultBrowser(url); err != nil {
+						if err := OpenDefaultBrowser(url); err != nil {
 							deps.Logger.Warn(fmt.Sprintf("web-app: could not open the default browser because %v; use the dsh web URL printed at startup", err))
 						}
 					}
@@ -4190,7 +4190,7 @@ func lanIPv4Addresses() []string {
 // openDefaultBrowser hands one URL to the OS default browser (official
 // spawnBrowserLauncher): Windows uses rundll32 url.dll, POSIX uses xdg-open
 // (or open on darwin).
-func openDefaultBrowser(url string) error {
+func OpenDefaultBrowser(url string) error {
 	var command *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":

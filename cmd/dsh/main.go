@@ -231,6 +231,20 @@ func serveWeb(app *boot.App, anchor string, host string, port string, logger cor
 	}
 	mounted.SetUnaryHandler(gw.UnaryHandler())
 
+	// The browser handoff fires only after mount+listen: a mid-composition
+	// open hits the unmounted router (404). The web-app startup row records
+	// the intent as the webHandoff service when openBrowser is on.
+	if handoffValue := app.Root().Get("webHandoff"); handoffValue != nil {
+		if handoff, ok := handoffValue.(map[string]any); ok {
+			if url, ok := handoff["url"].(string); ok {
+				fmt.Println("dsh web: opening the default browser; pass --no-open to disable")
+				if err := boot.OpenDefaultBrowser(url); err != nil {
+					logger.Warn(fmt.Sprintf("web: could not open the default browser because %v; use the dsh web URL printed at startup", err))
+				}
+			}
+		}
+	}
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
