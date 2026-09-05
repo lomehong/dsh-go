@@ -58,6 +58,9 @@ var Dispositions = map[string]string{
 	"@deepseek-ai/dsh-client-ui-user-questions":            "frontend-domain",
 	"@deepseek-ai/dsh-client-ui-workflow-run":              "frontend-domain",
 	"@deepseek-ai/dsh-client-hmr":                          "frontend-domain (client-side package; host cannot import)",
+	"@deepseek-ai/dsh-client-file-upload":                  "frontend-domain (client half; host admission is the session-controller upload path)",
+	"@deepseek-ai/dsh-client-ui-schedule":                  "frontend-domain",
+	"@deepseek-ai/cordis-plugin-hmr":                       "T2-disposition (upstream base yml disabled:true; node-specific HMR)",
 
 	// T2 disposition: recorded no-port decisions (external CLI adapters
 	// and loader-only machinery; the Go host has no JS/loader runtime).
@@ -66,6 +69,8 @@ var Dispositions = map[string]string{
 	"@deepseek-ai/dsh-subagent-claude-code":              "T2-disposition",
 	"@deepseek-ai/dsh-typert-loader":                     "T2-disposition",
 	"@deepseek-ai/dsh-llm-pi-ai":                         "T2-disposition (external pi-ai SDK adapter; port on demand, ROADMAP record)",
+	"@deepseek-ai/dsh-tool-workflow":                     "T2-disposition (model-facing JS workflow tool; Go workflow engine stays a library face)",
+	"@deepseek-ai/dsh-workflow-worker-thread":            "T2-disposition (Node worker execution model; Go engine executes compiled scripts directly)",
 	"@deepseek-ai/dsh-cordis-host-runner":                "T2-disposition (host-side loader runner; no JS runtime)",
 	"@deepseek-ai/dsh-host-plugin-inventory":             "T2-disposition (plugin inventory loader)",
 	"@deepseek-ai/dsh-plugin-package-inventory-deepseek": "T2-disposition (npm package inventory; N-A record)",

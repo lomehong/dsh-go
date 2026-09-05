@@ -5,11 +5,11 @@ the Go host tracks the upstream web implementation at one pinned commit, and
 the composition guard (guard v5) fails when this pin drifts from the official
 clone the sync ran against.
 
-- Upstream commit: 76fda729799fe9b3848dbe2c211d4b231032b81e
-- Upstream tag: dsh-v0.1.2-rc.1-99-g76fda72979
-- Synced at: 2026-09-03 16:24:22 +08:00
-- Closure packages: 84 @deepseek-ai packages + apps/web
-- Seed: 71 web-app client bundles + dsh-frontend + dsh-web-app
+- Upstream commit: d347e703908d0406b7a7ef80e3a0e594d86b2215
+- Upstream tag: dsh-v0.1.3-alpha.1
+- Synced at: 2026-09-05 10:41:28 +08:00
+- Closure packages: 86 @deepseek-ai packages + apps/web
+- Seed: 72 web-app client bundles + dsh-frontend + dsh-web-app
 
 ## Regenerate
 

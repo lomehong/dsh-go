@@ -70,12 +70,12 @@ import (
 	"dshgo/session/projectioncache"
 	"dshgo/sessionlog"
 	"dshgo/sessionquery"
-	"dshgo/sessionturnoutline"
 	"dshgo/sessionquerysqlite"
 	"dshgo/sessiontelemetry"
 	"dshgo/sessiontelemetryotel"
 	"dshgo/sessiontitle"
 	"dshgo/sessiontitlellm"
+	"dshgo/sessionturnoutline"
 	"dshgo/settings"
 	"dshgo/settings/file"
 	"dshgo/shell"
@@ -353,134 +353,134 @@ var builders = map[string]pluginBuilder{
 						}
 					}
 				}
-			store := settings.NewStore(deps.Logger)
-			f, err := file.Open(path, store, deps.Logger)
-			if err != nil {
-				return err
-			}
-			// The web theme namespace ships no Go host half (ui-theme is a
-			// frontend-domain row), yet the browser scope rehydrates its
-			// schema from settings/describe before any preference resolves.
-			// Register the exact client-side ThemeSettingsSchema envelope so
-			// appearance/font-size persists and round-trips.
-			themeEnvelope, err := json.Marshal(map[string]any{
-				"type": "object",
-				"dict": map[string]any{
-					"preference": map[string]any{
-						"type": "union",
-						"list": []any{
-							map[string]any{"type": "const", "value": "light"},
-							map[string]any{"type": "const", "value": "dark"},
-							map[string]any{"type": "const", "value": "system"},
+				store := settings.NewStore(deps.Logger)
+				f, err := file.Open(path, store, deps.Logger)
+				if err != nil {
+					return err
+				}
+				// The web theme namespace ships no Go host half (ui-theme is a
+				// frontend-domain row), yet the browser scope rehydrates its
+				// schema from settings/describe before any preference resolves.
+				// Register the exact client-side ThemeSettingsSchema envelope so
+				// appearance/font-size persists and round-trips.
+				themeEnvelope, err := json.Marshal(map[string]any{
+					"type": "object",
+					"dict": map[string]any{
+						"preference": map[string]any{
+							"type": "union",
+							"list": []any{
+								map[string]any{"type": "const", "value": "light"},
+								map[string]any{"type": "const", "value": "dark"},
+								map[string]any{"type": "const", "value": "system"},
+							},
+							"meta": map[string]any{"default": "system"},
 						},
-						"meta": map[string]any{"default": "system"},
+						"fontSize": map[string]any{
+							"type": "number",
+							"meta": map[string]any{"default": 14},
+						},
 					},
-					"fontSize": map[string]any{
-						"type": "number",
-						"meta": map[string]any{"default": 14},
+					"meta": map[string]any{"default": map[string]any{"preference": "system", "fontSize": 14}},
+				})
+				if err != nil {
+					return err
+				}
+				if _, err := store.Register("ui-theme", &settings.Schema{
+					Envelope: themeEnvelope,
+					Defaults: func() map[string]any {
+						return map[string]any{"preference": "system", "fontSize": 14}
 					},
-				},
-				"meta": map[string]any{"default": map[string]any{"preference": "system", "fontSize": 14}},
-			})
-			if err != nil {
-				return err
-			}
-			if _, err := store.Register("ui-theme", &settings.Schema{
-				Envelope: themeEnvelope,
-				Defaults: func() map[string]any {
-					return map[string]any{"preference": "system", "fontSize": 14}
-				},
-			}, map[string]any{"preference": "system", "fontSize": 14}); err != nil {
-				return err
-			}
-			// The Settings Plugins tab's configurable cards each bind a
-			// settings namespace; the Go host serves these three so the
-			// Shell, Agent Loop, and Web Search cards render. Without the
-			// schema registrations the served-namespace intersection is
-			// empty and the tab renders nothing.
-			shellEnvelope, err := json.Marshal(map[string]any{
-				"type": "object",
-				"dict": map[string]any{
-					"timeoutMs":     map[string]any{"type": "number", "meta": map[string]any{"description": "Foreground command timeout in milliseconds"}},
-					"maxOutputBytes": map[string]any{"type": "number", "meta": map[string]any{"description": "Per-stream in-memory output cap in bytes"}},
-				},
-			})
-			if err != nil {
-				return err
-			}
-			if _, err := store.Register("shell", &settings.Schema{
-				Envelope: shellEnvelope,
-				Defaults: func() map[string]any { return map[string]any{} },
-			}, map[string]any{}); err != nil {
-				return err
-			}
-			agentLoopEnvelope, err := json.Marshal(map[string]any{
-				"type": "object",
-				"dict": map[string]any{
-					"maxParallelToolCalls": map[string]any{"type": "number", "meta": map[string]any{"description": "Upper bound on parallel-safe tool calls per step"}},
-				},
-			})
-			if err != nil {
-				return err
-			}
-			if _, err := store.Register("agent-loop", &settings.Schema{
-				Envelope: agentLoopEnvelope,
-				Defaults: func() map[string]any { return map[string]any{} },
-			}, map[string]any{}); err != nil {
-				return err
-			}
-			webSearchEnvelope, err := json.Marshal(map[string]any{
-				"type": "object",
-				"dict": map[string]any{
-					"apiKeyEnv": map[string]any{"type": "string", "meta": map[string]any{"description": "Key reference naming the environment variable"}},
-					"baseURL":   map[string]any{"type": "string", "meta": map[string]any{"description": "Provider endpoint"}},
-					"maxUses":   map[string]any{"type": "number", "meta": map[string]any{"description": "Maximum searches per request"}},
-				},
-			})
-			if err != nil {
-				return err
-			}
-			if _, err := store.Register("web-search-deepseek", &settings.Schema{
-				Envelope: webSearchEnvelope,
-				Defaults: func() map[string]any { return map[string]any{} },
-			}, map[string]any{}); err != nil {
-				return err
-			}
-			// The Models tab's custom-provider card opens only when its
-			// namespace carries a protocol union at providers.\0probe.api.
-			piAiEnvelope, err := json.Marshal(map[string]any{
-				"type": "object",
-				"dict": map[string]any{
-					"providers": map[string]any{
-						"type": "object",
-						"dict": map[string]any{
-							"\u0000probe": map[string]any{
-								"type": "object",
-								"dict": map[string]any{
-									"api": map[string]any{
-										"type": "union",
-										"list": []any{
-											map[string]any{"type": "const", "value": "openai-completions"},
-											map[string]any{"type": "const", "value": "openai-responses"},
-											map[string]any{"type": "const", "value": "anthropic-messages"},
+				}, map[string]any{"preference": "system", "fontSize": 14}); err != nil {
+					return err
+				}
+				// The Settings Plugins tab's configurable cards each bind a
+				// settings namespace; the Go host serves these three so the
+				// Shell, Agent Loop, and Web Search cards render. Without the
+				// schema registrations the served-namespace intersection is
+				// empty and the tab renders nothing.
+				shellEnvelope, err := json.Marshal(map[string]any{
+					"type": "object",
+					"dict": map[string]any{
+						"timeoutMs":      map[string]any{"type": "number", "meta": map[string]any{"description": "Foreground command timeout in milliseconds"}},
+						"maxOutputBytes": map[string]any{"type": "number", "meta": map[string]any{"description": "Per-stream in-memory output cap in bytes"}},
+					},
+				})
+				if err != nil {
+					return err
+				}
+				if _, err := store.Register("shell", &settings.Schema{
+					Envelope: shellEnvelope,
+					Defaults: func() map[string]any { return map[string]any{} },
+				}, map[string]any{}); err != nil {
+					return err
+				}
+				agentLoopEnvelope, err := json.Marshal(map[string]any{
+					"type": "object",
+					"dict": map[string]any{
+						"maxParallelToolCalls": map[string]any{"type": "number", "meta": map[string]any{"description": "Upper bound on parallel-safe tool calls per step"}},
+					},
+				})
+				if err != nil {
+					return err
+				}
+				if _, err := store.Register("agent-loop", &settings.Schema{
+					Envelope: agentLoopEnvelope,
+					Defaults: func() map[string]any { return map[string]any{} },
+				}, map[string]any{}); err != nil {
+					return err
+				}
+				webSearchEnvelope, err := json.Marshal(map[string]any{
+					"type": "object",
+					"dict": map[string]any{
+						"apiKeyEnv": map[string]any{"type": "string", "meta": map[string]any{"description": "Key reference naming the environment variable"}},
+						"baseURL":   map[string]any{"type": "string", "meta": map[string]any{"description": "Provider endpoint"}},
+						"maxUses":   map[string]any{"type": "number", "meta": map[string]any{"description": "Maximum searches per request"}},
+					},
+				})
+				if err != nil {
+					return err
+				}
+				if _, err := store.Register("web-search-deepseek", &settings.Schema{
+					Envelope: webSearchEnvelope,
+					Defaults: func() map[string]any { return map[string]any{} },
+				}, map[string]any{}); err != nil {
+					return err
+				}
+				// The Models tab's custom-provider card opens only when its
+				// namespace carries a protocol union at providers.\0probe.api.
+				piAiEnvelope, err := json.Marshal(map[string]any{
+					"type": "object",
+					"dict": map[string]any{
+						"providers": map[string]any{
+							"type": "object",
+							"dict": map[string]any{
+								"\u0000probe": map[string]any{
+									"type": "object",
+									"dict": map[string]any{
+										"api": map[string]any{
+											"type": "union",
+											"list": []any{
+												map[string]any{"type": "const", "value": "openai-completions"},
+												map[string]any{"type": "const", "value": "openai-responses"},
+												map[string]any{"type": "const", "value": "anthropic-messages"},
+											},
 										},
 									},
 								},
 							},
 						},
 					},
-				},
-			})
-			if err != nil {
-				return err
-			}
-			if _, err := store.Register("llm-pi-ai", &settings.Schema{
-				Envelope: piAiEnvelope,
-				Defaults: func() map[string]any { return map[string]any{} },
-			}, map[string]any{}); err != nil {
-				return err
-			}
-			ctx.Provide(ServiceSettings, store)
+				})
+				if err != nil {
+					return err
+				}
+				if _, err := store.Register("llm-pi-ai", &settings.Schema{
+					Envelope: piAiEnvelope,
+					Defaults: func() map[string]any { return map[string]any{} },
+				}, map[string]any{}); err != nil {
+					return err
+				}
+				ctx.Provide(ServiceSettings, store)
 				if err := ctx.Effect(func() (cordis.Disposer, error) {
 					return cordis.Disposer(func() { _ = f.Close() }), nil
 				}); err != nil {
@@ -1067,8 +1067,8 @@ var builders = map[string]pluginBuilder{
 					}
 				}
 				llmController := gateway.NewLlmController(func() any {
-    return ctx.Get(ServiceLlm)
-})
+					return ctx.Get(ServiceLlm)
+				})
 				ctx.Provide("llmController", llmController)
 				if _, exists := registry.GetPackage("llm-controller", typert.FaceHost); !exists {
 					if _, err := registry.Register(llmController.Contribution()); err != nil {
@@ -3428,8 +3428,15 @@ var batchThreeBuilders = map[string]pluginBuilder{
 					if raw, ok := overridden["mode"].(string); ok {
 						cfg.Mode = sessiontelemetryotel.Mode(raw)
 					}
+					// The released base yml nests the endpoint under
+					// exporter (with compression/timeout siblings); keep the
+					// historical flat spelling as a fallback.
 					if raw, ok := overridden["url"].(string); ok {
 						cfg.URL = raw
+					} else if exporter, ok := overridden["exporter"].(map[string]any); ok {
+						if raw, ok := exporter["url"].(string); ok {
+							cfg.URL = raw
+						}
 					}
 				}
 				backend, err := sessiontelemetryotel.New(cfg)

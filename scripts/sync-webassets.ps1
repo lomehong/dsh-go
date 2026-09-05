@@ -51,7 +51,7 @@ pushd (Join-Path $Monorepo "packages\experimental\webworker-runtime")
 & pnpm exec tsdown 2>&1 | Select-Object -Last 1
 popd
 pushd (Join-Path $Monorepo "packages\client\store")
-& node --max-old-space-size=4096 "$Monorepo\node_modules\typescript\bin\tsc" -b tsconfig.client.json 2>&1 | Out-Null
+& node --max-old-space-size=4096 "$Monorepo\node_modules\typescript\bin\tsc" -b . 2>&1 | Out-Null
 & pnpm exec tsdown 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "client-store build failed" }
 popd
@@ -123,6 +123,31 @@ foreach ($dir in $pkgDirs) {
     # source maps are skipped: the Go boot composer builds identity maps
     $built++
 }
+# --- 4. stage every @deepseek-ai package manifest + bundle rows ------------
+# The Go profile resolver reads each profile bundle's cordis.patch.yml from
+# this anchor (web profile needs dsh-base + dsh-web-app), and the composition
+# guard compares rows against the shipped set. Stage package.json +
+# cordis.patch.yml for EVERY monorepo @deepseek-ai package (source tree,
+# depth 4): host bundles, client halves, and vendor kernels alike.
+$manifests = Get-ChildItem $srcPkgs -Recurse -Filter "package.json" -Depth 4 -ErrorAction SilentlyContinue
+foreach ($candidate in (Get-ChildItem (Join-Path $Monorepo "vendor") -Recurse -Filter "package.json" -Depth 4 -ErrorAction SilentlyContinue)) {
+    $manifests += $candidate
+}
+$stagedAll = 0
+foreach ($manifest in $manifests) {
+    $j = Get-Content $manifest.FullName -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+    if (-not $j.name -or -not $j.name.StartsWith("@deepseek-ai/")) { continue }
+    $short = $j.name -replace '^@deepseek-ai/', ''
+    $dstPkg = Join-Path $webassets "node_modules\@deepseek-ai\$short"
+    New-Item -ItemType Directory -Force -Path $dstPkg | Out-Null
+    Copy-Item $manifest.FullName (Join-Path $dstPkg "package.json") -Force
+    $patch = Join-Path $manifest.DirectoryName "cordis.patch.yml"
+    if (Test-Path $patch) {
+        Copy-Item $patch (Join-Path $dstPkg "cordis.patch.yml") -Force
+    }
+    $stagedAll++
+}
+Write-Host "manifests+bundle rows staged: $stagedAll"
 Write-Host "client bundles staged: $built; failed: $($failed.Count)"
 if ($failed.Count -gt 0) { $failed | ForEach-Object { Write-Host "  FAIL: $_" } }
 Write-Host "webassets sync complete: $webassets"

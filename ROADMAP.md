@@ -225,10 +225,11 @@ workflow / typert / sdk / boot / jobs / interaction / guard 的 src 在 alpha.2 
 | r124a | 上游小修复批：subprocess Windows 子窗隐藏（HideWindow+CREATE_NO_WINDOW，taskkill 助手同）；workspace fully-qualified 守卫+盘根标题；toolfs FS_NOT_OBSERVED 模型面诊断统一（策略/提供方同归一，原始措辞下沉 cause） | ✅ |
 | r124b | attachment 通用文件族：FileStore 服务面+AdmitEncodedFile+local file-store（FileLeafName 双分隔符净化/设备名/UTF-8 预算；sha256 object+展示名 alias；流式分块哈希；读取端完整性裁决）+ llm BlockFile/ProjectFilesToText/Runtime 投影缝 | ✅ |
 | r125 | sessionturnoutline 投影单元（turn/start 锚点+有界 prompt/response 预览+draft turn/end 提交+序守卫+DecodeState 序校验）接线 apiGateway 组合；处置表三 api-controller 行 T2-resolved（gateway 控制器承载）+ turn-outline T2-resolved | ✅ |
+| r126 | 前端 fork+webassets 重同步 0.1.3-alpha.1（d347e70390）：sync-frontend 86 包；webassets 脚本两修（client-store tsc -b . 新配方；补回全闭包 manifest+patch 行暂存 264 包——profile 解析器需 dsh-base/dsh-web-app bundle 行）；otel 行 exporter.url 嵌套解码；处置表 +5 新行（client-file-upload/client-ui-schedule frontend-domain、hmr/tool-workflow/workflow-worker-thread T2）。实机冒烟：GET / 200+boot 注入、dist 资产 200、SPA 回落 200、combo 4.2MB/200（51 client halves） | ✅ |
 
-## 待续轮次（依赖序）
+## 待续轮次（依赖序，余量为增量特性而非对齐缺口）
 
-1. **r126 前端 fork/webassets 重同步 0.1.3-alpha.1**（sync-frontend.ps1 + sync-webassets.ps1 需 npm 可用）；tokenmeter file 节点定价缝（随 gateway 文件上传端点轮——上传→日志→计价一条链）；session-reference/session-stats/session-log-export 三行 catalog 接线（包已移植，待读上游 cordis 条目后挂）；jsonl 跨进程写权租约（c58097a826）；agent terminate live assistant attempts；session cold listing body-free。
+1. **tokenmeter file 节点定价缝**（随 gateway 文件上传端点轮——上传→日志→计价一条链）；session-reference/session-stats/session-log-export 三行 catalog 接线（包已移植，待读上游 cordis 条目后挂）；jsonl 跨进程写权租约（c58097a826）；agent terminate live assistant attempts（a65edc4810）；session cold listing body-free（17f49f6191）；surface replacement 端点/compaction span 验证（b5f1539733/f9870325b2——v2 目标验证已覆盖同语义）；dsh-host-directory-picker-auto（网关已答 unavailable 诊断）；agent/assistant-stream 的 web follow 适配（gateway journal-stream 消费 agent/assistant-stream 帧）。
 2. **r121 session v2 核心**：SESSION_FORMAT_VERSION→2、v2 头（isSeeded 必在、割点走 end-seed {inherited:true} 标记）、assistant/attempt 词汇注册、seeded 构造器追标记、装词汇 restoreCurrent（catalog 接线）。
 3. **r122 agentloop v2 live writer**：停写顶层 assistant/chunk；settlement 前置于 committed end（`agent/assistant-stream` 帧 start/chunk/end、attemptId=`<sessionId>:<n>`、dense index、revision）；中断有可见前缀→message(interrupted)、否则 attempt；finish error/aborted→attempt+request-error 瀑布。
 4. **r123 消费方**：surface/sessionquery 提取/sessionstats/tokenmeter 折叠/sessiontelemetry/projectioncache（checkpoint 绑 format 世代）对 assistant/attempt+内嵌流适配；gateway journal-stream + session-controller assistant-stream（web follow 光标无帧 FIFO）。
