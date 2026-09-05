@@ -86,6 +86,14 @@ func (g *Gateway) sessionStore() *session.Store {
 	return nil
 }
 
+// projections resolves the composed projection registry, or nil when absent.
+func (g *Gateway) projections() *projection.Registry {
+	if projections, ok := g.ctx.Get("projections").(*projection.Registry); ok && projections != nil {
+		return projections
+	}
+	return nil
+}
+
 // openSessionFollow answers one session follow stream: the opening snapshot
 // (header, cursor, message-aligned records, projection baseline) then an
 // open, quiet hold until the caller's signal ends.
@@ -132,6 +140,14 @@ func (g *Gateway) openSessionFollow(args map[string]any, signal context.Context)
 	frames := make(chan any)
 	go func() {
 		defer close(frames)
+		// The projection baseline: every registered wire unit's view as of
+		// the snapshot cursor (turnOutline, sessionStats, goal, ...). The
+		// registry is an optional composition — absent, the baseline stays
+		// empty exactly as before.
+		values := map[string]any{}
+		if projections := g.projections(); projections != nil {
+			values = projections.Snapshot(sess).Values
+		}
 		snapshot := map[string]any{
 			"type":    "snapshot",
 			"header":  wire,
@@ -140,7 +156,7 @@ func (g *Gateway) openSessionFollow(args map[string]any, signal context.Context)
 			"hasMore": hasMore,
 			"projections": map[string]any{
 				"asOfSeq": cursor,
-				"values":  map[string]any{},
+				"values":  values,
 			},
 		}
 		select {

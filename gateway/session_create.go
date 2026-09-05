@@ -8,6 +8,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -50,10 +51,16 @@ type SessionCreateDeps struct {
 	// Uploads resolves staged file-upload receipts for prompt file parts;
 	// an absent service answers the honest attachment-invalid wording.
 	Uploads func() any
+	// Selections carries the session model-selection overrides
+	// (session/selectModel); an absent registry disables the endpoint.
+	Selections func() any
 	// DefaultCwd is the project directory used when create names neither a
 	// workspace nor a cwd (official ApiSessionCommands defaultCwd).
 	DefaultCwd string
 }
+
+// errSessionCreateSetupNoAgent is the setup-time scoped-agent absence.
+var errSessionCreateSetupNoAgent = errors.New("session create setup has no scoped Agent")
 
 // EnableCreate attaches the create seams. The endpoint stays unregistered
 // until this runs, so minimal profiles that mount api-gateway without the
@@ -79,6 +86,9 @@ func (c *SessionController) EnableCreate(deps SessionCreateDeps) {
 	}
 	if deps.Uploads == nil {
 		deps.Uploads = func() any { return nil }
+	}
+	if deps.Selections == nil {
+		deps.Selections = func() any { return nil }
 	}
 	c.createDeps = &deps
 }
@@ -310,6 +320,9 @@ func (c *SessionController) Create(ctx context.Context, request map[string]any) 
 				}
 			}
 			if err := installCreationModelSelection(agentCtx, selection); err != nil {
+				return agent.AgentSetupCommit{}, err
+			}
+			if err := c.installSelectionOverride(agentCtx, sessionID); err != nil {
 				return agent.AgentSetupCommit{}, err
 			}
 			return agent.AgentSetupCommit{}, nil

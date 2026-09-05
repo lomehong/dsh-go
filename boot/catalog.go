@@ -1142,8 +1142,14 @@ var builders = map[string]pluginBuilder{
 					Titles:      func() any { return ctx.Get(ServiceSessionTitle) },
 					Attachments: func() any { return ctx.Get(ServiceAttachments) },
 					Uploads:     func() any { return ctx.Get("fileUploads") },
+					Selections:  func() any { return ctx.Get("sessionSelections") },
 					DefaultCwd:  defaultCwd,
 				})
+				// The session model-selection overrides (session/selectModel):
+				// an in-process registry the created agents' request
+				// waterfalls consult (recorded deviation: in-memory until the
+				// durable model-selection projection round).
+				ctx.Provide("sessionSelections", gateway.NewSessionSelections())
 				// The staged file-upload service + the fileReferences Remote
 				// namespace: both need the live agent plane, so they compose
 				// through the delayed agent injection. The file store is an

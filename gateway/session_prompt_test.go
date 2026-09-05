@@ -166,10 +166,12 @@ func newPromptController(t *testing.T, store attachment.Store) (*SessionControll
 		t.Fatalf("register adapter: %v", err)
 	}
 	controller := NewSessionController(nil, nil, func() any { return llmRuntime }, func() any { return defaultModel })
+	selections := NewSessionSelections()
 	controller.EnableCreate(SessionCreateDeps{
 		Agents:      func() any { return factory.registry },
 		Sessions:    func() any { return storeSessions },
 		Attachments: func() any { return store },
+		Selections:  func() any { return selections },
 	})
 	return controller, factory, driver
 }

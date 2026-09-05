@@ -255,10 +255,15 @@ func (c *SessionController) Cancel(ctx context.Context, request map[string]any) 
 	return map[string]any{"accepted": true}, nil
 }
 
-// selectionFor resolves the agent's current model selection: the persisted
-// request header's route while one exists (the live provider/model pair),
-// else the deployment's installed default.
+// selectionFor resolves the agent's current model selection: the explicit
+// session override (selectModel) first, then the persisted request header's
+// route, else the deployment's installed default.
 func (c *SessionController) selectionFor(live *agent.Agent) agent.ModelSelection {
+	if selections := c.selections(); selections != nil {
+		if selection, ok := selections.Get(live.ID); ok {
+			return selection
+		}
+	}
 	if header := live.Session.RequestHeader(); header != nil && header.Config.Provider != "" {
 		return agent.ModelSelection{Provider: header.Config.Provider, Model: header.Config.Model}
 	}

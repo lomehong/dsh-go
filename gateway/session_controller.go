@@ -192,6 +192,16 @@ func (c *SessionController) List(ctx context.Context, request map[string]any) (a
 			"running":   false,
 			"blank":     blank,
 		}
+		// The sidebar title: live sessions read the session-title service's
+		// current snapshot (provider/fallback/user fold); cold sessions
+		// stay titleless until the title projection round.
+		if live := c.liveAgent(header.ID); live != nil {
+			if service := c.titles(); service != nil {
+				if snapshot := service.Get(live.Session); snapshot != nil && snapshot.Title != "" {
+					item["title"] = snapshot.Title
+				}
+			}
+		}
 		if header.CWD != "" {
 			item["cwd"] = header.CWD
 		}
@@ -278,7 +288,9 @@ func (c *SessionController) Contribution() typert.Contribution {
 					descriptor("session.create", "create", "Create", requestParam),
 					descriptor("session.prompt", "prompt", "Prompt", requestParam),
 					descriptor("session.cancel", "cancel", "Cancel", requestParam),
-					descriptor("session.rename", "rename", "Rename", requestParam))
+					descriptor("session.rename", "rename", "Rename", requestParam),
+					descriptor("session.selectModel", "selectModel", "SelectModel", requestParam),
+					descriptor("session.openWorkspacePath", "openWorkspacePath", "OpenWorkspacePath", requestParam))
 			}
 			return invocations
 		}(),
