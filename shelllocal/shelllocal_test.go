@@ -247,6 +247,16 @@ func TestRunReal(t *testing.T) {
 	}
 }
 
+// Load tolerance for the real-process tests (F12): the full suite runs
+// ~110 packages concurrently and Windows spawn/teardown latency scales with
+// machine load. The cancel lead time ensures the process is certainly
+// running before cancellation; the settle bounds stay far above the happy
+// path but finite.
+const (
+	spawnLeadTime  = time.Second
+	killSettleTime = 60 * time.Second
+)
+
 // TestTimeoutClassificationReal: only the executor's own timeout counts as
 // timedOut (single first-cause classification).
 func TestTimeoutClassificationReal(t *testing.T) {
@@ -272,7 +282,7 @@ func TestTimeoutClassificationReal(t *testing.T) {
 	// A timeout kill is tree-terminated: the exact exit fact is platform
 	// dependent (POSIX signal, Windows force-terminate), but the cause
 	// classification is not.
-	if elapsed := time.Since(started); elapsed > 20*time.Second {
+	if elapsed := time.Since(started); elapsed > killSettleTime {
 		t.Fatalf("timeout kill took too long: %v", elapsed)
 	}
 }
@@ -292,7 +302,7 @@ func TestAbortClassificationReal(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	spec := executor.Resolve(shell.ShellExecRequest{Command: flavor.sleepCmd, Signal: ctx})
 	go func() {
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(spawnLeadTime)
 		cancel()
 	}()
 	result, err := executor.Run(spec)
@@ -347,11 +357,11 @@ func TestBackgroundKillClassificationReal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(spawnLeadTime)
 	cancel()
 	select {
 	case <-proc.Done():
-	case <-time.After(20 * time.Second):
+	case <-time.After(killSettleTime):
 		t.Fatal("done never settled after cancellation")
 	}
 	if proc.Status() != shell.ProcessKilled {
