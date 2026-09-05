@@ -144,6 +144,9 @@ type Service struct {
 	lifetime context.Context
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
+
+	// detachFeed removes the service's store feed listener.
+	detachFeed func()
 }
 
 // NewService validates the config and attaches the service to the store's
@@ -179,8 +182,9 @@ func NewService(store *session.Store, config Config, logger cordis.Logger) (*Ser
 		lifetime: lifetime,
 		cancel:   cancel,
 	}
-	store.OnEvent(s.onEvent)
+	detachFeed := store.OnEvent(s.onEvent)
 	store.OnDisposed(s.onDisposed)
+	s.detachFeed = detachFeed
 	return s, nil
 }
 
@@ -204,7 +208,9 @@ func (s *Service) Dispose() {
 	s.mu.Unlock()
 	s.cancel()
 	s.wg.Wait()
-	s.store.OnEvent(nil)
+	if s.detachFeed != nil {
+		s.detachFeed()
+	}
 	s.store.OnDisposed(nil)
 }
 

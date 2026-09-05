@@ -80,11 +80,11 @@ type Store struct {
 	seq   int
 	items map[SessionID]*storeEntry
 
-	logger    Logger
-	created   []func(*Session) error
-	disposed  []func(*Session)
-	flush     []func(*Session) error
-	eventSink func(*Session, Event)
+	logger     Logger
+	created    []func(*Session) error
+	disposed   []func(*Session)
+	flush      []func(*Session) error
+	eventSinks []*eventSinkEntry
 }
 
 // Logger is the minimal logging face the store needs (satisfied by
@@ -125,12 +125,27 @@ func (st *Store) OnDisposed(fn func(*Session)) {
 	st.mu.Unlock()
 }
 
-// OnEvent registers the post-commit append feed. The callback runs after
-// the event entered the log; failures are logged and contained.
-func (st *Store) OnEvent(fn func(*Session, Event)) {
+// OnEvent registers a post-commit append feed listener and returns its
+// detach closure. The official feed is a cordis event: every subscriber
+// observes every committed event (multi-subscriber, not single-claim —
+// sessiontitle, telemetry, and the follow bridge all subscribe
+// concurrently). Callbacks run after the event entered the log; failures
+// are logged and contained.
+func (st *Store) OnEvent(fn func(*Session, Event)) func() {
+	entry := &eventSinkEntry{fn: fn}
 	st.mu.Lock()
-	st.eventSink = fn
+	st.eventSinks = append(st.eventSinks, entry)
 	st.mu.Unlock()
+	return func() {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		for index, candidate := range st.eventSinks {
+			if candidate == entry {
+				st.eventSinks = append(st.eventSinks[:index], st.eventSinks[index+1:]...)
+				return
+			}
+		}
+	}
 }
 
 // OnFlush registers a flush participant. Flush runs participants in
@@ -148,9 +163,9 @@ func (st *Store) OnFlush(fn func(*Session) error) {
 // commit and feed would otherwise lose one event and duplicate the next.
 func (st *Store) onEventCommit(session *Session, event Event) {
 	st.mu.Lock()
-	sink := st.eventSink
+	sinks := append([]*eventSinkEntry{}, st.eventSinks...)
 	st.mu.Unlock()
-	if sink == nil {
+	if len(sinks) == 0 {
 		return
 	}
 	// Only live (announced) sessions feed the store stream; seed replay in
@@ -161,14 +176,16 @@ func (st *Store) onEventCommit(session *Session, event Event) {
 	if entry == nil {
 		return
 	}
-	func() {
-		defer func() {
-			if rec := recover(); rec != nil {
-				st.warnf("session %q: session/event listener panicked: %v", session.ID(), rec)
-			}
+	for _, sink := range sinks {
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					st.warnf("session %q: session/event listener panicked: %v", session.ID(), rec)
+				}
+			}()
+			sink.fn(session, event)
 		}()
-		sink(session, event)
-	}()
+	}
 }
 
 // Create prepares, enters, and announces a session owned by the calling
@@ -422,4 +439,9 @@ func (st *Store) Flush() FlushResult {
 	}
 	wg.Wait()
 	return FlushResult{Participated: anyRan, Error: first}
+}
+
+// eventSinkEntry is one feed listener; the pointer is the detach identity.
+type eventSinkEntry struct {
+	fn func(*Session, Event)
 }

@@ -196,11 +196,11 @@ func (c *DirectoryPickerController) Contribution() typert.Contribution {
 		}
 	}
 	listParam := typert.InvocationParameterDescriptor{
-		Name:            "path",
-		Wire:            "path",
-		Source:          typert.SourceJSON,
+		Name:             "path",
+		Wire:             "path",
+		Source:           typert.SourceJSON,
 		AcceptsUndefined: true,
-		Codec:           typert.Codec{Mode: typert.CodecSrcJSON},
+		Codec:            typert.Codec{Mode: typert.CodecSrcJSON},
 	}
 	return typert.Contribution{
 		Package: "directory-picker-controller",

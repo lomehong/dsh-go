@@ -70,8 +70,8 @@ import (
 	"dshgo/session/projectioncache"
 	"dshgo/sessionlog"
 	"dshgo/sessionquery"
-	"dshgo/sessionstats"
 	"dshgo/sessionquerysqlite"
+	"dshgo/sessionstats"
 	"dshgo/sessiontelemetry"
 	"dshgo/sessiontelemetryotel"
 	"dshgo/sessiontitle"
@@ -1816,6 +1816,32 @@ var builders = map[string]pluginBuilder{
 					if err := ctx.Effect(func() (cordis.Disposer, error) { return disposer, nil }); err != nil {
 						return err
 					}
+				}
+				// The store→cordis event bridge (official store taps):
+				// session/created and session/event ride the composition
+				// context so every subscriber — the projection registry,
+				// the projection cache, goal-round driver, and the gateway
+				// follow feed — observes one multiplexed stream. Without
+				// this bridge the cordis subscribers never fire.
+				detachCreated := ctx.On("session/created", func(value any, next func(any) any) any {
+					return next(value)
+				})
+				detachEvent := store.OnEvent(func(live *session.Session, event session.Event) {
+					ctx.Waterfall("session/event", &projection.SessionEventPayload{Session: live, Event: event})
+				})
+				store.OnCreated(func(live *session.Session) error {
+					ctx.Waterfall("session/created", &projection.SessionCreatedPayload{Session: live})
+					return nil
+				})
+				detachLive := func() {}
+				if err := ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(func() {
+						detachEvent()
+						detachLive()
+						detachCreated()
+					}), nil
+				}); err != nil {
+					return err
 				}
 				return nil
 			},

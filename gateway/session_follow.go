@@ -1,19 +1,21 @@
 // The session history follow stream (official api-session-controller
 // history.ts): one opening snapshot frame (wire header, cursor,
-// message-aligned records, projection baseline) followed by live event
-// entries. The live continuation is served over the same stream; this port
-// opens the snapshot and holds the stream open — the Go event bus does not
-// yet relay session/event into any follow-consumable feed, so the honest
-// continuation is an open, quiet stream (matching the r103 control-stream
-// posture) until the event-bridge batch lands.
+// message-aligned records, projection baseline) followed by the live
+// continuation — gap-free durable events (store OnEvent, seq > cursor) and
+// opted-in `agent/assistant-stream` frames relayed through the agent
+// registry's global emit layer, routed to followers by the attempt id's
+// session prefix.
 package gateway
 
 import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 
+	"dshgo/agent"
 	"dshgo/session"
+	"dshgo/session/projection"
 )
 
 const sessionFollowEndpoint = "session/follow"
@@ -131,9 +133,9 @@ func (g *Gateway) openSessionFollow(args map[string]any, signal context.Context)
 	go func() {
 		defer close(frames)
 		snapshot := map[string]any{
-			"type":   "snapshot",
-			"header": wire,
-			"cursor": cursor,
+			"type":    "snapshot",
+			"header":  wire,
+			"cursor":  cursor,
 			"records": followRecords(page),
 			"hasMore": hasMore,
 			"projections": map[string]any{
@@ -148,10 +150,109 @@ func (g *Gateway) openSessionFollow(args map[string]any, signal context.Context)
 		case <-ctx.Done():
 			return
 		}
-		select {
-		case <-signal.Done():
-		case <-ctx.Done():
+
+		// Live continuation: one FIFO carrying durable events past the
+		// snapshot cursor (the cordis session/event feed — the same
+		// multiplexed source the projection registry drives) and
+		// assistant-stream frames routed by the attempt id's session prefix
+		// (official follow loop).
+		live := make(chan any, 64)
+		done := make(chan struct{})
+		defer close(done)
+		detachEvents := g.ctx.On("session/event", func(value any, next func(any) any) any {
+			if payload, ok := value.(*projection.SessionEventPayload); ok {
+				if payload.Session.ID() == sess.ID() && payload.Event.Seq > cursor {
+					select {
+					case live <- map[string]any{"type": "event", "event": payload.Event}:
+					case <-done:
+					case <-signal.Done():
+					}
+				}
+			}
+			return next(value)
+		})
+		defer detachEvents()
+		detachFrames := g.relayAssistantFrames(sess.ID(), func(frame any) {
+			select {
+			case live <- map[string]any{"type": "assistant-stream", "frame": frame}:
+			case <-done:
+			case <-signal.Done():
+			}
+		})
+		defer detachFrames()
+
+		for {
+			select {
+			case entry := <-live:
+				select {
+				case frames <- entry:
+				case <-signal.Done():
+					return
+				case <-ctx.Done():
+					return
+				}
+			case <-signal.Done():
+				return
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 	return frames, cancel, nil
+}
+
+// sessionEventPayload is the cordis session/event payload (the projection
+// registry drives the same shape).
+type sessionEventPayload struct {
+	Session *session.Session
+	Event   session.Event
+}
+
+// relayAssistantStreams is the gateway-level assistant-frame relay: a
+// global emit listener on the agent registry's bus (official ctx.on
+// 'agent/assistant-stream'), nil when no registry is composed.
+var relayAssistantStreams = struct {
+	mu       sync.Mutex
+	handlers map[session.SessionID][]func(any)
+}{handlers: map[session.SessionID][]func(any){}}
+
+// relayAssistantFrames registers one session-scoped assistant-frame sink.
+// Frames route by the attempt id's session prefix (`<sessionId>:<n>` —
+// session ids are uuid-shaped in this deployment, so the last `:` splits).
+func (g *Gateway) relayAssistantFrames(id session.SessionID, sink func(any)) func() {
+	registry, ok := g.ctx.Get("agents").(*agent.AgentRegistry)
+	if !ok || registry == nil {
+		return func() {}
+	}
+	relayAssistantStreams.mu.Lock()
+	relayAssistantStreams.handlers[id] = append(relayAssistantStreams.handlers[id], sink)
+	relayAssistantStreams.mu.Unlock()
+	detach := registry.Events().OnEmit(agent.EventAssistantStream, nil, func(payload any) error {
+		frame, ok := payload.(agent.AssistantStreamFrame)
+		if !ok {
+			return nil
+		}
+		target := session.SessionID(liveSessionPrefix(string(frame.AttemptID)))
+		relayAssistantStreams.mu.Lock()
+		handlers := append([]func(any){}, relayAssistantStreams.handlers[target]...)
+		relayAssistantStreams.mu.Unlock()
+		for _, handler := range handlers {
+			handler(frame)
+		}
+		return nil
+	})
+	return func() {
+		relayAssistantStreams.mu.Lock()
+		delete(relayAssistantStreams.handlers, id)
+		relayAssistantStreams.mu.Unlock()
+		detach()
+	}
+}
+
+// liveSessionPrefix returns the attempt id's session prefix.
+func liveSessionPrefix(attemptID string) string {
+	if index := strings.LastIndex(attemptID, ":"); index > 0 {
+		return attemptID[:index]
+	}
+	return attemptID
 }

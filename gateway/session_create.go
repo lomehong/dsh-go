@@ -111,7 +111,9 @@ func (c *SessionController) agents() SessionAgentCreator {
 // liveAgent resolves the composed registry's live-agent lookup, or nil.
 func (c *SessionController) liveAgent(sessionID session.SessionID) *agent.Agent {
 	registry := c.agents()
-	if getter, ok := registry.(interface{ Get(session.SessionID) *agent.Agent }); ok {
+	if getter, ok := registry.(interface {
+		Get(session.SessionID) *agent.Agent
+	}); ok {
 		return getter.Get(sessionID)
 	}
 	return nil

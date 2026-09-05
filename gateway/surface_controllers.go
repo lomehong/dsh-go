@@ -188,7 +188,7 @@ type PluginInventoryRow struct {
 // (official dsh-host-plugin-inventory): a read-only projection of the
 // composed profile rows.
 type PluginInventoryController struct {
-	rows   func() []PluginInventoryRow
+	rows    func() []PluginInventoryRow
 	presets func() any
 }
 

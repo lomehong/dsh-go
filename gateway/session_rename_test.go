@@ -14,8 +14,8 @@ import (
 // session-title service over the same store, matching the composed wiring.
 type renameFixture struct {
 	*createFakeFactory
-	store    *session.Store
-	titles   *sessiontitle.Service
+	store      *session.Store
+	titles     *sessiontitle.Service
 	controller *SessionController
 }
 
