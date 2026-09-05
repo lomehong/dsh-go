@@ -74,6 +74,7 @@ import (
 	"dshgo/sessionlog"
 	"dshgo/sessionquery"
 	"dshgo/sessionquerysqlite"
+	"dshgo/sessionreference"
 	"dshgo/sessionstats"
 	"dshgo/sessiontelemetry"
 	"dshgo/sessiontelemetryotel"
@@ -2674,6 +2675,66 @@ var builders = map[string]pluginBuilder{
 	// The in-process fork provider: the child is seeded with the parent's
 	// completed-turn prefix. Config.providerName overrides fork.
 	"@deepseek-ai/dsh-subagent-fork-in-process": inProcessProviderSpec("fork"),
+
+	// Cross-session references (official dsh-session-reference): canonical
+	// session mentions in direct user messages snapshot the referenced
+	// session's surface into durable untrusted context during the agent's
+	// pre-step, and the same resolver serves mention-candidate discovery.
+	// The row Apply is deferred until agents + session-query resolve
+	// (PluginSpec.Inject); the pre-step listener registers with the row
+	// context's effect lifetime — a ctx.Inject pending callback's effect
+	// does not survive to runtime (r139 wiring finding).
+	"@deepseek-ai/dsh-session-reference": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceAgents, ServiceSessionQuery},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				fmt.Fprintln(os.Stderr, "session-reference DEBUG: apply entered")
+				engine, ok := ctx.Get(ServiceSessionQuery).(*sessionquery.Engine)
+				if !ok || engine == nil {
+					return errors.New("session-reference: the session query engine is unavailable")
+				}
+				agents := ctx.Get(ServiceAgents).(*agent.AgentRegistry)
+				reader := &sessionReferenceReader{engine: engine, ctx: context.Background()}
+				var labeler sessionreference.Labeler
+				if titles, ok := ctx.Get(ServiceSessionTitle).(*sessiontitle.Service); ok && titles != nil {
+					labeler = func(record sessionreference.SessionRecord) (string, bool) {
+						if live := agents.Get(session.SessionID(record.ID)); live != nil {
+							if snapshot := titles.Get(live.Session); snapshot != nil && snapshot.Title != "" {
+								return snapshot.Title, true
+							}
+						}
+						return "", false
+					}
+				}
+				resolver, resolverErr := sessionreference.NewResolver(sessionreference.DefaultConfig(), reader, labeler)
+				if resolverErr != nil {
+					return resolverErr
+				}
+				ctx.Provide("sessionReferences", resolver)
+				bus := agents.Events()
+				undo := bus.PreStep().On(nil, func(payload agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
+					fmt.Fprintln(os.Stderr, "session-reference DEBUG: listener entered")
+					if payload.Agent == nil {
+						return next(payload)
+					}
+					prepared, err := resolver.PrepareDirectMessages(string(payload.Agent.ID), payload.Messages)
+					if err != nil {
+						// A broken reference degrades to the unprepared
+						// messages rather than dead-ending the turn (the
+						// official listener failure settles into next()).
+						deps.Logger.Warn(fmt.Sprintf("session-reference: prepare failed for %q: %v", payload.Agent.ID, err))
+						return next(payload)
+					}
+					payload.Messages = prepared
+					return next(payload)
+				})
+			return ctx.Effect(func() (cordis.Disposer, error) {
+				return cordis.Disposer(undo), nil
+			})
+			},
+		}
+	},
 	// The shipped base bundle names the in-process delegation providers by
 	// their upstream package names; both spellings resolve to the same
 	// provider builder (official config providerName overrides).

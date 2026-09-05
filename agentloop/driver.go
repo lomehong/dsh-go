@@ -582,18 +582,23 @@ func (d *ReactLoopAgent) preStep(signal context.Context, target agent.InboxTarge
 	}
 	joined := systemprompt.JoinContextSections(sections)
 	projected := d.runtimeContext.Project(joined, sections)
+	// The dispatched messages carry the runtime-context projection: a
+	// pre-step listener's decision.messages are authoritative for the step.
 	messages := claimed
 	if projected.ID != "" || len(projected.Content) > 0 {
 		messages = append(append([]llm.Message{}, claimed...), projected)
 	}
 	decision := d.Events().PreStep().Dispatch(d.Scope, agent.PreStepPayload{
 		Agent:    d.Agent,
-		Messages: claimed,
+		Messages: messages,
 		Turn:     turn,
 		Step:     step,
 		Signal:   signal,
-	}, func(agent.PreStepPayload) agent.PreStepDecision {
-		return agent.PreStepEnter(messages)
+	}, func(payload agent.PreStepPayload) agent.PreStepDecision {
+		// The base honors payload.Messages: a pre-step listener may replace
+		// the messages that enter the step (official PreStepDecision
+		// contract).
+		return agent.PreStepEnter(payload.Messages)
 	})
 	if err := signal.Err(); err != nil {
 		return preparedStep{}, err

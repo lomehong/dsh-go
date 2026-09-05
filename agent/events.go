@@ -129,6 +129,17 @@ func (b *SubjectEventBus) OnWaterfall(event string, listenerScope scope.ScopeKey
 	return eventListeners.On(listenerScope, fn)
 }
 
+// WaterfallListenerCount reports the registered listener count for one
+// waterfall event (test-support probe).
+func (b *SubjectEventBus) WaterfallListenerCount(event string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if eventListeners := b.waterfall[event]; eventListeners != nil {
+		return eventListeners.Len()
+	}
+	return 0
+}
+
 // admitted reports whether one listener's tag admits the agent subject's
 // scope: untagged listeners are admitted for every dispatch; tagged listeners
 // follow the scope admission rules.

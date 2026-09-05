@@ -100,7 +100,6 @@ var Dispositions = map[string]string{
 	"@deepseek-ai/dsh-tool-pwsh-persistent":                "T3-planned (persistent shell tool family)",
 	"@deepseek-ai/dsh-host-directory-picker-auto":          "T3-planned (directory picker)",
 	"@deepseek-ai/dsh-code-runtime-worker-thread":          "T3-planned-skip (web-mode PTC code execution deferred; see DECISIONS)",
-	"@deepseek-ai/dsh-session-reference":                   "T3-planned (sessionreference ported; catalog row pending)",
 	"@deepseek-ai/dsh-session-stats":                       "T3-planned (sessionstats ported; catalog row pending)",
 	"@deepseek-ai/dsh-session-log-export":         "frontend-domain (browser /export command + download dialog; the shared archive helpers port as sessionlog)",
 	// Delivered under Go packaging: the api-controller rows' Remote
