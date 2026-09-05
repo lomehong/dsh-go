@@ -450,21 +450,37 @@ var builders = map[string]pluginBuilder{
 				}
 				// The Models tab's custom-provider card opens only when its
 				// namespace carries a protocol union at providers.\0probe.api.
+								// The Models tab's custom-provider card resolves its schema at
+				// providers.<id>: the official namespace registers the
+				// providers map as a schemastery DICT (type dict + inner),
+				// whose inner names the profile fields the editor reads
+				// (api protocol union, models map, credential derivation).
 				piAiEnvelope, err := json.Marshal(map[string]any{
 					"type": "object",
 					"dict": map[string]any{
 						"providers": map[string]any{
-							"type": "object",
-							"dict": map[string]any{
-								"\u0000probe": map[string]any{
-									"type": "object",
-									"dict": map[string]any{
-										"api": map[string]any{
-											"type": "union",
-											"list": []any{
-												map[string]any{"type": "const", "value": "openai-completions"},
-												map[string]any{"type": "const", "value": "openai-responses"},
-												map[string]any{"type": "const", "value": "anthropic-messages"},
+							"type": "dict",
+							"inner": map[string]any{
+								"type": "object",
+								"dict": map[string]any{
+									"api": map[string]any{
+										"type": "union",
+										"list": []any{
+											map[string]any{"type": "const", "value": "openai-completions"},
+											map[string]any{"type": "const", "value": "openai-responses"},
+											map[string]any{"type": "const", "value": "anthropic-messages"},
+										},
+									},
+									"baseUrl":   map[string]any{"type": "string"},
+									"apiKeyEnv": map[string]any{"type": "string"},
+									"models": map[string]any{
+										"type": "dict",
+										"inner": map[string]any{
+											"type": "object",
+											"dict": map[string]any{
+												"name":          map[string]any{"type": "string"},
+												"contextWindow": map[string]any{"type": "number"},
+												"maxTokens":     map[string]any{"type": "number"},
 											},
 										},
 									},
