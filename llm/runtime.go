@@ -256,6 +256,9 @@ type ConfigurableProvider struct {
 	SettingsNs string
 	// SettingsPath is the document path of the section inside the namespace.
 	SettingsPath []string
+	// Declared marks a hand-declared route absent from the installed
+	// catalog (official `declared`); catalog members omit it.
+	Declared bool `json:"declared,omitempty"`
 }
 
 // RegisterConfigurableProviders records discovery-facing provider entries.

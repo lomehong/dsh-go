@@ -40,7 +40,8 @@ func CompositionRows(preset AgentPreset) ([]CompositionRow, error) {
 		return nil, fmt.Errorf("agent-presets: composition of %q: %w", preset.ID, err)
 	}
 	rows := make([]CompositionRow, 0, len(entries))
-	walkCompositionRows(entries, nil, &rows)
+	top := false
+	walkCompositionRows(entries, &top, &rows)
 	return rows, nil
 }
 
@@ -98,7 +99,18 @@ func walkCompositionRows(entries []loader.Entry, outer *bool, out *[]Composition
 		}
 		row := CompositionRow{
 			ModuleName: entry.Name,
-			Enabled:    combined,
+		}
+		// Effective ENABLEMENT, not the disabled flag: combined true (any
+		// level disabled) → row disabled; conditional → nil (left to a
+		// mount); else enabled (official enabled projection).
+		switch {
+		case combined == nil:
+		case *combined:
+			disabled := false
+			row.Enabled = &disabled
+		default:
+			enabled := true
+			row.Enabled = &enabled
 		}
 		if entry.ID != "" {
 			id := entry.ID

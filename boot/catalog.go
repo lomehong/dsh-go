@@ -1067,6 +1067,16 @@ var builders = map[string]pluginBuilder{
 						return fmt.Errorf("api-gateway: agent presets controller: %w", err)
 					}
 				}
+				// The installed multi-provider catalog (official llm-pi-ai
+				// directoryEntries): every catalog provider renders on the
+				// Models page before any route exists. Dispatch needs a
+				// matching wire adapter (the pi-ai twin remains the T2
+				// on-demand round).
+				if runtime, ok := ctx.Get(ServiceLlm).(*llm.Runtime); ok && runtime != nil {
+					if err := runtime.RegisterConfigurableProviders(llm.PiAiCatalogEntries()); err != nil {
+						return err
+					}
+				}
 				llmController := gateway.NewLlmController(func() any {
 					return ctx.Get(ServiceLlm)
 				})
