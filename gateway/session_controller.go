@@ -297,8 +297,10 @@ func (c *SessionController) Contribution() typert.Contribution {
 					descriptor("session.cancel", "cancel", "Cancel", requestParam),
 					descriptor("session.rename", "rename", "Rename", requestParam),
 					descriptor("session.selectModel", "selectModel", "SelectModel", requestParam),
-					descriptor("session.openWorkspacePath", "openWorkspacePath", "OpenWorkspacePath", requestParam))
+					descriptor("session.openWorkspacePath", "openWorkspacePath", "OpenWorkspacePath", requestParam),
+					descriptor("session.updateQueue", "updateQueue", "UpdateQueue", requestParam))
 			}
+			invocations = append(invocations, descriptor("session.search", "search", "SearchSessions", requestParam))
 			return invocations
 		}(),
 	}
