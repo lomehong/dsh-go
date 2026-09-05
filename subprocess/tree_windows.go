@@ -8,11 +8,22 @@ import (
 	"syscall"
 )
 
-// configureDetached is a no-op on Windows: teardown terminates the tree by
-// root pid through taskkill /T instead of a process group.
+// configureDetached hides every child window on Windows (official
+// windowsHide + CREATE_NO_WINDOW): the harness spawns console tools whose
+// windows must never flash over the user's desktop. Teardown terminates the
+// tree by root pid through taskkill /T instead of a process group.
 func configureDetached(cmd *exec.Cmd) error {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.HideWindow = true
+	cmd.SysProcAttr.CreationFlags |= windowsCreateNoWindow
 	return nil
 }
+
+// windowsCreateNoWindow is the process-creation flag suppressing a console
+// window for the child.
+const windowsCreateNoWindow = 0x08000000
 
 // processGroupAlive is unreachable on Windows (the direct child's exit is
 // the observable boundary).
@@ -27,11 +38,17 @@ func defaultSignalTree(pid int, signalName string, directChildExited bool) {
 	if pid <= 0 {
 		return
 	}
-	// Outcome deliberately unchecked.
+	// Outcome deliberately unchecked. The helper itself must not flash a
+	// window (official windowsHide on the taskkill spawnSync).
 	cmd := exec.Command("taskkill", "/PID", itoa(pid), "/T", "/F")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.HideWindow = true
+	cmd.SysProcAttr.CreationFlags |= windowsCreateNoWindow
 	_ = cmd.Run()
 }
 

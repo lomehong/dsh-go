@@ -322,7 +322,7 @@ func registerWrite(runtime *tools.ToolRuntime, controller *controller) (func(), 
 			}
 			outcome, err := controller.backend.WriteText(ctx, target, content, intent, policy)
 			if err != nil {
-				return nil, RemediateFsError(controller.mapError(err, policy))
+				return nil, RemediateFsError(controller.mapError(err, policy), target.DisplayPath)
 			}
 			controller.recordObservation(target, fs.ObservationPresent(outcome.Version), exec)
 			return map[string]any{
@@ -434,10 +434,12 @@ func registerEdit(runtime *tools.ToolRuntime, controller *controller) (func(), e
 			var intent *fs.Version
 			if owned, ok := decided.(*fs.Version); ok {
 				intent = owned
+			} else if intentErr, ok := decided.(error); ok {
+				return nil, RemediateFsError(controller.mapError(intentErr, policy), target.DisplayPath)
 			}
 			outcome, err := controller.backend.EditText(ctx, target, fs.EditRequest{OldString: oldString, NewString: newString, ReplaceAll: replaceAll}, intent, policy)
 			if err != nil {
-				return nil, RemediateFsError(controller.mapError(err, policy))
+				return nil, RemediateFsError(controller.mapError(err, policy), target.DisplayPath)
 			}
 			controller.recordObservation(target, fs.ObservationPresent(outcome.Version), exec)
 			return map[string]any{

@@ -66,25 +66,26 @@ func parsePositiveInteger(value int, name string) (int, error) {
 	return value, nil
 }
 
-// RemediateFsError appends the correct recovery instruction to a
-// guarded-mutation failure's message: FS_STALE_VERSION recovers only by
-// re-reading; FS_NOT_OBSERVED by reading. The code is preserved so retry and
-// UI layers keep routing on it; anything else passes through untouched.
-func RemediateFsError(err error) error {
+// RemediateFsError is the model-facing wrapper for guarded-mutation
+// failures. Every FS_NOT_OBSERVED source — policy reason or provider error
+// alike — normalizes to one stable diagnostic naming the target; the
+// original wording rides the wrapped cause. FS_STALE_VERSION keeps the
+// provider's reason and appends the reread remedy. Both preserve the
+// structured code (official fs/tool-fs error.ts, alpha.3 normalization).
+func RemediateFsError(err error, displayPath string) error {
 	codeErr, ok := err.(*fs.Error)
 	if !ok {
 		return err
 	}
-	var remedy string
 	switch codeErr.Code {
 	case fs.CodeStaleVersion:
-		remedy = "re-read the file, then retry"
+		return fs.NewError(codeErr.Code, fmt.Sprintf("%s — re-read the file, then retry", codeErr.Detail), err)
 	case fs.CodeNotObserved:
-		remedy = "read the file, then retry"
+		return fs.NewError(codeErr.Code,
+			fmt.Sprintf("cannot modify %q: file has not been read — read the file, then retry", displayPath), err)
 	default:
 		return err
 	}
-	return fs.NewError(codeErr.Code, fmt.Sprintf("%s — %s", codeErr.Detail, remedy), err)
 }
 
 // blankArgs reads one string argument treating an absent key, a null, or a

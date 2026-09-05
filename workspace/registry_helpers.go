@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"dshgo/session"
@@ -31,9 +29,11 @@ func NewWorkspaceID() WorkspaceID {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", bytes[0:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:16])
 }
 
-// baseName is the display-title fallback: the path's final element.
+// baseName is the display-title fallback: the path's final element, or the
+// complete root spelling for a filesystem root (official
+// defaultWorkspaceTitle — a `C:\` workspace no longer titles as "").
 func baseName(path string) string {
-	return filepath.Base(strings.TrimSuffix(path, string(filepath.Separator)))
+	return DefaultWorkspaceTitle(path)
 }
 
 // domainTableStore adapts the domain-backed table to the entity-layer
