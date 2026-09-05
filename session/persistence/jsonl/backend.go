@@ -147,6 +147,25 @@ func (b *Backend) LoadStored(id session.SessionID) (*persistence.StoredPrefix, e
 	if path == "" {
 		return nil, nil
 	}
+	// A stored Session predating the current generation migrates before the
+	// body read returns: the source stays byte-identical, and the successor
+	// (published without overwrite) becomes the read target. A newer stored
+	// generation refuses with the upgrade direction.
+	path, _, err = b.Store.EnsureCurrent(path)
+	if err != nil {
+		var unsupported *SessionFormatUnsupportedError
+		if errors.As(err, &unsupported) {
+			return nil, &persistence.FormatUnsupportedError{
+				Message:  fmt.Sprintf("%s (raw log: %s)", unsupported.Error(), path),
+				Location: &persistence.Location{Path: path},
+			}
+		}
+		return nil, err
+	}
+	info, err = os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
 	buffer, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

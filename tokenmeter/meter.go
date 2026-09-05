@@ -263,12 +263,16 @@ func (m *Meter) foldEvent(state *replayState, event session.Event, events []sess
 }
 
 // estimateProviderAssistant reassembles provider output from the exact
-// cited chunk seqs for a usage anchor. Missing legacy source seqs
-// conservatively treat the durable output as the provider output; an
-// explicit empty list prices a known empty stream.
+// cited chunk seqs for a usage anchor. Format v2 messages cite nothing:
+// their provider output reassembles from the embedded compact stream.
+// Missing legacy source seqs conservatively treat the durable output as the
+// provider output; an explicit empty list prices a known empty stream.
 func estimateProviderAssistant(event session.Event, events []session.Event, durableEventTokens int64) (int64, error) {
 	sourceSeqs := event.SourceEventSeqs
 	if sourceSeqs == nil {
+		if embedded := embeddedStreamTokens(event); embedded != nil {
+			return embedded()
+		}
 		return durableEventTokens, nil
 	}
 	var messageData session.AssistantMessageData
@@ -310,4 +314,34 @@ func estimateProviderAssistant(event session.Event, events []session.Event, dura
 		return 0, nil
 	}
 	return EstimateContent(blocks) + RoleOverhead, nil
+}
+
+// embeddedStreamTokens lazily prices a format-v2 assistant/message from its
+// embedded compact stream; nil when the event carries none.
+func embeddedStreamTokens(event session.Event) func() (int64, error) {
+	var probe struct {
+		Stream json.RawMessage `json:"stream"`
+	}
+	if err := json.Unmarshal(event.Data, &probe); err != nil || len(probe.Stream) == 0 {
+		return nil
+	}
+	return func() (int64, error) {
+		records, err := llm.ParseAssistantStream(probe.Stream)
+		if err != nil {
+			return 0, fmt.Errorf("token meter: assistant/message at seq %d embedded stream: %w", event.Seq, err)
+		}
+		timed, err := llm.ExpandAssistantStream(records)
+		if err != nil {
+			return 0, fmt.Errorf("token meter: assistant/message at seq %d embedded stream: %w", event.Seq, err)
+		}
+		assembler := llm.NewBlockAssembler()
+		for _, member := range timed {
+			assembler.Push(member.Chunk)
+		}
+		blocks := assembler.Blocks()
+		if len(blocks) == 0 {
+			return 0, nil
+		}
+		return EstimateContent(blocks) + RoleOverhead, nil
+	}
 }

@@ -79,6 +79,8 @@ var SessionStatsProjection = projection.Unit[*State]{
 				PendingCalls: copyPending(current.PendingCalls),
 			}, true
 		case session.EventAssistantChunk:
+			// Historical v0/v1 generation only: format v2 keeps no top-level
+			// chunk events (the stream embeds in the settlement).
 			chunked := decode[chunkEnvelope](event)
 			open := current.OpenStep
 			if open == nil || open.Turn != chunked.Turn || open.Step != chunked.Step {
@@ -97,11 +99,42 @@ var SessionStatsProjection = projection.Unit[*State]{
 				OpenStep:     &openStep{Turn: open.Turn, Step: open.Step, StartTime: open.StartTime, FirstTokenTime: &first},
 				PendingCalls: copyPending(current.PendingCalls),
 			}, true
+		case session.EventAssistantAttempt:
+			// Format v2: an abandoned attempt's stream still names the
+			// step's first token (official assistant/attempt branch).
+			attempt := decode[session.AssistantAttemptData](event)
+			open := current.OpenStep
+			if open == nil || open.Turn != attempt.Turn || open.Step != attempt.Step {
+				return current, false
+			}
+			if open.FirstTokenTime != nil {
+				return current, false
+			}
+			first, ok := firstTokenTime(attempt.Stream)
+			if !ok {
+				return current, false
+			}
+			return &State{
+				Turns: current.Turns, Steps: current.Steps,
+				LlmMs: current.LlmMs, ToolMs: current.ToolMs,
+				TtftMs: current.TtftMs, TtftSteps: current.TtftSteps,
+				DecodeMs: current.DecodeMs, DecodeTokens: current.DecodeTokens,
+				LastTurn:     current.LastTurn,
+				OpenStep:     &openStep{Turn: open.Turn, Step: open.Step, StartTime: open.StartTime, FirstTokenTime: &first},
+				PendingCalls: copyPending(current.PendingCalls),
+			}, true
 		case session.EventAssistantMsg:
 			message := decode[session.AssistantMessageData](event)
 			open := current.OpenStep
 			if open == nil || open.Turn != message.Turn || open.Step != message.Step {
 				return current, false
+			}
+			// Format v2 derives the first token from the embedded stream
+			// when the live frames never landed on this fold.
+			if open.FirstTokenTime == nil {
+				if first, ok := firstTokenTime(message.Stream); ok {
+					open.FirstTokenTime = &first
+				}
 			}
 			// One assembled message per step: closing the boundary means a
 			// defensive duplicate cannot accrue twice.
@@ -217,6 +250,29 @@ type chunkEnvelope struct {
 
 // isTokenDelta reports whether a stream chunk carries a non-empty
 // first-token delta.
+// firstTokenTime names the first non-empty token timestamp in one durable
+// Assistant stream (official firstTokenTime): false when the stream carries
+// no token delta.
+func firstTokenTime(stream json.RawMessage) (int64, bool) {
+	if len(stream) == 0 {
+		return 0, false
+	}
+	records, err := llm.ParseAssistantStream(stream)
+	if err != nil {
+		return 0, false
+	}
+	timed, err := llm.ExpandAssistantStream(records)
+	if err != nil {
+		return 0, false
+	}
+	for _, member := range timed {
+		if isTokenDelta(member.Chunk) {
+			return member.Time, true
+		}
+	}
+	return 0, false
+}
+
 func isTokenDelta(chunk llm.StreamChunk) bool {
 	switch chunk.Type {
 	case llm.ChunkTextDelta, llm.ChunkReasoningDelta:

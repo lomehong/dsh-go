@@ -27,6 +27,12 @@ import (
 type Identity struct {
 	CreatedAt int64  `json:"createdAt"`
 	CWD       string `json:"cwd,omitempty"`
+	// FormatVersion binds every fold to the Session format generation the
+	// checkpoint refolds (official v7 semantics): a stored row without the
+	// generation (or with a stale one) cannot seed a current Session — the
+	// authoritative log refolds it, and the next checkpoint writes the
+	// complete current identity.
+	FormatVersion *int64 `json:"formatVersion,omitempty"`
 }
 
 // Record is one session's stored checkpoint: its log identity plus the
@@ -319,6 +325,13 @@ func (s *Service) recordFor(id session.SessionID, expected Identity) (*Record, b
 	if record.Identity.CreatedAt != expected.CreatedAt || record.Identity.CWD != expected.CWD {
 		return nil, false
 	}
+	// A record without the format generation (or from another generation)
+	// is structurally loadable but cannot seed a current Session: the log
+	// refolds it.
+	if record.Identity.FormatVersion == nil ||
+		*record.Identity.FormatVersion != derefOr(expected.FormatVersion, session.SESSION_FORMAT_VERSION) {
+		return nil, false
+	}
 	return record, true
 }
 
@@ -348,7 +361,15 @@ func (s *Service) markClean(sess *session.Session) {
 
 // identityOf projects a header onto the identity fields a record binds to.
 func identityOf(header session.SessionHeader) Identity {
-	return Identity{CreatedAt: header.CreatedAt, CWD: header.CWD}
+	version := header.Version
+	return Identity{CreatedAt: header.CreatedAt, CWD: header.CWD, FormatVersion: &version}
+}
+
+func derefOr(value *int64, fallback int64) int64 {
+	if value == nil {
+		return fallback
+	}
+	return *value
 }
 
 // MarshalRecord serializes a record for durable media; exported for store

@@ -114,6 +114,14 @@ func countDefinition() projection.Definition {
 	}
 }
 
+// cacheFormatVersion seeds fixture records with the current generation
+// binding (records written before the binding cannot seed a current
+// Session; these fixtures fold current logs).
+func cacheFormatVersion() *int64 {
+	version := int64(session.SESSION_FORMAT_VERSION)
+	return &version
+}
+
 func cacheHeader(id session.SessionID) session.SessionHeader {
 	return session.SessionHeader{ID: id, Version: session.SESSION_FORMAT_VERSION, CreatedAt: 99, CWD: "D:\\proj"}
 }
@@ -205,7 +213,7 @@ func TestIdentityMismatchDiscardsRecord(t *testing.T) {
 	id := session.SessionID("life")
 	// A record folded from an unrelated lifecycle under the same id.
 	store.records[id] = &Record{
-		Identity: Identity{CreatedAt: 1, CWD: "elsewhere"},
+		Identity: Identity{CreatedAt: 1, CWD: "elsewhere", FormatVersion: cacheFormatVersion()},
 		Rows:     projection.Checkpoint{"count": {Ver: 1, Seq: 9, Val: json.RawMessage(`99`)}},
 	}
 	meta := cacheHeader(id)
@@ -214,7 +222,7 @@ func TestIdentityMismatchDiscardsRecord(t *testing.T) {
 	}
 	// The matching lifecycle reads it.
 	store.records[id] = &Record{
-		Identity: Identity{CreatedAt: 99, CWD: "D:\\proj"},
+		Identity: Identity{CreatedAt: 99, CWD: "D:\\proj", FormatVersion: cacheFormatVersion()},
 		Rows:     projection.Checkpoint{"count": {Ver: 1, Seq: 9, Val: json.RawMessage(`9`)}},
 	}
 	snapshot, ok := service.CachedSnapshot(meta)
@@ -354,7 +362,7 @@ func TestHydratePreparedRetriesFromExactLogOnStaleRows(t *testing.T) {
 	// A poisoned row: the version matches but the value is malformed. A
 	// stale schema must not make a valid session unreadable.
 	store.records[meta.ID] = &Record{
-		Identity: Identity{CreatedAt: 99, CWD: "D:\\proj"},
+		Identity: Identity{CreatedAt: 99, CWD: "D:\\proj", FormatVersion: cacheFormatVersion()},
 		Rows:     projection.Checkpoint{"count": {Ver: 1, Seq: 5, Val: json.RawMessage(`{"object":"not an int"}`)}},
 	}
 	snapshot, err := service.HydratePrepared(sess, meta, logEvents)

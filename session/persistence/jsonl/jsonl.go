@@ -239,7 +239,11 @@ type headerLine struct {
 	CreatedAt       int64   `json:"createdAt"`
 	CWD             *string `json:"cwd,omitempty"`
 	ParentSession   *string `json:"parentSession,omitempty"`
+	// v0/v1 physical headers carry the numeric seedLength; the v2 physical
+	// header carries the boolean isSeeded and no cut (the cut derives from
+	// the last inherited end-seed marker at body-read time).
 	SeedLength      *int64  `json:"seedLength,omitempty"`
+	IsSeeded        *bool   `json:"isSeeded,omitempty"`
 	Origin          *string `json:"origin,omitempty"`
 	DelegationDepth int64   `json:"delegationDepth"`
 	AgentPreset     *string `json:"agentPreset,omitempty"`
@@ -259,11 +263,15 @@ func toHeaderLine(header session.SessionHeader) headerLine {
 		parent := string(header.ParentSession)
 		line.ParentSession = &parent
 	}
-	// The private version-0 physical header keeps the numeric seedLength;
-	// the logical isSeeded + exact inherited cut translate onto it (W1,
-	// official toHeaderLine): seeded → seedLength = inheritedEventCount,
-	// unseeded → field absent.
-	if header.IsSeeded {
+	// v0/v1 physical headers keep the numeric seedLength (seeded →
+	// inheritedEventCount); v2 physical headers carry only the boolean
+	// isSeeded and no cut (official toHeaderLine per generation).
+	if header.Version >= 2 {
+		if header.IsSeeded {
+			seeded := true
+			line.IsSeeded = &seeded
+		}
+	} else if header.IsSeeded {
 		seed := int64(header.InheritedEventCount)
 		line.SeedLength = &seed
 	}
@@ -294,6 +302,10 @@ func headerFromLine(line headerLine) session.SessionHeader {
 	if line.SeedLength != nil {
 		header.IsSeeded = true
 		header.InheritedEventCount = session.SessionLogOffset(*line.SeedLength)
+	} else if line.IsSeeded != nil && *line.IsSeeded {
+		// v2: the header states seeded but stores no cut; the body scan
+		// derives the exact cut from the last inherited end-seed marker.
+		header.IsSeeded = true
 	}
 	if line.Origin != nil {
 		header.Origin = *line.Origin
@@ -319,12 +331,19 @@ func decodeHeaderLine(parsed map[string]any) (session.SessionHeader, error) {
 		return session.SessionHeader{}, errors.New("corrupt session log: first line is not a session header")
 	} else if version, ok := versionRaw.(json.Number); ok {
 		value, err := version.Int64()
-		if err == nil && value != session.SESSION_FORMAT_VERSION {
+		if err == nil && value > session.SESSION_FORMAT_VERSION {
 			id := "<unknown>"
 			if raw, ok := parsed["id"].(string); ok {
 				id = raw
 			}
 			return session.SessionHeader{}, &SessionFormatUnsupportedError{ID: id, Version: value}
+		}
+		// Historical generations and the v2 header shape are mutually
+		// exclusive: a v2 physical header never carries a numeric cut.
+		if err == nil && value >= 2 {
+			if _, hasSeedLength := parsed["seedLength"]; hasSeedLength {
+				return session.SessionHeader{}, errors.New("corrupt session log: format v2 header must not carry a numeric seed cut")
+			}
 		}
 	}
 	if _, ok := parsed["delegationDepth"]; !ok {
@@ -338,8 +357,11 @@ func decodeHeaderLine(parsed map[string]any) (session.SessionHeader, error) {
 	if err := json.Unmarshal(raw, &line); err != nil {
 		return session.SessionHeader{}, err
 	}
-	if line.Type != "session" || line.Version != session.SESSION_FORMAT_VERSION || line.ID == "" ||
-		line.CreatedAt < 0 || line.Origin != nil && *line.Origin != "subagent" {
+	// Header-only reads translate historical generations in memory (they
+	// never publish a successor); only a NEWER generation refused above, and
+	// a non-session record is not a header at all.
+	if line.Type != "session" || line.Version < 0 || line.Version > session.SESSION_FORMAT_VERSION ||
+		line.ID == "" || line.CreatedAt < 0 || line.Origin != nil && *line.Origin != "subagent" {
 		return session.SessionHeader{}, errors.New("corrupt session log: first line is not a session header")
 	}
 	return headerFromLine(line), nil
@@ -516,12 +538,50 @@ func (s *SessionLogScanner) decodeEventLine(line []byte) ([]session.Event, error
 // already aborted the scan through Write.
 func (s *SessionLogScanner) Finish() (LogScan, error) {
 	s.finished = true
+	// Format v2 stores no numeric cut: a seeded artifact marks its exact
+	// cut with the last inherited end-seed marker (official
+	// deriveInheritedEventCount). Seeded without a marker, or unseeded with
+	// one, refuses.
+	if s.meta.Version >= 2 {
+		cut, hasCut, err := deriveInheritedCut(s.events)
+		if err != nil {
+			return LogScan{}, err
+		}
+		if s.meta.IsSeeded {
+			if !hasCut {
+				return LogScan{}, errors.New("corrupt session log: seeded format v2 Session lacks an inherited end-seed marker")
+			}
+			s.meta.InheritedEventCount = session.SessionLogOffset(cut)
+		} else if hasCut {
+			return LogScan{}, errors.New("corrupt session log: unseeded format v2 Session contains an inherited end-seed marker")
+		}
+	}
 	return LogScan{
 		Meta:           s.meta,
 		Events:         s.events,
 		CommittedBytes: s.committedBytes,
 		TornTail:       s.committedBytes < s.inputBytes,
 	}, nil
+}
+
+// deriveInheritedCut reports the cut named by the last inherited marker.
+func deriveInheritedCut(events []session.Event) (int64, bool, error) {
+	cut := int64(0)
+	has := false
+	for _, event := range events {
+		if event.Type != session.EventEndSeed {
+			continue
+		}
+		parsed, err := parseLineValue(event.Data)
+		if err != nil {
+			return 0, false, fmt.Errorf("corrupt session log: %s %d data is not valid JSON", event.Type, event.Seq)
+		}
+		if parsed["inherited"] == true {
+			cut = event.Seq
+			has = true
+		}
+	}
+	return cut, has, nil
 }
 
 // ScanLog parses a complete or torn JSONL buffer into its preserved event
@@ -582,6 +642,23 @@ func (st *Store) PathOf(cwd, id string) string {
 // Create writes the header line plus the seed events as a new artifact,
 // refusing to overwrite an existing log.
 func (st *Store) Create(header session.SessionHeader, seed []session.Event) error {
+	// Every existing generation reserves the Session id, independently of
+	// header readability (official create semantics).
+	dir := SessionDir(st.Root, header.CWD, string(header.ID))
+	suffix := LogSuffix(st.suffix())
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasSuffix(name, suffix) {
+				continue
+			}
+			if _, canonical := parseGenerationFilename(strings.TrimSuffix(name, suffix)); canonical {
+				return fmt.Errorf("session %q already has a log at %s", header.ID, filepath.Join(dir, name))
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	path := st.PathOf(header.CWD, string(header.ID))
 	if _, err := os.Stat(path); err == nil {
 		return fmt.Errorf("session %q already has a log at %s", header.ID, path)
