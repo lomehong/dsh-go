@@ -145,6 +145,12 @@ foreach ($manifest in $manifests) {
     if (Test-Path $patch) {
         Copy-Item $patch (Join-Path $dstPkg "cordis.patch.yml") -Force
     }
+    # Shipped preset sets travel inside their packages (the Go agent-presets
+    # row resolves its shippedRoot here).
+    $presetsDir = Join-Path $manifest.DirectoryName "presets"
+    if (Test-Path $presetsDir) {
+        Copy-Item $presetsDir (Join-Path $dstPkg "presets") -Recurse -Force
+    }
     $stagedAll++
 }
 Write-Host "manifests+bundle rows staged: $stagedAll"

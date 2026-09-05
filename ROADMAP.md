@@ -231,7 +231,7 @@ workflow / typert / sdk / boot / jobs / interaction / guard 的 src 在 alpha.2 
 
 ## 待续轮次（依赖序，余量为增量特性而非对齐缺口）
 
-1. headless E2E 遗留：流中段 context canceled（诊断线索已收集：非 Do/fail/watchdog/driver-cancel——疑似同步 Apply 阻塞组合与驱动生命周期交互，需异步 run + 生命周期专轮）；session-reference 行（pre-step mention→reference 深度接线）；dsh-host-directory-picker-auto（网关已答 unavailable）；文件上传 gateway 端点（FileStore 已就位，缺 wire 端点）。
+1. headless E2E 遗留：流中段 context canceled（诊断线索已收集：非 Do/fail/watchdog/driver-cancel——疑似同步 Apply 阻塞组合与驱动生命周期交互，需异步 run + 生命周期专轮）；session-reference 行（pre-step mention→reference 深度接线）；dsh-host-directory-picker-auto（网关已答 unavailable，双 client 面已从 boot 组合跳过）；文件上传 gateway 端点（FileStore 已就位，缺 wire 端点）；**多提供方（pi-ai 孪生）轮**：官方 dsh-base 挂 dsh-llm-pi-ai（dormant）——Models 页"添加提供方"写 llm-pi-ai settings 并由 pi-ai 适配器族（openai-completions/anthropic-messages 等 JS SDK wire）派发；Go 侧需 ①llm 运行时注册 pi-ai 目录的 configurable entries（settingsNs llm-pi-ai、settingsPath providers/<id>）②通用 OpenAI-completions wire 的 Go 适配器（DeepSeek 线协议同族可泛化）③anthropic-messages 按需。当前 Models 页只渲染 deepseek-official（诚实：配了无适配器的路由即 NO_ADAPTER）。
 2. **r121 session v2 核心**：SESSION_FORMAT_VERSION→2、v2 头（isSeeded 必在、割点走 end-seed {inherited:true} 标记）、assistant/attempt 词汇注册、seeded 构造器追标记、装词汇 restoreCurrent（catalog 接线）。
 3. **r122 agentloop v2 live writer**：停写顶层 assistant/chunk；settlement 前置于 committed end（`agent/assistant-stream` 帧 start/chunk/end、attemptId=`<sessionId>:<n>`、dense index、revision）；中断有可见前缀→message(interrupted)、否则 attempt；finish error/aborted→attempt+request-error 瀑布。
 4. **r123 消费方**：surface/sessionquery 提取/sessionstats/tokenmeter 折叠/sessiontelemetry/projectioncache（checkpoint 绑 format 世代）对 assistant/attempt+内嵌流适配；gateway journal-stream + session-controller assistant-stream（web follow 光标无帧 FIFO）。
