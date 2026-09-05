@@ -3,6 +3,9 @@ llm-pi-ai:
         my-openai:
             api: openai-completions
             baseUrl: https://example.com/v1
+        test-openai:
+            api: openai-completions
+            baseUrl: https://api.test.com/v1
 ui-onboarding:
     betaDisclaimerAccepted: true
     welcomeNoticeVersion: 2026-08-13.1
