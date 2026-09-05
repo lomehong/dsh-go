@@ -1252,6 +1252,42 @@ var builders = map[string]pluginBuilder{
 						deps.Logger.Warn("api-gateway: workspace registry service has an unexpected type; workspace Remote namespace not registered")
 					}
 				}
+				if err := ctx.Inject([]string{ServiceCommands}, func(c *cordis.Context) error {
+					runtime, ok := c.Get(ServiceCommands).(*commands.CommandRuntime)
+					if !ok {
+						// Commands not composed: the namespace stays unregistered.
+						return nil
+					}
+					commandsController := gateway.NewCommandsController(
+						func() any { return ctx.Get(ServiceCommands) },
+						func() *agent.AgentRegistry { return ctx.Get(ServiceAgents).(*agent.AgentRegistry) },
+					)
+					ctx.Provide("commandsController", commandsController)
+					if _, exists := registry.GetPackage("commands-controller", typert.FaceHost); !exists {
+						if _, err := registry.Register(commandsController.Contribution()); err != nil {
+							return fmt.Errorf("api-gateway: commands controller: %w", err)
+						}
+					}
+					// The commands/change forwarded event: the runtime's private
+					// listener table bridges onto the agent bus so the $events
+					// allowlist forwards it (the browser invalidates its
+					// directory; payload ignored client-side).
+					if agentsValue := c.Get(ServiceAgents); agentsValue != nil {
+						if agents := agentsValue.(*agent.AgentRegistry); agents != nil {
+							bus := agents.Events()
+							undo := runtime.OnChange(func() {
+								bus.Emit("commands/change", nil, map[string]any{})
+							})
+							return ctx.Effect(func() (cordis.Disposer, error) {
+								undo()
+								return cordis.Disposer(func() {}), nil
+							})
+						}
+					}
+					return nil
+				}); err != nil {
+					return fmt.Errorf("api-gateway: commands wiring: %w", err)
+				}
 				return nil
 			},
 		}
