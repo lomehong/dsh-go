@@ -575,8 +575,10 @@ var builders = map[string]pluginBuilder{
 				// launcher (serveWeb, webhost.Mount) — a second registration
 				// here would collide on the registry's single fallback seat
 				// (official frontend-static is the composing owner's job).
-				// The URL line and browser handoff are readiness signals
-				// (official printUrl/handoffBrowser after Loader settles).
+				// The URL line prints at composition; the browser handoff is
+				// deferred to the launcher (official printUrl/handoffBrowser
+				// after Loader settles) — opening the browser here would hit
+				// the unmounted router (404).
 				if cfg.printUrl || cfg.openBrowser {
 					url := fmt.Sprintf("http://127.0.0.1:%d", int(port))
 					if cfg.printUrl {
@@ -587,10 +589,7 @@ var builders = map[string]pluginBuilder{
 						fmt.Printf("dsh web: %s%s\n", url, lan)
 					}
 					if cfg.openBrowser {
-						fmt.Println("dsh web: opening the default browser; pass --no-open to disable")
-						if err := OpenDefaultBrowser(url); err != nil {
-							deps.Logger.Warn(fmt.Sprintf("web-app: could not open the default browser because %v; use the dsh web URL printed at startup", err))
-						}
+						ctx.Provide("webHandoff", map[string]any{"url": url})
 					}
 				}
 				return nil

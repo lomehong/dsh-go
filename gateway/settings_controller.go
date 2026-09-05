@@ -93,7 +93,13 @@ func (c *SettingsController) Update(ctx context.Context, ns string, patch map[st
 	if c.store() == nil {
 		return c.provider()
 	}
-	return nil, c.storeScope(ns).Update(patch)
+	if err := c.storeScope(ns).Update(patch); err != nil {
+		return nil, err
+	}
+	// The write answer carries the updated namespace view: the client
+	// settings mirror folds it into its held document (official
+	// settings-controller update return).
+	return c.store().NamespaceView(ns), nil
 }
 
 // Replace overwrites one namespace's stored user section wholesale.
@@ -101,7 +107,10 @@ func (c *SettingsController) Replace(ctx context.Context, ns string, section map
 	if c.store() == nil {
 		return c.provider()
 	}
-	return nil, c.storeScope(ns).Replace(section)
+	if err := c.storeScope(ns).Replace(section); err != nil {
+		return nil, err
+	}
+	return c.store().NamespaceView(ns), nil
 }
 
 // Mutate applies path-addressed edits to one namespace's user section.
@@ -138,7 +147,10 @@ func (c *SettingsController) Mutate(ctx context.Context, ns string, ops []any, e
 			revision = &r
 		}
 	}
-	return nil, scope.Mutate(pathOps, revision)
+	if err := scope.Mutate(pathOps, revision); err != nil {
+		return nil, err
+	}
+	return c.store().NamespaceView(ns), nil
 }
 
 // OpenSettingsDocument opens the settings document in the host editor.

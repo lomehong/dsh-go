@@ -188,6 +188,23 @@ func clientExportPath(raw json.RawMessage) string {
 	return ""
 }
 
+// clientModuleSkips mirrors the boot.Dispositions decisions for client-half
+// modules whose host-injected bootstrap the Go host does not provide (the
+// experimental inspector requires __DSH_INSPECTOR__ from the unported
+// Inspector Worker host face).
+var clientModuleSkips = map[string]bool{
+	// Inspector requires __DSH_INSPECTOR__ from the unported Inspector
+	// Worker host face.
+	"@deepseek-ai/dsh-experimental-inspector": true,
+	// The directory-picker dual faces collide on the single
+	// conversation.hero.workspace.directoryFlow slot (the official
+	// host-directory-picker-auto row mounts exactly one). The Go host has
+	// no picker backend yet (gateway answers unavailable), so neither face
+	// can serve — skip both until the backend round.
+	"@deepseek-ai/dsh-client-ui-directory-picker-native": true,
+	"@deepseek-ai/dsh-client-ui-directory-picker-browse": true,
+}
+
 // scanClientPackages reads every node_modules package declaring
 // dsh.client.platform == "web" (official activation scan; a web-declaring
 // package with a missing bundle fails loud).
@@ -218,6 +235,13 @@ func scanClientPackages(nodeModules string) ([]*pluginRecord, error) {
 			continue
 		}
 		name := filepath.Base(filepath.Dir(dir)) + "/" + filepath.Base(dir)
+		if clientModuleSkips[name] {
+			// Dispositioned client module (boot.Dispositions semantics, mirrored
+			// here to avoid an import cycle): applying it in the browser would
+			// throw on host-injected bootstrap data the Go host does not
+			// provide.
+			continue
+		}
 		decl := pkg.Dsh.Client
 		clientPath := "lib/client.js"
 		if sub := clientExportPath(pkg.Exports["./client"]); sub != "" {
