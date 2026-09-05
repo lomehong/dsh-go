@@ -450,12 +450,6 @@ var builders = map[string]pluginBuilder{
 				}, map[string]any{}); err != nil {
 					return err
 				}
-				if _, err := store.Register("llm-pi-ai", &settings.Schema{
-					Envelope: piAiSettingsEnvelope(),
-					Defaults: func() map[string]any { return map[string]any{} },
-				}, map[string]any{}); err != nil {
-					return err
-				}
 				ctx.Provide(ServiceSettings, store)
 				return nil
 			},
