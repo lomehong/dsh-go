@@ -57,8 +57,9 @@ func Start(ctx context.Context, config Config) (*Plugin, *DiscoveredContribution
 
 	local := subprocess.NewLocal()
 	handle, err := local.Spawn(ctx, subprocess.SpawnSpec{
-		Argv: config.Argv,
-		Cwd:  config.Cwd,
+		Argv:    config.Argv,
+		Cwd:     config.Cwd,
+		GraceMs: 5000,
 		Stdio: subprocess.Stdio{
 			Stdin:  subprocess.StdinPipe{},
 			Stdout: subprocess.OutputPipe{},

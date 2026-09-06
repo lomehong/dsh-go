@@ -99,23 +99,24 @@ func buildWrappedArgv(argv []string, workspaceRoot string, readOnly bool) []stri
 	command := strings.Join(quoted, " ")
 
 	// The preamble:
-	// - Computes the workspace parent (the deny target).
-	// - Applies deny-write via icacls on the parent.
-	// - Grants full access on the workspace (overriding the parent deny
-	//   via explicit allow).
-	// - Runs the command in a try/finally that always restores the ACL.
-	// For read-only mode, the workspace grant is also read-only.
+	// - Denies write/append on the workspace parent (inherited by all
+	//   children — including the workspace).
+	// - Explicitly grants on the workspace (explicit allow overrides
+	//   inherited deny in Windows ACL evaluation).
+	// - Runs the command in a try/finally that always removes the deny.
+	// For read-only mode, the workspace grant is read+execute only.
 	workspaceGrant := "(OI)(CI)F"
 	if readOnly {
-		workspaceGrant = "(OI)(CI)R"
+		workspaceGrant = "(OI)(CI)RX"
 	}
 
 	script := fmt.Sprintf(
 		`$ws='%s';$parent=Split-Path $ws -Parent;`+
-			`icacls $parent /deny /grant:r "$($ws):%s" *S-1-1-0:(OX)(OD,WD) 2>$null;`+
-			`try { %s }`+
-			`finally { icacls $parent /remove:d *S-1-1-0 2>$null }`,
-		psQuote(workspaceRoot),
+			`icacls $parent /deny '*S-1-1-0:(OI)(CI)(WD,AD)' 2>$null;`+
+			`icacls $ws /grant:r '*S-1-1-0:%s' 2>$null;`+
+			`try { & %s }`+
+			`finally { icacls $parent /remove:d '*S-1-1-0' 2>$null }`,
+		strings.ReplaceAll(workspaceRoot, "'", "''"),
 		workspaceGrant,
 		command,
 	)
