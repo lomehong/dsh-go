@@ -28,6 +28,7 @@ import (
 	"dshgo/agentinstructions"
 	"dshgo/agentloop"
 	"dshgo/checkpointpolicy"
+	"dshgo/coderuntime"
 	"dshgo/commandfeedback"
 	"dshgo/commandgoal"
 	"dshgo/commands"
@@ -46,6 +47,7 @@ import (
 	"dshgo/gatewaystream"
 	"dshgo/goal"
 	"dshgo/goalrounddriver"
+	"dshgo/gojaruntime"
 	"dshgo/guard"
 	"dshgo/headless"
 	"dshgo/homepaths"
@@ -3522,8 +3524,39 @@ var batchThreeBuilders = map[string]pluginBuilder{
 			Provide: []string{},
 			Apply: func(ctx *cordis.Context, config any) error {
 				toolRuntime := ctx.Get(ServiceTools).(*tools.ToolRuntime)
-				toolRuntime.SetCodeRuntime(&gojaCodeRuntime{})
-				return nil
+				engine := gojaruntime.New(gojaruntime.Config{})
+				toolRuntime.SetCodeRuntime(engine)
+				runCodeDef, defErr := tools.DefineTool(tools.DefineToolOptions{
+					Name:        tools.ReservedRunCodeName,
+					Description: "Execute a JavaScript program. Returns the completion value.",
+					Parameters: map[string]tools.PropSpec{
+						"code": {ValueSchemaSpec: tools.ValueSchemaSpec{Type: "string"}, Required: true},
+					},
+					Execute: func(args map[string]any, exec *tools.ToolRunContext) (any, error) {
+						code, _ := args["code"].(string)
+						if code == "" {
+							return nil, fmt.Errorf("run_code: code must be a non-empty string")
+						}
+						result, runErr := engine.Run(coderuntime.CodeRunRequest{Program: code})
+						if runErr != nil {
+							return nil, runErr
+						}
+						if result.Error != nil {
+							return map[string]any{
+								"error": map[string]any{
+									"kind":    result.Error.Kind,
+									"message": result.Error.Message,
+								},
+							}, nil
+						}
+						return map[string]any{"result": result.Value}, nil
+					},
+				})
+				if defErr != nil {
+					return defErr
+				}
+				_, regErr := toolRuntime.Register(runCodeDef)
+				return regErr
 			},
 		}
 	},

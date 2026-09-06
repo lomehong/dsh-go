@@ -555,9 +555,25 @@ func (rt *ToolRuntime) WireSchemas(scope ScopeKey) (ToolProviderResult, error) {
 	if !hasCodeRuntime {
 		return ToolProviderResult{}, fmt.Errorf("tools: mode %q requires a code runtime — no implementation is registered in this build yet", mode)
 	}
-	// PTC mode with a code runtime: serve only run_code in the schema.
-	result := ToolProviderResult{KnownNames: []string{ReservedRunCodeName}}
-	return result, nil
+	// PTC mode with a code runtime: serve run_code as the only schema.
+	runCodeSchema := llm.ToolSchema{
+		Name:        ReservedRunCodeName,
+		Description: "Execute a JavaScript program. Host tools are exposed as async functions on the `tools` global.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"code": map[string]any{
+					"type":        "string",
+					"description": "The JavaScript program to execute.",
+				},
+			},
+			"required": []any{"code"},
+		},
+	}
+	return ToolProviderResult{
+		KnownNames: []string{ReservedRunCodeName},
+		Schemas:    []llm.ToolSchema{runCodeSchema},
+	}, nil
 }
 
 func sortVisibleNames(visible map[string]*ToolDefinition) []string {
