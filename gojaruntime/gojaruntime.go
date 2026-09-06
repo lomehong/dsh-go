@@ -41,7 +41,7 @@ func New(config Config) *Run {
 	return &Run{config: config}
 }
 
-func (r *Run) Language() string { return "typescript" }
+func (r *Run) Language() string  { return "typescript" }
 func (r *Run) Isolation() string { return "in-process-goja" }
 
 func (r *Run) Close() error {
@@ -66,7 +66,9 @@ func (r *Run) Run(request coderuntime.CodeRunRequest) (coderuntime.CodeRunResult
 	}
 
 	timeout := time.Duration(r.config.TimeoutMs) * time.Millisecond
-	if timeout <= 0 { timeout = 30 * time.Second }
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 	vm := goja.New()
 	timer := time.AfterFunc(timeout, func() { vm.Interrupt("execution timed out") })
 	defer timer.Stop()
@@ -130,11 +132,15 @@ func installBindings(vm *goja.Runtime, bindings []coderuntime.CodeBindingNamespa
 }
 
 func exportJSON(value goja.Value) coderuntime.CodeJSONValue {
-	if value == nil { return nil }
+	if value == nil {
+		return nil
+	}
 	exported := value.Export()
 	if b, err := json.Marshal(exported); err == nil {
 		var out any
-		if json.Unmarshal(b, &out) == nil { return out }
+		if json.Unmarshal(b, &out) == nil {
+			return out
+		}
 	}
 	return exported
 }
