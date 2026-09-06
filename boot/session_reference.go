@@ -16,8 +16,10 @@ import (
 )
 
 // sessionReferenceReader adapts the session-query engine to the
-// sessionreference exact-read seam. The signal is threaded from the
-// pre-step payload so cancellation reaches the engine read.
+// sessionreference exact-read seam. Signal threading is a documented
+// deferral: the reader currently uses context.Background(); pre-step
+// payload cancellation does NOT propagate into engine reads (the read is
+// bounded by the engine's own query budget instead).
 type sessionReferenceReader struct {
 	engine *sessionquery.Engine
 	ctx    context.Context

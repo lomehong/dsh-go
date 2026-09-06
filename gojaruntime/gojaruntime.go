@@ -35,7 +35,7 @@ func New(config Config) *Run {
 	return &Run{config: config}
 }
 
-func (r *Run) Language() string  { return "typescript" }
+func (r *Run) Language() string  { return "javascript" }
 func (r *Run) Isolation() string { return "in-process-goja" }
 
 func (r *Run) Close() error {
@@ -69,7 +69,7 @@ func (r *Run) Run(request coderuntime.CodeRunRequest) (coderuntime.CodeRunResult
 
 	installBindings(vm, request.Bindings)
 
-	source := fmt.Sprintf("(function(){\n%s\n})()", request.Program)
+	source := fmt.Sprintf("(async function(){\n%s\n})()", request.Program)
 	completion, err := vm.RunString(source)
 	if err != nil {
 		if isInterrupt(err) {
@@ -81,7 +81,36 @@ func (r *Run) Run(request coderuntime.CodeRunRequest) (coderuntime.CodeRunResult
 			Error: &coderuntime.CodeRunFailure{Kind: coderuntime.FailureException, Message: err.Error()},
 		}, nil
 	}
-	return resultFromGoja(completion.Export()), nil
+	return extractResult(vm, completion), nil
+}
+
+// extractResult resolves the completion value: a *goja.Promise is settled
+// synchronously for non-I/O programs (goja resolves promises on the event
+// loop), so we read its state and extract the settled result. Rejected
+// promises become FailureException (async-body throws must not be
+// silently swallowed).
+func extractResult(vm *goja.Runtime, completion goja.Value) coderuntime.CodeRunResult {
+	if promise, ok := completion.Export().(*goja.Promise); ok {
+		switch promise.State() {
+		case goja.PromiseStateFulfilled:
+			return resultFromGoja(promise.Result().Export())
+		case goja.PromiseStateRejected:
+			reason := promise.Result()
+			msg := "async program rejected"
+			if reason != nil {
+				msg = reason.String()
+			}
+			return coderuntime.CodeRunResult{
+				Error: &coderuntime.CodeRunFailure{Kind: coderuntime.FailureException, Message: msg},
+			}
+		default:
+			// Pending: a program that awaits an unresolved binding call.
+			return coderuntime.CodeRunResult{
+				Error: &coderuntime.CodeRunFailure{Kind: coderuntime.FailureTimeout, Message: "program did not settle within the run"},
+			}
+		}
+	}
+	return resultFromGoja(completion.Export())
 }
 
 func installBindings(vm *goja.Runtime, bindings []coderuntime.CodeBindingNamespace) {
