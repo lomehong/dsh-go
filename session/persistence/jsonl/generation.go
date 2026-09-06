@@ -2,6 +2,7 @@ package jsonl
 
 import (
 	"bytes"
+	"encoding/binary"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -86,13 +87,31 @@ func classifyStoredLog(path string) (int64, error) {
 // EnsureCurrent returns the path to read for one stored generation: the
 // source itself when current, or the freshly published successor after
 // migrating a supported historical body. The second result reports whether
-// a successor was published.
+// a successor was published. A zstd container is already the current write
+// encoding: the scan locates the complete-frame prefix, the decoded header
+// classifies the generation, and a current-generation container returns
+// unchanged (torn final frames are the caller's repair concern).
 func (st *Store) EnsureCurrent(sourcePath string) (string, bool, error) {
-	storedVersion, err := classifyStoredLog(sourcePath)
+	container, readErr := os.ReadFile(sourcePath)
+	if readErr != nil {
+		return "", false, readErr
+	}
+	scan, scanErr := scanZstdFrames(container)
+	if scanErr == nil && len(scan.frames) > 0 {
+		// A zstd container is already the current write encoding: no
+		// plaintext-to-zstd migration applies to it.
+		return sourcePath, false, nil
+	}
+	plaintext, isZstd, err := st.decodeSourceContainer(container)
 	if err != nil {
 		return "", false, err
 	}
-	if storedVersion == session.SESSION_FORMAT_VERSION {
+	storedVersion, err := classifyStoredLogFromHeader(plaintext)
+	if err != nil {
+		return "", false, err
+	}
+	if storedVersion == session.SESSION_FORMAT_VERSION && !isZstd {
+		// Already current plaintext: byte-identical no-op.
 		return sourcePath, false, nil
 	}
 	if storedVersion > session.SESSION_FORMAT_VERSION {
@@ -105,10 +124,7 @@ func (st *Store) EnsureCurrent(sourcePath string) (string, bool, error) {
 	}
 
 	// One stable source snapshot drives the whole migration.
-	source, err := os.ReadFile(sourcePath)
-	if err != nil {
-		return "", false, err
-	}
+	source := plaintext
 	sourceInfo, err := os.Stat(sourcePath)
 	if err != nil {
 		return "", false, err
@@ -182,6 +198,45 @@ func (st *Store) EnsureCurrent(sourcePath string) (string, bool, error) {
 		return "", false, err
 	}
 	return targetPath, true, nil
+}
+
+// decodeSourceContainer detects and unwraps a zstd frame container; plain
+// JSONL passes through with isZstd=false.
+func (st *Store) decodeSourceContainer(container []byte) (plaintext []byte, isZstd bool, err error) {
+	if len(container) >= 4 && binary.LittleEndian.Uint32(container[:4]) == zstdMagic {
+		plaintext, err = decodeZstdFrames(container)
+		if err != nil {
+			return nil, false, err
+		}
+		return plaintext, true, nil
+	}
+	return container, false, nil
+}
+
+// classifyStoredLogFromHeader classifies the format version from a decoded
+// plaintext header line.
+func classifyStoredLogFromHeader(plaintext []byte) (int64, error) {
+	headerEnd := bytes.IndexByte(plaintext, 0x0A)
+	if headerEnd == -1 {
+		return 0, errors.New("empty or header-less session log")
+	}
+	parsed, err := parseLineValue(bytes.TrimSuffix(plaintext[:headerEnd], []byte("\n")))
+	if err != nil {
+		return 0, errors.New("corrupt session log: header line is not valid JSON")
+	}
+	versionRaw, ok := parsed["version"]
+	if !ok {
+		return 0, errors.New("corrupt session log: first line is not a session header")
+	}
+	number, ok := versionRaw.(json.Number)
+	if !ok {
+		return 0, errors.New("corrupt session log: first line is not a session header")
+	}
+	version, err := number.Int64()
+	if err != nil {
+		return 0, errors.New("corrupt session log: header version must be an integer")
+	}
+	return version, nil
 }
 
 // publishNoOverwrite stages one same-directory temp file (write + sync) and

@@ -20,13 +20,15 @@ import (
 	"dshgo/session/persistence"
 )
 
-// Compression selects the physical artifact encoding; only plaintext exists
-// in this build (zstd is a later sidecar concern).
+// Compression selects the physical artifact encoding: plaintext lines, or
+// the concatenated-Zstandard-frame container (one independently decodable,
+// checksummed frame per durable batch).
 type Compression string
 
 // Supported physical encodings.
 const (
 	CompressionNone Compression = "none"
+	CompressionZstd Compression = "zstd"
 )
 
 // LogSuffix returns the artifact suffix for one physical encoding.
@@ -634,6 +636,51 @@ func (st *Store) suffix() Compression {
 	return st.Compression
 }
 
+// encodeArtifact wraps plaintext into the store's artifact encoding:
+// plaintext for none, one concatenated-frame container for zstd.
+func (st *Store) encodeArtifact(plaintext []byte) ([]byte, error) {
+	if st.suffix() != CompressionZstd {
+		return plaintext, nil
+	}
+	return compressZstdFrame(plaintext)
+}
+
+// decodeArtifact reads the artifact encoding back to plaintext. tornAt is
+// the FILE truncation offset for crash repair: the end of the last complete
+// frame (zstd) or the plaintext committed position (none); torn reports
+// whether a torn tail exists at all.
+func (st *Store) decodeArtifact(container []byte) (plaintext []byte, tornAt int64, torn bool, err error) {
+	if st.suffix() != CompressionZstd {
+		scan, err := ScanLog(container)
+		if err != nil {
+			return nil, 0, false, err
+		}
+		tornAt = scan.CommittedBytes
+		return container, tornAt, tornAt < int64(len(container)), nil
+	}
+	scan, err := scanZstdFrames(container)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if scan.torn {
+		// The torn final frame is dropped: its batch was never
+		// acknowledged by the write-behind coordinator, which re-flushes
+		// retained events after repair.
+		tornAt = scan.tornStart
+		if tornAt == 0 {
+			return nil, 0, true, nil
+		}
+		container = container[:scan.tornStart]
+	} else {
+		tornAt = int64(len(container))
+	}
+	plaintext, err = decodeZstdFrames(container)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	return plaintext, tornAt, scan.torn, nil
+}
+
 // PathOf is one session's artifact path.
 func (st *Store) PathOf(cwd, id string) string {
 	return LogPath(st.Root, cwd, id, st.suffix())
@@ -681,7 +728,11 @@ func (st *Store) Create(header session.SessionHeader, seed []session.Event) erro
 		buffer.Write(lines)
 		buffer.WriteByte('\n')
 	}
-	return os.WriteFile(path, buffer.Bytes(), 0o644)
+	artifact, err := st.encodeArtifact(buffer.Bytes())
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, artifact, 0o644)
 }
 
 // Load scans one session artifact without mutating it. A torn tail is
@@ -689,15 +740,19 @@ func (st *Store) Create(header session.SessionHeader, seed []session.Event) erro
 // returned CommittedBytes is where the next append resumes.
 func (st *Store) Load(cwd, id string) (LogScan, error) {
 	path := st.PathOf(cwd, id)
-	buffer, err := os.ReadFile(path)
+	container, err := os.ReadFile(path)
 	if err != nil {
 		return LogScan{}, err
 	}
-	return ScanLog(buffer)
+	plaintext, _, _, err := st.decodeArtifact(container)
+	if err != nil {
+		return LogScan{}, err
+	}
+	return ScanLog(plaintext)
 }
 
 // Append serializes an event batch and appends it after the committed
-// prefix.
+// prefix: plaintext lines (none) or one complete frame (zstd).
 func (st *Store) Append(cwd, id string, committedBytes int64, events []session.Event) error {
 	lines, err := session.EventLines(events, true)
 	if err != nil {
@@ -712,7 +767,16 @@ func (st *Store) Append(cwd, id string, committedBytes int64, events []session.E
 		return err
 	}
 	defer file.Close()
-	if _, err := file.Write(append(append([]byte{}, lines...), '\n')); err != nil {
+	var batch []byte
+	if st.suffix() == CompressionZstd {
+		batch, err = compressZstdFrame(append(append([]byte{}, lines...), '\n'))
+		if err != nil {
+			return err
+		}
+	} else {
+		batch = append(append([]byte{}, lines...), '\n')
+	}
+	if _, err := file.Write(batch); err != nil {
 		return err
 	}
 	return file.Sync()
@@ -745,18 +809,20 @@ func (st *Store) List() ([]session.SessionHeader, error) {
 			if !found {
 				continue
 			}
-			file, err := os.Open(path)
+			container, err := os.ReadFile(path)
 			if err != nil {
 				continue
 			}
-			scanner := bufio.NewScanner(file)
+			plaintext, _, _, decodeErr := st.decodeArtifact(container)
+			if decodeErr != nil {
+				continue
+			}
+			scanner := bufio.NewScanner(bytes.NewReader(plaintext))
 			scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 			if !scanner.Scan() {
-				file.Close()
 				continue
 			}
 			header, ok, metaErr := ParseHeaderMeta(scanner.Text())
-			file.Close()
 			if metaErr != nil {
 				return nil, metaErr
 			}

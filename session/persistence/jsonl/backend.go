@@ -8,10 +8,13 @@ package jsonl
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/klauspost/compress/zstd"
 
 	"dshgo/session"
 	"dshgo/session/persistence"
@@ -97,7 +100,7 @@ func (b *Backend) findByID(id session.SessionID) (string, error) {
 			if !found {
 				continue
 			}
-			header, ok, metaErr := readFirstLineHeader(path)
+			header, ok, metaErr := readFirstLineHeader(path, b.Store.suffix())
 			if metaErr != nil {
 				// A format refusal for THIS id must surface unwrapped with
 				// the raw-log location: the user must see "upgrade the
@@ -119,17 +122,28 @@ func (b *Backend) findByID(id session.SessionID) (string, error) {
 	return "", nil
 }
 
-// readFirstLineHeader parses only the header record of a log.
-func readFirstLineHeader(path string) (session.SessionHeader, bool, error) {
+// readFirstLineHeader parses only the header record of a log. Zstd
+// containers decode to plaintext first (the header frame is the container's
+// first frame).
+func readFirstLineHeader(path string, compression Compression) (session.SessionHeader, bool, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return session.SessionHeader{}, false, nil
 	}
 	defer file.Close()
+	var reader io.Reader = file
+	if compression == CompressionZstd {
+		zr, err := zstd.NewReader(file)
+		if err != nil {
+			return session.SessionHeader{}, false, nil
+		}
+		defer zr.Close()
+		reader = zr.IOReadCloser()
+	}
 	buffer := make([]byte, 0, 4096)
 	one := make([]byte, 1)
 	for {
-		n, readErr := file.Read(one)
+		n, readErr := reader.Read(one)
 		if n > 0 {
 			if one[0] == 0x0A {
 				break
@@ -203,11 +217,15 @@ func (b *Backend) LoadStored(id session.SessionID) (*persistence.StoredPrefix, e
 	if err != nil {
 		return nil, err
 	}
-	buffer, err := os.ReadFile(path)
+	container, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	scan, err := ScanLog(buffer)
+	plaintext, tornAt, torn, err := b.Store.decodeArtifact(container)
+	if err != nil {
+		return nil, err
+	}
+	scan, err := ScanLog(plaintext)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +234,13 @@ func (b *Backend) LoadStored(id session.SessionID) (*persistence.StoredPrefix, e
 		Events:   scan.Events,
 		Revision: fileRevision(info),
 	}
-	if scan.CommittedBytes < int64(len(buffer)) {
+	if torn {
+		// The torn marker is the FILE truncation offset: the end of the
+		// last complete frame (zstd) or the plaintext committed position
+		// (none).
+		prefix.TornMarker = tornAt
+	}
+	if !torn && scan.CommittedBytes < int64(len(plaintext)) {
 		prefix.TornMarker = scan.CommittedBytes
 	}
 	return prefix, nil
@@ -304,7 +328,7 @@ func (b *Backend) ListSnapshots() ([]persistence.Snapshot, error) {
 			if err != nil {
 				continue
 			}
-			header, ok, metaErr := readFirstLineHeader(path)
+			header, ok, metaErr := readFirstLineHeader(path, b.Store.suffix())
 			if metaErr != nil {
 				return nil, metaErr
 			}
@@ -331,7 +355,8 @@ func (b *Backend) Locate(meta session.SessionHeader) *persistence.Location {
 	return &persistence.Location{Path: path}
 }
 
-// ReadStoredRaw returns the artifact's own text, verbatim.
+// ReadStoredRaw returns the artifact's log text, decoded (the zstd frame
+// container decodes to the plaintext stream the coordinator consumes).
 func (b *Backend) ReadStoredRaw(id session.SessionID) (persistence.RawArtifact, error) {
 	path, _, err := b.statByID(id)
 	if err != nil {
@@ -340,18 +365,21 @@ func (b *Backend) ReadStoredRaw(id session.SessionID) (persistence.RawArtifact, 
 	if path == "" {
 		return persistence.RawArtifact{}, &persistence.NotFoundError{SessionID: id}
 	}
-	buffer, err := os.ReadFile(path)
+	container, err := os.ReadFile(path)
 	if err != nil {
 		return persistence.RawArtifact{}, err
 	}
-	content := string(buffer)
-	meta, err := ScanLog(buffer)
+	plaintext, _, _, err := b.Store.decodeArtifact(container)
+	if err != nil {
+		return persistence.RawArtifact{}, err
+	}
+	meta, err := ScanLog(plaintext)
 	if err != nil {
 		return persistence.RawArtifact{}, err
 	}
 	return persistence.RawArtifact{
 		Meta:     meta.Meta,
 		Filename: strings.TrimSuffix(filepath.Base(path), LogSuffix(b.Store.suffix())),
-		Content:  content,
+		Content:  string(plaintext),
 	}, nil
 }
