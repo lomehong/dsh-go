@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"sync"
 
+	"dshgo/coderuntime"
 	"dshgo/cordis"
 	"dshgo/llm"
 	"dshgo/scope"
@@ -153,6 +154,11 @@ type ToolRuntime struct {
 	maxParallelSubCalls int
 	tokenCounter        uint64
 
+	// codeRuntime is the optional execution backend for PTC mode's run_code
+	// tool. When present, WireSchemas can serve PTC-mode schemas and
+	// run_code dispatches through the runtime's Run method.
+	codeRuntime coderuntime.CodeRuntime
+
 	// events carry the pipeline waterfalls and the result/change emits.
 	preExecEvent  waterfallEvent[*preExecuteCarrier, *preExecuteCarrier]
 	execEvent     waterfallEvent[*executeCarrier, *executeCarrier]
@@ -165,6 +171,23 @@ type ToolRuntime struct {
 	// seam, consumed opportunistically like the source's ctx.get('approval'):
 	// nil (or a nil return) keeps the historical degrade to deny.
 	Approval func() ApprovalService
+}
+
+// CodeRuntime and related vocabulary alias the coderuntime package types so
+// PTC-mode consumers can reference them through the tools namespace.
+type (
+	CodeRuntime    = coderuntime.CodeRuntime
+	CodeRunRequest = coderuntime.CodeRunRequest
+	CodeRunResult  = coderuntime.CodeRunResult
+	CodeRunFailure = coderuntime.CodeRunFailure
+)
+
+// SetCodeRuntime installs the PTC execution backend. When set, PTC-mode
+// schemas include run_code and dispatches execute through it.
+func (rt *ToolRuntime) SetCodeRuntime(cr CodeRuntime) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.codeRuntime = cr
 }
 
 type resultListener struct {
@@ -526,9 +549,15 @@ func (rt *ToolRuntime) WireSchemas(scope ScopeKey) (ToolProviderResult, error) {
 		}
 		return result, nil
 	}
-	// PTC collapse and SDK projection need the run_code transport and the
-	// code-runtime seam; they arrive with the PTC port.
-	return ToolProviderResult{}, fmt.Errorf("tools: mode %q requires a code runtime — no implementation is registered in this build yet", mode)
+	rt.mu.Lock()
+	hasCodeRuntime := rt.codeRuntime != nil
+	rt.mu.Unlock()
+	if !hasCodeRuntime {
+		return ToolProviderResult{}, fmt.Errorf("tools: mode %q requires a code runtime — no implementation is registered in this build yet", mode)
+	}
+	// PTC mode with a code runtime: serve only run_code in the schema.
+	result := ToolProviderResult{KnownNames: []string{ReservedRunCodeName}}
+	return result, nil
 }
 
 func sortVisibleNames(visible map[string]*ToolDefinition) []string {

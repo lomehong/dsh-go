@@ -3513,6 +3513,21 @@ var batchThreeBuilders = map[string]pluginBuilder{
 		}
 	},
 
+	// The code runtime: goja pure-Go JS engine implementing the
+	// coderuntime.CodeRuntime interface for PTC run_code execution. When
+	// composed, the tools runtime can serve PTC-mode schemas.
+	"@deepseek-ai/dsh-code-runtime-goja": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceTools},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				toolRuntime := ctx.Get(ServiceTools).(*tools.ToolRuntime)
+				toolRuntime.SetCodeRuntime(&gojaCodeRuntime{})
+				return nil
+			},
+		}
+	},
+
 	// The process-confinement provider seam (official dsh-sandbox-local).
 	// On Windows, the sandboxlocal package provides EnforcementPartial via
 	// Job Object constraints (process-level restrictions, not filesystem
