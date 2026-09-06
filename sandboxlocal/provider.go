@@ -1,133 +1,57 @@
-// Package sandboxlocal implements the Windows sandbox enforcement backend:
-// process-level isolation via Job Objects (kill-on-close, UI restrictions)
-// PLUS filesystem write restriction outside the workspace via temporary
-// ACL entries (icacls deny). Enforcement is reported as Partial: the ACL
-// approach is coarser than per-process restricted tokens (which require
-// CreateRestrictedToken, deferred to a security round), but it provides
-// real write denial outside the workspace for the duration of the command.
+// Package sandboxlocal is the Windows slot for the sandbox provider seam.
+//
+// Status: FAIL-CLOSED. The icacls preamble experiment (deny-write on the
+// workspace parent) was reverted: a deny ACE on the parent directory is a
+// SYSTEM-WIDE effect (every process of the user loses write access for the
+// command”s duration, not just the confined child), and a killed runner
+// between deny and cleanup leaves the deny ACE permanently stuck. Both are
+// disqualifying for a security component.
+//
+// The correct per-process path is CreateRestrictedToken (Win32, not
+// exposed by x/sys/windows — requires a manual syscall bridge) or a Job
+// Object runner. That is a dedicated security round (ROADMAP: sandbox
+// family). Until it lands, Confine fails closed with SANDBOX_UNAVAILABLE —
+// the official semantics for "missing confinement refuses rather than
+// runs unconfined".
 package sandboxlocal
 
 import (
-	"fmt"
-	"strings"
-
 	"dshgo/sandbox"
 )
 
-// Config configures the Windows sandbox provider.
+// Config is accepted for seam parity with the future real provider; the
+// fail-closed provider ignores it.
 type Config struct {
-	// WorkspaceRoot is the directory the sandboxed process may write under.
 	WorkspaceRoot string
 }
 
-// provider implements sandbox.Provider on Windows.
+// provider fails closed for every confining mode.
 type provider struct {
 	workspaceRoot string
 }
 
-// NewProvider builds the Windows sandbox provider.
+// NewProvider returns the fail-closed Windows provider.
 func NewProvider(config Config) *provider {
 	return &provider{workspaceRoot: config.WorkspaceRoot}
 }
 
-// windowsDenialSignatures are the case-insensitive stderr substrings that
-// indicate a Windows ACCESS_DENIED (the sandbox's denial dialect).
-var windowsDenialSignatures = []string{
-	"access is denied",
-	"access denied",
-	"unauthorizedaccessexception",
-	"permissiondenied",
-	"denied",
-}
-
-// runnerFailureRules detect a sandbox runner startup failure (distinct
-// from a command the sandbox correctly denied).
-var runnerFailureRules = []sandbox.RunnerFailureRule{
-	{
-		FatalSignatures: []string{
-			"icacls :",
-			"start-process :",
-			"new-object :",
-		},
-		InformationalLines: []string{},
-	},
-}
-
-// Confine wraps the argv with a PowerShell preamble that:
-//  1. Applies a temporary deny-write ACL on the drive root (icacls) —
-//     writes outside the workspace are denied at the filesystem level.
-//  2. Runs the caller's command.
-//  3. Removes the deny ACL in a finally block (always restored, even on
-//     command failure).
-//
-// The enforcement is Partial: the deny ACL is coarse (per-volume, not
-// per-process), but it provides real filesystem write denial outside the
-// workspace. Full per-process enforcement requires CreateRestrictedToken.
+// Confine always refuses with SANDBOX_UNAVAILABLE for confining modes: no
+// per-process enforcement backend exists on Windows in this build. A
+// danger-full-access policy is not confinement and passes through
+// unmodified (full enforcement of "no confinement").
 func (p *provider) Confine(argv []string, policy sandbox.Policy) (sandbox.ConfinedArgv, error) {
-	if len(argv) == 0 {
-		return sandbox.ConfinedArgv{}, fmt.Errorf("sandboxlocal: empty argv")
-	}
-	if policy.Mode != sandbox.ModeWorkspaceWrite && policy.Mode != sandbox.ModeReadOnly {
-		// danger-full-access is not confined by this provider.
+	if policy.Mode == sandbox.ModeDangerFullAccess {
 		return sandbox.ConfinedArgv{
-			Argv:               argv,
-			Enforcement:        sandbox.EnforcementFull,
-			DenialSignatures:   nil,
-			RunnerFailureRules: nil,
+			Argv:        argv,
+			Enforcement: sandbox.EnforcementFull,
 		}, nil
 	}
-
-	wrapped := buildWrappedArgv(argv, p.workspaceRoot, policy.Mode == sandbox.ModeReadOnly)
-
-	return sandbox.ConfinedArgv{
-		Argv:               wrapped,
-		Enforcement:        sandbox.EnforcementPartial,
-		DenialSignatures:   windowsDenialSignatures,
-		RunnerFailureRules: runnerFailureRules,
-	}, nil
-}
-
-// buildWrappedArgv produces the sandbox runner argv: a PowerShell preamble
-// that applies a deny-write ACL on the workspace parent (excluding the
-// workspace itself via an explicit grant), runs the command, and always
-// restores the ACL.
-func buildWrappedArgv(argv []string, workspaceRoot string, readOnly bool) []string {
-	quoted := make([]string, 0, len(argv))
-	for _, arg := range argv {
-		quoted = append(quoted, psQuote(arg))
+	return sandbox.ConfinedArgv{}, &sandbox.UnavailableError{
+		Mode: policy.Mode,
+		Detail: "windows per-process enforcement (CreateRestrictedToken / Job Object runner) " +
+			"is not implemented in this build; the icacls preamble experiment was reverted " +
+			"(system-wide deny side effect + ACE residue on kill)",
 	}
-	command := strings.Join(quoted, " ")
-
-	// The preamble:
-	// - Denies write/append on the workspace parent (inherited by all
-	//   children — including the workspace).
-	// - Explicitly grants on the workspace (explicit allow overrides
-	//   inherited deny in Windows ACL evaluation).
-	// - Runs the command in a try/finally that always removes the deny.
-	// For read-only mode, the workspace grant is read+execute only.
-	workspaceGrant := "(OI)(CI)F"
-	if readOnly {
-		workspaceGrant = "(OI)(CI)RX"
-	}
-
-	script := fmt.Sprintf(
-		`$ws='%s';$parent=Split-Path $ws -Parent;`+
-			`icacls $parent /deny '*S-1-1-0:(OI)(CI)(WD,AD)' 2>$null;`+
-			`icacls $ws /grant:r '*S-1-1-0:%s' 2>$null;`+
-			`try { & %s }`+
-			`finally { icacls $parent /remove:d '*S-1-1-0' 2>$null }`,
-		strings.ReplaceAll(workspaceRoot, "'", "''"),
-		workspaceGrant,
-		command,
-	)
-
-	return []string{"pwsh", "-NoProfile", "-NonInteractive", "-Command", script}
-}
-
-// psQuote escapes one argument for safe inclusion in a PowerShell command.
-func psQuote(arg string) string {
-	escaped := strings.ReplaceAll(arg, "'", "''")
-	return "'" + escaped + "'"
 }
 
 // Ensure provider implements the sandbox.Provider interface.

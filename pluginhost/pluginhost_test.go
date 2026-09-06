@@ -79,3 +79,77 @@ func TestStartNonexistentExecutableFails(t *testing.T) {
 		t.Fatal("nonexistent executable must fail to start")
 	}
 }
+
+// TestCloseTerminatesProcess: Close must terminate the process tree (not
+// just close stdin) — Done resolves after Close.
+func TestCloseTerminatesProcess(t *testing.T) {
+	if _, err := exec.LookPath("pwsh"); err != nil {
+		t.Skip("pwsh not on PATH; skipping live plugin host test")
+	}
+	// A server that never exits on its own: it just echoes initialize
+	// responses and keeps reading.
+	script := `
+while ($true) {
+  $line = [Console]::In.ReadLine()
+  if ($null -eq $line) { break }
+  try { $req = $line | ConvertFrom-Json } catch { continue }
+  if ($req.method -eq 'initialize') {
+    $res = @{ jsonrpc = '2.0'; id = $req.id; result = @{ serverInfo = @{ name = 'long-lived'; version = '1.0.0' } } }
+    [Console]::Out.WriteLine(($res | ConvertTo-Json -Compress -Depth 5))
+  }
+}
+`
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	plugin, _, err := Start(ctx, Config{
+		Argv: []string{"pwsh", "-NoProfile", "-NonInteractive", "-Command", script},
+		Cwd:  ".",
+		Name: "long-lived-plugin",
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := plugin.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	// Close is idempotent.
+	if err := plugin.Close(); err != nil {
+		t.Fatalf("second close: %v", err)
+	}
+	// The process must exit: Done resolves within the timeout.
+	select {
+	case <-plugin.Done():
+		// terminated — good
+	case <-time.After(15 * time.Second):
+		t.Fatal("plugin process did not terminate within 15s of Close")
+	}
+}
+
+// TestGarbageInitializeResultFails: a child that answers initialize with
+// malformed JSON must fail the start (no silent zero-value degradation).
+func TestGarbageInitializeResultFails(t *testing.T) {
+	if _, err := exec.LookPath("pwsh"); err != nil {
+		t.Skip("pwsh not on PATH; skipping live plugin host test")
+	}
+	// Responds to initialize with a JSON-RPC result that is not an
+	// InitializeResult shape.
+	script := `
+$line = [Console]::In.ReadLine()
+$req = $line | ConvertFrom-Json
+$res = @{ jsonrpc = '2.0'; id = $req.id; result = @{ unexpected = $true } }
+[Console]::Out.WriteLine(($res | ConvertTo-Json -Compress -Depth 5))
+Start-Sleep -Seconds 60
+`
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, _, err := Start(ctx, Config{
+		Argv: []string{"pwsh", "-NoProfile", "-NonInteractive", "-Command", script},
+		Cwd:  ".",
+		Name: "garbage-plugin",
+	})
+	if err == nil {
+		t.Fatal("garbage initialize result must fail the start")
+	}
+}

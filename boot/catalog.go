@@ -63,7 +63,6 @@ import (
 	"dshgo/planmode"
 	"dshgo/preset"
 	"dshgo/sandbox"
-	"dshgo/sandboxlocal"
 	"dshgo/sandboxpolicy"
 	"dshgo/sandboxshell"
 	"dshgo/scope"
@@ -3531,24 +3530,19 @@ var batchThreeBuilders = map[string]pluginBuilder{
 	},
 
 	// The process-confinement provider seam (official dsh-sandbox-local).
-	// On Windows, the sandboxlocal package provides EnforcementPartial via
-	// Job Object constraints (process-level restrictions, not filesystem
-	// ACL — CreateRestrictedToken is deferred to a security round). On
-	// non-Windows, the fail-closed provider is used (Linux Landlock and
-	// macOS Seatbelt are separate OS-native rounds).
+	// FAIL-CLOSED on every platform: no native per-process enforcement
+	// backend exists in this build (Linux Landlock / macOS Seatbelt /
+	// Windows CreateRestrictedToken are each OS-native security rounds).
+	// Confine refuses with SANDBOX_UNAVAILABLE rather than running
+	// unconfined — the official "missing confinement fails closed"
+	// semantics. The sandboxlocal package documents the reverted icacls
+	// experiment and the per-process path forward.
 	"@deepseek-ai/dsh-sandbox-local": func(deps CatalogDeps) PluginSpec {
 		return PluginSpec{
 			Inject:  []string{},
 			Provide: []string{ServiceSandbox},
 			Apply: func(ctx *cordis.Context, config any) error {
-				if runtime.GOOS == "windows" {
-					workspaceRoot, _ := os.Getwd()
-					ctx.Provide(ServiceSandbox, sandboxlocal.NewProvider(sandboxlocal.Config{
-						WorkspaceRoot: workspaceRoot,
-					}))
-				} else {
-					ctx.Provide(ServiceSandbox, sandbox.FailClosedProvider{})
-				}
+				ctx.Provide(ServiceSandbox, sandbox.FailClosedProvider{})
 				return nil
 			},
 		}
