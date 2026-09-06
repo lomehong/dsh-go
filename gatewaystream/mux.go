@@ -281,7 +281,7 @@ func (s *MuxServer) runConnection(ws *websocket.Conn) {
 // client cancel message (or the socket dying) tears the source down.
 func (s *MuxServer) openStream(w *wsWriter, msg clientMessage) {
 	if s.open == nil {
-		_ = w.writeJSON(map[string]any{"type": "error", "streamId": msg.StreamID, "error": map[string]any{"code": "internal", "message": "remote stream dispatcher is not mounted"}})
+		_ = w.writeJSON(map[string]any{"type": "error", "streamId": msg.StreamID, "error": map[string]any{"code": "internal", "message": "remote stream dispatcher is not mounted", "details": map[string]any{}}})
 		return
 	}
 	frames, errs, cancel := s.open(msg.Endpoint, msg.Payload)
@@ -309,7 +309,7 @@ func (s *MuxServer) openStream(w *wsWriter, msg clientMessage) {
 				if !ok {
 					return
 				}
-				_ = w.writeJSON(map[string]any{"type": "error", "streamId": msg.StreamID, "error": map[string]any{"code": "internal", "message": err.Error()}})
+				_ = w.writeJSON(map[string]any{"type": "error", "streamId": msg.StreamID, "error": map[string]any{"code": "internal", "message": err.Error(), "details": map[string]any{}}})
 				return
 			}
 		}

@@ -399,16 +399,24 @@ type waterfallListener[Tin any, Tout any] struct {
 
 // WaterfallEvent stores scope-tagged listeners for one event family and
 // dispatches them with cordis waterfall semantics — first-registered
-// outermost, next() delegates, calling next twice panics.
+// outermost, next() delegates, calling next twice panics. All listener
+// access is mutex-guarded: registration (On) runs concurrently with
+// dispatch (Dispatch/Snapshot) in the production composition (agent rows
+// register while agent turns dispatch).
 type WaterfallEvent[Tin any, Tout any] struct {
+	mu        sync.Mutex
 	listeners []waterfallListener[Tin, Tout]
 }
 
 // On appends one listener and returns its idempotent undo.
 func (e *WaterfallEvent[Tin, Tout]) On(scope ScopeKey, fn func(value Tin, next func(Tin) Tout) Tout) func() {
 	id := NextEntryID()
+	e.mu.Lock()
 	e.listeners = append(e.listeners, waterfallListener[Tin, Tout]{scope: scope, id: id, fn: fn})
+	e.mu.Unlock()
 	return func() {
+		e.mu.Lock()
+		defer e.mu.Unlock()
 		for i := range e.listeners {
 			if e.listeners[i].id == id {
 				e.listeners = append(e.listeners[:i], e.listeners[i+1:]...)
@@ -420,8 +428,11 @@ func (e *WaterfallEvent[Tin, Tout]) On(scope ScopeKey, fn func(value Tin, next f
 
 // Snapshot returns the admitted listener functions in registration order,
 // so a dispatcher can release its registry mutex before running listeners
-// (listeners re-enter their registry).
+// (listeners re-enter their registry). The slice is built under the lock;
+// the returned functions run unlocked.
 func (e *WaterfallEvent[Tin, Tout]) Snapshot(scope ScopeKey) []func(Tin, func(Tin) Tout) Tout {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	var admitted []func(Tin, func(Tin) Tout) Tout
 	for _, listener := range e.listeners {
 		if Admits(listener.scope, scope) {
@@ -437,7 +448,11 @@ func (e *WaterfallEvent[Tin, Tout]) Dispatch(scope ScopeKey, value Tin, base fun
 }
 
 // Len reports the live listener count.
-func (e *WaterfallEvent[Tin, Tout]) Len() int { return len(e.listeners) }
+func (e *WaterfallEvent[Tin, Tout]) Len() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.listeners)
+}
 
 // RunWaterfall executes listener functions with cordis waterfall semantics:
 // first-registered outermost, next() delegates, calling next twice panics.

@@ -23,6 +23,23 @@ func TestAttachForwardedEventsRoutesByMode(t *testing.T) {
 	if done || frame.Type != "emit" || frame.Event != "commands/change" {
 		t.Fatalf("emit frame = %+v done=%v", frame, done)
 	}
+	// A []any payload IS the raw args array (Go-side convention for the
+	// official multi-arg emit): it must pass through WITHOUT an extra wrap.
+	multi := []any{"session-1", true}
+	bus.Emit("api-session/status", nil, multi)
+	frame, done = queue.Next()
+	if done || frame.Type != "emit" {
+		t.Fatalf("multi-arg emit frame = %+v done=%v", frame, done)
+	}
+	if len(frame.Args) != 2 || frame.Args[0] != "session-1" || frame.Args[1] != true {
+		t.Fatalf("multi-arg frame args = %#v, want [session-1 true] (double-wrap check)", frame.Args)
+	}
+	// A single non-slice payload stays a one-element args array.
+	bus.Emit("llm/adapters-updated", nil, "payload-string")
+	frame, done = queue.Next()
+	if done || len(frame.Args) != 1 || frame.Args[0] != "payload-string" {
+		t.Fatalf("single-arg frame args = %#v", frame.Args)
+	}
 	// A waterfall-mode event pushes a pending invocation frame. Waterfall
 	// listeners are dispatched via the bus's Waterfall method, not Emit.
 	bus.Waterfall("approval/request", nil, userapproval.ApprovalRequest{ToolName: "write", Reason: "r"}, func(payload any) any { return payload })

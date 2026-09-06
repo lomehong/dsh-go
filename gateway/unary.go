@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -226,17 +225,18 @@ func (g *Gateway) UnaryHandler() http.HandlerFunc {
 			result["ok"] = true
 			result["value"] = value
 		} else {
-			var gerr *GatewayError
-			if !errors.As(err, &gerr) {
-				gerr = wrapGatewayError("gateway/unknown", endpoint, "", err, "")
-			}
-			// The browser client validates error.code against a closed
-			// union whose fallback is "internal"; the Go-side diagnostic
-			// rides in the message.
+			// The official error envelope carries {code, message, details}:
+			// the browser client reads all three members and a missing
+			// details throws TypeError into the socket handler. WireFailure
+			// is the single mapping (cancellation → cancelled, lookup/
+			// business envelopes kept, else internal) — the same one the
+			// stream carrier uses.
+			failure := WireFailure(err)
 			result["ok"] = false
 			result["error"] = map[string]any{
-				"code":    "internal",
-				"message": string(gerr.Code) + ": " + gerr.message,
+				"code":    failure.Code,
+				"message": failure.Message,
+				"details": failure.Details,
 			}
 		}
 		if err := json.NewEncoder(w).Encode(map[string]any{

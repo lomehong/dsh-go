@@ -59,7 +59,16 @@ func AttachForwardedEventsWithOptions(queue *RemoteEventQueue, events *agent.Sub
 			disposers = append(disposers, undo)
 		default:
 			undo := events.OnEmit(event, nil, func(payload any) error {
-				queue.Push(WireFrame{Type: "emit", Event: event, Args: []any{payload}})
+				// Go-side convention: a []any payload IS the raw args
+				// array of the official multi-arg emit (e.g. the catalog
+				// emits api-session/status as []any{id, running}); any
+				// other payload is a single argument. Wrapping unconditionally
+				// double-wraps multi-arg events and misaligns the browser.
+				args, ok := payload.([]any)
+				if !ok {
+					args = []any{payload}
+				}
+				queue.Push(WireFrame{Type: "emit", Event: event, Args: args})
 				return nil
 			})
 			disposers = append(disposers, undo)
