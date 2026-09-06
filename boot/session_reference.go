@@ -1,7 +1,8 @@
 // The session-reference exact-read adapter: the composed session-query
 // engine observed through the sessionreference SnapshotReader seam (the
 // official ctx.sessionQuery adaptation). Exact reads only — the projection
-// is bounded by the configured byte budget.
+// is bounded by the configured byte budget. ReadSurface uses the engine's
+// surface-only read (excludes shadowed/replaced events), not the raw log.
 package boot
 
 import (
@@ -15,24 +16,27 @@ import (
 )
 
 // sessionReferenceReader adapts the session-query engine to the
-// sessionreference exact-read seam.
+// sessionreference exact-read seam. The signal is threaded from the
+// pre-step payload so cancellation reaches the engine read.
 type sessionReferenceReader struct {
 	engine *sessionquery.Engine
 	ctx    context.Context
 }
 
-// ReadSurface observes one session's current surface: user and assistant
-// messages project as text-bearing events; other event kinds stay outside
-// the seam (matching the Go projection vocabulary).
+// ReadSurface observes one session's current surface via the engine's
+// surface-only read (excluding shadowed/replaced events): user and
+// assistant messages project as text-bearing events.
 func (r *sessionReferenceReader) ReadSurface(sessionID string) (sessionreference.SessionSnapshot, error) {
-	snapshot, err := r.engine.ReadSession(r.ctx, session.SessionID(sessionID))
+	surface, err := r.engine.ReadSurface(r.ctx, session.SessionID(sessionID))
 	if err != nil {
 		return sessionreference.SessionSnapshot{}, err
 	}
-	out := sessionreference.SessionSnapshot{SessionID: sessionID, Cwd: snapshot.Session.CWD}
-	for _, event := range snapshot.Events {
-		out.CapturedThroughSeq = event.Seq
+	out := sessionreference.SessionSnapshot{SessionID: sessionID, Cwd: surface.Session.CWD}
+	if surface.CapturedThroughSeq != nil {
+		out.CapturedThroughSeq = *surface.CapturedThroughSeq
 		out.HasCapturedThroughSeq = true
+	}
+	for _, event := range surface.Events {
 		switch event.Type {
 		case session.EventUserMessage:
 			var message llm.Message

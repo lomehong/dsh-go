@@ -1397,8 +1397,7 @@ var builders = map[string]pluginBuilder{
 								bus.Emit("commands/change", nil, map[string]any{})
 							})
 							return ctx.Effect(func() (cordis.Disposer, error) {
-								undo()
-								return cordis.Disposer(func() {}), nil
+								return cordis.Disposer(undo), nil
 							})
 						}
 					}
@@ -2689,7 +2688,6 @@ var builders = map[string]pluginBuilder{
 			Inject:  []string{ServiceAgents, ServiceSessionQuery},
 			Provide: []string{},
 			Apply: func(ctx *cordis.Context, config any) error {
-				fmt.Fprintln(os.Stderr, "session-reference DEBUG: apply entered")
 				engine, ok := ctx.Get(ServiceSessionQuery).(*sessionquery.Engine)
 				if !ok || engine == nil {
 					return errors.New("session-reference: the session query engine is unavailable")
@@ -2714,15 +2712,17 @@ var builders = map[string]pluginBuilder{
 				ctx.Provide("sessionReferences", resolver)
 				bus := agents.Events()
 				undo := bus.PreStep().On(nil, func(payload agent.PreStepPayload, next func(agent.PreStepPayload) agent.PreStepDecision) agent.PreStepDecision {
-					fmt.Fprintln(os.Stderr, "session-reference DEBUG: listener entered")
 					if payload.Agent == nil {
 						return next(payload)
 					}
 					prepared, err := resolver.PrepareDirectMessages(string(payload.Agent.ID), payload.Messages)
+					// Go ruling (deviation from official): a broken reference
+					// degrades to the unprepared messages via next() rather than
+					// failing the turn. The official listener throws, which the
+					// pre-step propagates as a loud turn failure. The Go host
+					// chooses resilience: one broken mention must not dead-end
+					// the entire step.
 					if err != nil {
-						// A broken reference degrades to the unprepared
-						// messages rather than dead-ending the turn (the
-						// official listener failure settles into next()).
 						deps.Logger.Warn(fmt.Sprintf("session-reference: prepare failed for %q: %v", payload.Agent.ID, err))
 						return next(payload)
 					}
