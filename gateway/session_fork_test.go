@@ -41,9 +41,19 @@ func TestForkBoundarySemantics(t *testing.T) {
 	if err != nil || boundary != 5 {
 		t.Fatalf("atSeq 2 boundary = %d, %v; want 5 (first turn/end at-or-after)", boundary, err)
 	}
+	// Past-end atSeq CLAMPS to the last completed turn (official fallback:
+	// atSeq > lastSeq → findLast(turn/end)) — it does not refuse.
 	future := int64(99)
-	if _, err := forkBoundary(events, &future); err == nil ||
-		!strings.Contains(err.Error(), "not completed the turn") {
+	boundary, err = forkBoundary(events, &future)
+	if err != nil || boundary != 8 {
+		t.Fatalf("past-end atSeq boundary = %d, %v; want 8 (clamp to last completed turn)", boundary, err)
+	}
+	// An atSeq INSIDE the log whose containing turn never completed refuses
+	// with the containing-turn message (atSeq 8: the trailing user/message
+	// inside the open third turn).
+	inside := int64(8)
+	if _, err := forkBoundary(events, &inside); err == nil ||
+		!strings.Contains(err.Error(), "not completed the turn containing event 8") {
 		t.Fatalf("err = %v, want the uncompleted-turn refusal", err)
 	}
 	if _, err := forkBoundary(nil, nil); err == nil ||

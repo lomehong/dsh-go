@@ -94,18 +94,17 @@ func Start(ctx context.Context, config Config) (*Plugin, *DiscoveredContribution
 	transport.Start()
 	plugin.transport = transport
 
-	// The handshake runs under the caller's context AND a default timeout
-	// (a Background caller must not hang forever on a silent plugin).
-	handshakeCtx := ctx
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		timeout := config.HandshakeTimeout
-		if timeout <= 0 {
-			timeout = DefaultHandshakeTimeout
-		}
-		var cancel context.CancelFunc
-		handshakeCtx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
+	// The handshake runs under the caller's context AND the handshake
+	// budget (config override, else the default). WithTimeout takes the
+	// earlier of the two deadlines, so a Background caller cannot hang
+	// forever on a silent plugin and a short config budget fires even
+	// under a long caller deadline.
+	timeout := config.HandshakeTimeout
+	if timeout <= 0 {
+		timeout = DefaultHandshakeTimeout
 	}
+	handshakeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	// Initialize handshake: send the JSON-RPC "initialize" request and
 	// decode the InitializeResult from the response. A malformed result

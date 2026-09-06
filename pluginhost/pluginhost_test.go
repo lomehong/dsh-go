@@ -153,3 +153,34 @@ Start-Sleep -Seconds 60
 		t.Fatal("garbage initialize result must fail the start")
 	}
 }
+
+// TestHandshakeTimeout: a child that never answers initialize must fail the
+// start when the configured handshake budget expires (the child is
+// terminated by the failure path, so the test does not leak it).
+func TestHandshakeTimeout(t *testing.T) {
+	if _, err := exec.LookPath("pwsh"); err != nil {
+		t.Skip("pwsh not on PATH; skipping live plugin host test")
+	}
+	// Reads the request but never answers.
+	script := `
+$null = [Console]::In.ReadLine()
+Start-Sleep -Seconds 60
+`
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	started := time.Now()
+	_, _, err := Start(ctx, Config{
+		Argv:             []string{"pwsh", "-NoProfile", "-NonInteractive", "-Command", script},
+		Cwd:              ".",
+		Name:             "silent-plugin",
+		HandshakeTimeout: 300 * time.Millisecond,
+	})
+	elapsed := time.Since(started)
+	if err == nil {
+		t.Fatal("silent plugin must fail the handshake")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("handshake took %s, want ~300ms budget", elapsed)
+	}
+}

@@ -186,13 +186,29 @@ func run() error {
 			if done, ok := doneValue.(<-chan error); ok {
 				stop := make(chan os.Signal, 1)
 				signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-				select {
-				case runErr := <-done:
-					if runErr != nil {
-						fmt.Fprintf(os.Stderr, "dsh: %v\n", runErr)
+				interrupted := false
+			waitLoop:
+				for {
+					select {
+					case runErr := <-done:
+						// A run failure (dep missing, panic, flush error)
+						// must NOT exit 0: record the failure code before
+						// the final exit read.
+						if runErr != nil {
+							fmt.Fprintf(os.Stderr, "dsh: %v\n", runErr)
+							headless.RequestExit(1)
+						}
+						break waitLoop
+					case <-stop:
+						if interrupted {
+							// Second interrupt: the run is not settling —
+							// force exit with the conventional 130.
+							fmt.Println("dsh: forced exit")
+							os.Exit(130)
+						}
+						interrupted = true
+						fmt.Println("dsh: interrupt received; waiting for the run to settle (interrupt again to force exit)")
 					}
-				case <-stop:
-					fmt.Println("dsh: interrupted")
 				}
 				signal.Stop(stop)
 			}
