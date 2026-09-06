@@ -65,6 +65,8 @@ import (
 	"dshgo/sandboxpolicy"
 	"dshgo/sandboxshell"
 	"dshgo/scope"
+	"dshgo/sdk/protocol"
+	sdkServer "dshgo/sdk/server"
 	"dshgo/session"
 	"dshgo/session/persistence"
 	"dshgo/session/persistence/jsonl"
@@ -2758,6 +2760,50 @@ var builders = map[string]pluginBuilder{
 					return err
 				}
 				ctx.Provide(ServiceWorkflowEngine, engine)
+				return nil
+			},
+		}
+	},
+
+	// SDK JSON-RPC server (official dsh-sdk-jsonrpc-server): serves the
+	// SDK protocol over stdio, creating and managing agents on demand.
+	"@deepseek-ai/dsh-sdk-jsonrpc-server": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{ServiceAgents, ServiceSessions, ServiceAgentDefaultModel, ServiceLlm},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
+				registry := ctx.Get(ServiceAgents).(*agent.AgentRegistry)
+				store := ctx.Get(ServiceSessions).(*session.Store)
+				defaultModel := ctx.Get(ServiceAgentDefaultModel).(*agentdefaultmodel.Config)
+				llmRuntime := ctx.Get(ServiceLlm).(*llm.Runtime)
+				factory := &sdkAgentFactory{registry: registry, store: store, defaultModel: defaultModel}
+				router := &sdkLLMRouter{runtime: llmRuntime}
+				var maxTokensAsSuccess bool
+				if overridden, ok := config.(map[string]any); ok {
+					if raw, ok := overridden["maxTokensAsSuccess"].(bool); ok {
+						maxTokensAsSuccess = raw
+					}
+				}
+				transport := protocol.NewLineTransport(os.Stdin, os.Stdout)
+				server := sdkServer.New(sdkServer.Deps{
+					Registry:       registry,
+					Store:          store,
+					SubagentEvents: registry.Events(),
+					Agents:         factory,
+					LLM:            router,
+				}, transport, sdkServer.Options{MaxTokensAsSuccess: maxTokensAsSuccess})
+				go server.Serve(transport)
+				return nil
+			},
+		}
+	},
+
+	// SDK application startup (official dsh-sdk-app): identity row.
+	"@deepseek-ai/dsh-sdk-app": func(deps CatalogDeps) PluginSpec {
+		return PluginSpec{
+			Inject:  []string{},
+			Provide: []string{},
+			Apply: func(ctx *cordis.Context, config any) error {
 				return nil
 			},
 		}

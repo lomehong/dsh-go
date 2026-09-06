@@ -9,34 +9,36 @@ import (
 	"dshgo/agent"
 	"dshgo/agentdefaultmodel"
 	"dshgo/llm"
+	sdkServer "dshgo/sdk/server"
 	"dshgo/session"
 )
 
 // sdkAgentFactory creates and disposes agents through the composed
-// registry, resolving the default model at construction time.
+// registry, resolving the default model at construction time. Implements
+// sdk/server's AgentFactory face.
 type sdkAgentFactory struct {
 	registry     *agent.AgentRegistry
 	store        *session.Store
 	defaultModel *agentdefaultmodel.Config
 }
 
-func (f *sdkAgentFactory) Create(sessionID string, opts sdkCreateOptions) (*agent.Agent, error) {
+func (f *sdkAgentFactory) Create(sessionID string, options sdkServer.CreateAgentOptions) (*agent.Agent, error) {
 	selection := f.defaultModel.CurrentSelection()
-	provider := opts.Provider
+	provider := options.Provider
 	if provider == "" {
 		provider = selection.Provider
 	}
-	model := opts.Model
+	model := options.Model
 	if model == "" {
 		model = selection.Model
 	}
 	handle, err := f.registry.Create(context.Background(), agent.CreateAgentOptions{
 		SessionID: session.SessionID(sessionID),
-		Meta:      agent.CreateAgentMeta{CWD: opts.CWD},
+		Meta:      agent.CreateAgentMeta{CWD: options.Cwd},
 		AgentOptions: agent.AgentOptions{
 			Provider:        provider,
 			Model:           model,
-			ReasoningEffort: llm.ReasoningEffortID(opts.ReasoningEffort),
+			ReasoningEffort: llm.ReasoningEffortID(options.ReasoningEffort),
 		},
 	})
 	if err != nil {
@@ -48,16 +50,6 @@ func (f *sdkAgentFactory) Create(sessionID string, opts sdkCreateOptions) (*agen
 func (f *sdkAgentFactory) Dispose(a *agent.Agent) error {
 	a.Cancel(session.TurnEndCancelCause{Kind: session.CancelDisposed}, agent.CancelOptions{})
 	return nil
-}
-
-// sdkCreateOptions mirrors the server's CreateAgentOptions to avoid a
-// circular import.
-type sdkCreateOptions struct {
-	CWD             string
-	Provider        string
-	Model           string
-	ReasoningEffort string
-	MaxTokens       int64
 }
 
 // sdkLLMRouter wraps the llm.Runtime for the sdk/server's HasAdapter /
