@@ -267,12 +267,13 @@ func toHeaderLine(header session.SessionHeader) headerLine {
 	}
 	// v0/v1 physical headers keep the numeric seedLength (seeded →
 	// inheritedEventCount); v2 physical headers carry only the boolean
-	// isSeeded and no cut (official toHeaderLine per generation).
+	// isSeeded and no cut (official toHeaderLine per generation). v2
+	// headers ALWAYS write isSeeded (true or false) — the official reader
+	// requires its presence (wire F11: Go-written v2 headers must be
+	// officially readable).
 	if header.Version >= 2 {
-		if header.IsSeeded {
-			seeded := true
-			line.IsSeeded = &seeded
-		}
+		seeded := header.IsSeeded
+		line.IsSeeded = &seeded
 	} else if header.IsSeeded {
 		seed := int64(header.InheritedEventCount)
 		line.SeedLength = &seed
