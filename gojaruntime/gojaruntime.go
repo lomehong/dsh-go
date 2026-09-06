@@ -1,13 +1,8 @@
 // Package gojaruntime implements the coderuntime.CodeRuntime seam over the
 // goja pure-Go ES2015+ JavaScript engine. Runs execute in-process (no CGO,
 // no subprocess): each Run creates a fresh goja.Runtime, installs host
-// bindings as global functions, and evaluates the program as an async
-// function body (top-level await and return available). A hard per-run
+// bindings as global functions, and evaluates the program. A hard per-run
 // timeout (goja.Interrupt) terminates runaway programs.
-//
-// This is the Go-native answer to the official code-runtime-worker-thread
-// (which requires Node.js worker_threads): same CodeRuntime contract, pure
-// Go execution substrate.
 package gojaruntime
 
 import (
@@ -26,8 +21,7 @@ type Config struct {
 	TimeoutMs int64
 }
 
-// Run is the goja-backed CodeRuntime: fresh VM per run, host bindings as
-// globals, hard timeout via goja.Interrupt.
+// Run is the goja-backed CodeRuntime.
 type Run struct {
 	config Config
 	mu     sync.Mutex
@@ -72,45 +66,22 @@ func (r *Run) Run(request coderuntime.CodeRunRequest) (coderuntime.CodeRunResult
 	vm := goja.New()
 	timer := time.AfterFunc(timeout, func() { vm.Interrupt("execution timed out") })
 	defer timer.Stop()
+
 	installBindings(vm, request.Bindings)
 
-	source := fmt.Sprintf("(async function(){\n%s\n})()", request.Program)
+	source := fmt.Sprintf("(function(){\n%s\n})()", request.Program)
 	completion, err := vm.RunString(source)
 	if err != nil {
 		if isInterrupt(err) {
-			return coderuntime.CodeRunResult{Error: &coderuntime.CodeRunFailure{Kind: coderuntime.FailureTimeout, Message: "execution timed out"}}, nil
+			return coderuntime.CodeRunResult{
+				Error: &coderuntime.CodeRunFailure{Kind: coderuntime.FailureTimeout, Message: "execution timed out"},
+			}, nil
 		}
-		return coderuntime.CodeRunResult{Error: &coderuntime.CodeRunFailure{Kind: coderuntime.FailureException, Message: err.Error()}}, nil
+		return coderuntime.CodeRunResult{
+			Error: &coderuntime.CodeRunFailure{Kind: coderuntime.FailureException, Message: err.Error()},
+		}, nil
 	}
 	return resultFromGoja(completion.Export()), nil
-}
-
-func resultFromGoja(exported any) coderuntime.CodeRunResult {
-	switch v := exported.(type) {
-	case nil:
-	case string:
-		return coderuntime.CodeRunResult{Value: v}
-	case bool:
-		return coderuntime.CodeRunResult{Value: v}
-	case float64:
-		return coderuntime.CodeRunResult{Value: v}
-	case int:
-		return coderuntime.CodeRunResult{Value: float64(v)}
-	case int64:
-		return coderuntime.CodeRunResult{Value: float64(v)}
-	case []any:
-		return coderuntime.CodeRunResult{Value: v}
-	case map[string]any:
-		return coderuntime.CodeRunResult{Value: v}
-	default:
-		if b, jsonErr := json.Marshal(exported); jsonErr == nil {
-			var generic any
-			if json.Unmarshal(b, &generic) == nil {
-				return coderuntime.CodeRunResult{Value: generic}
-			}
-		}
-	}
-	return coderuntime.CodeRunResult{}
 }
 
 func installBindings(vm *goja.Runtime, bindings []coderuntime.CodeBindingNamespace) {
@@ -129,6 +100,32 @@ func installBindings(vm *goja.Runtime, bindings []coderuntime.CodeBindingNamespa
 		}
 		vm.Set(ns.Global, obj)
 	}
+}
+
+func resultFromGoja(exported any) coderuntime.CodeRunResult {
+	switch v := exported.(type) {
+	case nil:
+	case string:
+		return coderuntime.CodeRunResult{Value: v}
+	case bool:
+		return coderuntime.CodeRunResult{Value: v}
+	case float64:
+		return coderuntime.CodeRunResult{Value: v}
+	case int:
+		return coderuntime.CodeRunResult{Value: float64(v)}
+	case []any:
+		return coderuntime.CodeRunResult{Value: v}
+	case map[string]any:
+		return coderuntime.CodeRunResult{Value: v}
+	default:
+		if b, jsonErr := json.Marshal(exported); jsonErr == nil {
+			var generic any
+			if json.Unmarshal(b, &generic) == nil {
+				return coderuntime.CodeRunResult{Value: generic}
+			}
+		}
+	}
+	return coderuntime.CodeRunResult{}
 }
 
 func exportJSON(value goja.Value) coderuntime.CodeJSONValue {
