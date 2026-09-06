@@ -479,10 +479,10 @@ func TestDefineDomainValidatesCompatibleVersionsAndPolicy(t *testing.T) {
 
 func TestOpenBacksUpAndSkipsInvalidRecords(t *testing.T) {
 	spec, err := DefineDomain(DomainSpec{
-		Name:               "test_domain",
-		Version:            2,
+		Name:                "test_domain",
+		Version:             2,
 		InvalidRecordPolicy: InvalidRecordsBackupAndSkip,
-		Tables:             []string{"things"},
+		Tables:              []string{"things"},
 		ValidateRecord: func(table string, key string, raw json.RawMessage) error {
 			var decoded map[string]any
 			if err := json.Unmarshal(raw, &decoded); err != nil {

@@ -1,9 +1,9 @@
 package credentials
 
 import (
-	"os"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"sync"
 )

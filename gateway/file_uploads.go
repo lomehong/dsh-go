@@ -30,7 +30,7 @@ import (
 type FileUploadValue struct {
 	// ReceiptID is the per-upload authority accepted only inside the
 	// receiving Agent scope.
-	ReceiptID string                 `json:"receiptId"`
+	ReceiptID string                       `json:"receiptId"`
 	File      attachment.FileAttachmentRef `json:"file"`
 }
 

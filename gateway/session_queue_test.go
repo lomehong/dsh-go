@@ -16,8 +16,8 @@ import (
 // observers.
 type silentNotifications struct{}
 
-func (silentNotifications) Inserted(llm.Message)  {}
-func (silentNotifications) Discarded(llm.Message) {}
+func (silentNotifications) Inserted(llm.Message)       {}
+func (silentNotifications) Discarded(llm.Message)      {}
 func (silentNotifications) Claimed(llm.Message, int64) {}
 
 // queueFixture builds the controller plus a live agent whose inbox is

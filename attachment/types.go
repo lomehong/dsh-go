@@ -121,7 +121,6 @@ type RequestImageAttachment struct {
 	HasAlpha bool
 }
 
-
 // FileAttachmentRef is a durable, serializable reference to one verbatim
 // stored file. Files are stored byte-for-byte with no normalization;
 // AttachmentID is the sha256 digest of exactly those bytes (official

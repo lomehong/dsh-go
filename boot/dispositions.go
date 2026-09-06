@@ -77,30 +77,30 @@ var Dispositions = map[string]string{
 	// Invariant companion packages: the official dev-time observation
 	// harness over production types (Go relies on the test suite instead —
 	// recorded deviation, see the schedule/preset rows' invariant notes).
-	"@deepseek-ai/dsh-invariants":              "T2-disposition (dev-time invariant harness; Go gates on tests)",
-	"@deepseek-ai/dsh-agent/invariant":         "T2-disposition (invariant companion)",
-	"@deepseek-ai/dsh-agent-loop/invariant":    "T2-disposition (invariant companion)",
-	"@deepseek-ai/dsh-scope/invariant":         "T2-disposition (invariant companion)",
-	"@deepseek-ai/dsh-session/invariant":       "T2-disposition (invariant companion)",
+	"@deepseek-ai/dsh-invariants":           "T2-disposition (dev-time invariant harness; Go gates on tests)",
+	"@deepseek-ai/dsh-agent/invariant":      "T2-disposition (invariant companion)",
+	"@deepseek-ai/dsh-agent-loop/invariant": "T2-disposition (invariant companion)",
+	"@deepseek-ai/dsh-scope/invariant":      "T2-disposition (invariant companion)",
+	"@deepseek-ai/dsh-session/invariant":    "T2-disposition (invariant companion)",
 
 	// T3 planned: Go port scheduled this migration round. Removed from
 	// this table when the row's catalog entry lands. The r139 audit found
 	// the acp/sdk/sdk-minimal profiles failing hard at import over these
 	// rows; the dispositions make every selectable profile compose through
 	// with warns instead.
-	"@deepseek-ai/dsh-acp":                                 "T3-planned (ACP provider surface; subagent provider packs)",
-	"@deepseek-ai/dsh-acp-app":                             "T3-planned (ACP app startup over the ACP provider)",
-	"@deepseek-ai/dsh-sdk-app":                             "T3-planned (SDK JSON-RPC app startup; sdk/server ported, composition round pending)",
-	"@deepseek-ai/dsh-sdk-jsonrpc-server":                  "T3-planned (SDK JSON-RPC server row; sdk/server ported, composition round pending)",
-	"@deepseek-ai/dsh-sdk-minimal":                         "T3-planned (the sdk-minimal bundle's own startup row)",
-	"@deepseek-ai/dsh-fs-local":                            "T3-planned (bare local fs row — Go ships fs through dsh-fs-sandbox)",
-	"@deepseek-ai/dsh-terminal":                            "T3-planned (terminal/pty primitives — documented deferral)",
-	"@deepseek-ai/dsh-terminal-bash":                       "T3-planned (terminal bash executor)",
-	"@deepseek-ai/dsh-tool-bash-persistent":                "T3-planned (persistent shell tool family)",
-	"@deepseek-ai/dsh-tool-pwsh-persistent":                "T3-planned (persistent shell tool family)",
-	"@deepseek-ai/dsh-host-directory-picker-auto":          "T3-planned (directory picker)",
-	"@deepseek-ai/dsh-code-runtime-worker-thread":          "T3-planned-skip (web-mode PTC code execution deferred; see DECISIONS)",
-	"@deepseek-ai/dsh-session-stats":                       "T3-planned (sessionstats ported; catalog row pending)",
+	"@deepseek-ai/dsh-acp":                        "T3-planned (ACP provider surface; subagent provider packs)",
+	"@deepseek-ai/dsh-acp-app":                    "T3-planned (ACP app startup over the ACP provider)",
+	"@deepseek-ai/dsh-sdk-app":                    "T3-planned (SDK JSON-RPC app startup; sdk/server ported, composition round pending)",
+	"@deepseek-ai/dsh-sdk-jsonrpc-server":         "T3-planned (SDK JSON-RPC server row; sdk/server ported, composition round pending)",
+	"@deepseek-ai/dsh-sdk-minimal":                "T3-planned (the sdk-minimal bundle's own startup row)",
+	"@deepseek-ai/dsh-fs-local":                   "T3-planned (bare local fs row — Go ships fs through dsh-fs-sandbox)",
+	"@deepseek-ai/dsh-terminal":                   "T3-planned (terminal/pty primitives — documented deferral)",
+	"@deepseek-ai/dsh-terminal-bash":              "T3-planned (terminal bash executor)",
+	"@deepseek-ai/dsh-tool-bash-persistent":       "T3-planned (persistent shell tool family)",
+	"@deepseek-ai/dsh-tool-pwsh-persistent":       "T3-planned (persistent shell tool family)",
+	"@deepseek-ai/dsh-host-directory-picker-auto": "T3-planned (directory picker)",
+	"@deepseek-ai/dsh-code-runtime-worker-thread": "T3-planned-skip (web-mode PTC code execution deferred; see DECISIONS)",
+	"@deepseek-ai/dsh-session-stats":              "T3-planned (sessionstats ported; catalog row pending)",
 	"@deepseek-ai/dsh-session-log-export":         "frontend-domain (browser /export command + download dialog; the shared archive helpers port as sessionlog)",
 	// Delivered under Go packaging: the api-controller rows' Remote
 	// controllers live in the gateway package and compose through the

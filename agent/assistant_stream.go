@@ -7,7 +7,7 @@ import "dshgo/llm"
 // published on the scoped `agent/assistant-stream` event. Durable
 // settlements own replay; these frames are process-local presentation.
 type AssistantStreamFrame struct {
-	Type      string `json:"type"`
+	Type      string           `json:"type"`
 	AttemptID llm.LlmAttemptId `json:"attemptId"`
 	// Revision is monotone within one attached Agent lifecycle; a
 	// replacement Agent restarts at 1.
@@ -16,8 +16,8 @@ type AssistantStreamFrame struct {
 	Step     int64 `json:"step"`
 	// Chunk frames: dense zero-based position and the stream timestamp the
 	// durable embedded stream reuses.
-	Index int64           `json:"index,omitempty"`
-	Time  int64           `json:"time,omitempty"`
+	Index int64            `json:"index,omitempty"`
+	Time  int64            `json:"time,omitempty"`
 	Chunk *llm.StreamChunk `json:"chunk,omitempty"`
 	// End frames: the durable settlement committed before this notification,
 	// or live abandonment without one.
@@ -26,8 +26,7 @@ type AssistantStreamFrame struct {
 
 // AssistantStreamOutcome is the end frame's settlement record.
 type AssistantStreamOutcome struct {
-	Kind       string `json:"kind"` // committed | abandoned
-	EventType  string `json:"eventType,omitempty"`
-	Seq        int64  `json:"seq,omitempty"`
+	Kind      string `json:"kind"` // committed | abandoned
+	EventType string `json:"eventType,omitempty"`
+	Seq       int64  `json:"seq,omitempty"`
 }
-

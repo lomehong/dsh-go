@@ -2,8 +2,8 @@ package jsonl
 
 import (
 	"bytes"
-	"encoding/binary"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"

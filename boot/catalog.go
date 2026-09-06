@@ -2729,9 +2729,9 @@ var builders = map[string]pluginBuilder{
 					payload.Messages = prepared
 					return next(payload)
 				})
-			return ctx.Effect(func() (cordis.Disposer, error) {
-				return cordis.Disposer(undo), nil
-			})
+				return ctx.Effect(func() (cordis.Disposer, error) {
+					return cordis.Disposer(undo), nil
+				})
 			},
 		}
 	},
@@ -4722,30 +4722,30 @@ func piAiSettingsEnvelope() []byte {
 				"inner": map[string]any{
 					"type": "object",
 					"dict": map[string]any{
-									"api": map[string]any{
-										"type": "union",
-										"meta": map[string]any{"default": "openai-completions"},
-										"list": []any{
-											map[string]any{"type": "const", "value": "openai-completions"},
-											map[string]any{"type": "const", "value": "openai-responses"},
-											map[string]any{"type": "const", "value": "anthropic-messages"},
-										},
-									},
-									"baseUrl":   map[string]any{"type": "string"},
-									"apiKeyEnv": map[string]any{"type": "string"},
-									"models": map[string]any{
-										"type": "dict",
-										"meta": map[string]any{"default": map[string]any{}},
-										"inner": map[string]any{
-											"type": "object",
-											"meta": map[string]any{"default": map[string]any{}},
-											"dict": map[string]any{
-												"name":          map[string]any{"type": "string"},
-												"contextWindow": map[string]any{"type": "number"},
-												"maxTokens":     map[string]any{"type": "number"},
-											},
-										},
-									},
+						"api": map[string]any{
+							"type": "union",
+							"meta": map[string]any{"default": "openai-completions"},
+							"list": []any{
+								map[string]any{"type": "const", "value": "openai-completions"},
+								map[string]any{"type": "const", "value": "openai-responses"},
+								map[string]any{"type": "const", "value": "anthropic-messages"},
+							},
+						},
+						"baseUrl":   map[string]any{"type": "string"},
+						"apiKeyEnv": map[string]any{"type": "string"},
+						"models": map[string]any{
+							"type": "dict",
+							"meta": map[string]any{"default": map[string]any{}},
+							"inner": map[string]any{
+								"type": "object",
+								"meta": map[string]any{"default": map[string]any{}},
+								"dict": map[string]any{
+									"name":          map[string]any{"type": "string"},
+									"contextWindow": map[string]any{"type": "number"},
+									"maxTokens":     map[string]any{"type": "number"},
+								},
+							},
+						},
 					},
 				},
 			},

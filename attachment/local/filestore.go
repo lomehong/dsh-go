@@ -3,9 +3,9 @@ package local
 import (
 	cryptosha256 "crypto/sha256"
 	"crypto/subtle"
-	"hash"
 	"encoding/hex"
 	"errors"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"

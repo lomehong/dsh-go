@@ -96,7 +96,7 @@ func OpenMemoryUnit(descriptor KvUnitDescriptor, openUnits map[string]struct{}) 
 	unit := &MemoryUnit{
 		descriptor: descriptor,
 		records:    map[string]map[string]json.RawMessage{},
-	backups:    map[string]map[string]json.RawMessage{},
+		backups:    map[string]map[string]json.RawMessage{},
 	}
 	for _, table := range descriptor.Tables {
 		unit.records[table] = map[string]json.RawMessage{}

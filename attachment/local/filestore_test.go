@@ -136,8 +136,8 @@ func TestSaveFileStreamVerbatim(t *testing.T) {
 }
 
 type sliceReader struct {
-	parts [][]byte
-	index int
+	parts  [][]byte
+	index  int
 	offset int
 }
 

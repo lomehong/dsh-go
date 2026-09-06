@@ -189,8 +189,8 @@ type Runtime struct {
 	hooks    []*streamHookEntry
 	// adapterWatchers observe route-set changes (the llm/adapters-updated
 	// forwarded event source); notified outside the runtime lock.
-	adapterWatchers   map[int]func()
-	nextWatcherID     int
+	adapterWatchers map[int]func()
+	nextWatcherID   int
 	// configurable holds discovery-facing provider entries (the
 	// `registerConfigurableProviders` table: which provider routes expose a
 	// user settings section).

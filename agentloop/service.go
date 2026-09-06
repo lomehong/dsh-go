@@ -259,14 +259,14 @@ func NewAgentLoop(ctx *cordis.Context, registry *agent.AgentRegistry, logger cor
 		return nil, err
 	}
 	loop := &AgentLoop{
-		LLM:                  llmRuntime,
-		Tools:                toolRuntime,
-		Prompt:               prompt,
-		Registry:             registry,
-		Logger:               logger,
-		baseCtx:              context.Background(),
-		configStartFailed:    config.ConfigStartFailed,
-		ownership:            newFactoryOwnership(),
+		LLM:               llmRuntime,
+		Tools:             toolRuntime,
+		Prompt:            prompt,
+		Registry:          registry,
+		Logger:            logger,
+		baseCtx:           context.Background(),
+		configStartFailed: config.ConfigStartFailed,
+		ownership:         newFactoryOwnership(),
 	}
 	loop.maxParallelToolCalls.Store(int64(maxParallel))
 	if err := ctx.Effect(func() (cordis.Disposer, error) {
