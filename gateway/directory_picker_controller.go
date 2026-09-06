@@ -12,11 +12,6 @@ import (
 	"dshgo/typert"
 )
 
-// directoryPickerUnavailable is the diagnostic answered while no
-// directory-picking backend is composed in the Go web profile (official
-// dsh-host-directory-picker rows: T3-planned, see DECISIONS).
-const directoryPickerUnavailable = "directoryPicker: no directory-picking backend is composed in this deployment"
-
 // maxPickerEntries bounds one listing level (official browse default 1000).
 const maxPickerEntries = 1000
 
@@ -43,9 +38,22 @@ type pickerEntry struct {
 	Hidden bool   `json:"hidden"`
 }
 
-// Pick opens the host's OS chooser; unavailable without the native backend.
+// Pick opens the host's OS directory chooser (Windows FolderBrowserDialog,
+// macOS osascript choose-folder, Linux zenity) and answers the picked
+// absolute path. An operator cancel resolves as a null result — the
+// official pick contract (never an error). The dialog appears on the
+// host's interactive desktop: for the local web deployment that is the
+// operator's own screen.
 func (c *DirectoryPickerController) Pick(ctx context.Context) (any, error) {
-	return nil, wrapGatewayError("directory-picker/unavailable", "directoryPicker/pick", "", nil, "%s", directoryPickerUnavailable)
+	path, err := pickNativeDirectory(ctx)
+	if err != nil {
+		return nil, wrapGatewayError("directory-picker/unavailable", "directoryPicker/pick", "", err, "%v", err)
+	}
+	if path == "" {
+		// Operator cancelled: official pick resolves null.
+		return nil, nil
+	}
+	return path, nil
 }
 
 // List answers one directory level with its ancestry for the in-app browser.

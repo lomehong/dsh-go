@@ -96,7 +96,7 @@ var Dispositions = map[string]string{
 	"@deepseek-ai/dsh-terminal-bash":              "T3-planned (terminal bash executor)",
 	"@deepseek-ai/dsh-tool-bash-persistent":       "T3-planned (persistent shell tool family)",
 	"@deepseek-ai/dsh-tool-pwsh-persistent":       "T3-planned (persistent shell tool family)",
-	"@deepseek-ai/dsh-host-directory-picker-auto": "T2-disposition (auto chooser row absent; its EFFECTIVE browse outcome is composed natively: gateway DirectoryPickerController serves list/createDirectory, webhost serves the browse client face — native OS-chooser face stays unported, launcher capability)",
+	"@deepseek-ai/dsh-host-directory-picker-auto": "T2-disposition (auto chooser row absent; both its outcomes compose natively — native: gateway Pick opens the real OS chooser via PowerShell/osascript/zenity + webhost serves the native client face; browse: DirectoryPickerController list/createDirectory; the auto row's host-bind resolution itself stays unported, native face served unconditionally = the official localhost posture)",
 	"@deepseek-ai/dsh-code-runtime-worker-thread": "T3-planned-skip (web-mode PTC code execution deferred; see DECISIONS)",
 	"@deepseek-ai/dsh-session-stats":              "T3-planned (sessionstats ported; catalog row pending)",
 	"@deepseek-ai/dsh-session-log-export":         "frontend-domain (browser /export command + download dialog; the shared archive helpers port as sessionlog)",

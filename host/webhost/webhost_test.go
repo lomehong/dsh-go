@@ -192,10 +192,10 @@ func writeClientPackage(t *testing.T, root, name, platform string) {
 	}
 }
 
-// The picker faces' scan disposition: the BROWSE face loads (the Go
-// DirectoryPickerController serves its list/createDirectory primitives),
-// the NATIVE face stays skipped (no OS-chooser backend) — the workspace
-// picker button is live through the browse interaction.
+// The picker faces' scan disposition: the NATIVE face loads (the Go
+// DirectoryPickerController answers pick with a real OS chooser —
+// FolderBrowserDialog/osascript/zenity), the BROWSE face stays skipped
+// (the two faces collide on the single directoryFlow slot).
 func TestScanClientPackagesPickerFaces(t *testing.T) {
 	root := t.TempDir()
 	writeClientPackage(t, root, "dsh-client-ui-directory-picker-browse", "web")
@@ -209,10 +209,10 @@ func TestScanClientPackagesPickerFaces(t *testing.T) {
 	for _, record := range records {
 		seen[record.entry.ID] = true
 	}
-	if !seen["@deepseek-ai/dsh-client-ui-directory-picker-browse"] {
-		t.Fatal("browse face must be scanned (the Go host serves its backend)")
+	if !seen["@deepseek-ai/dsh-client-ui-directory-picker-native"] {
+		t.Fatal("native face must be scanned (the Go host serves the native pick)")
 	}
-	if seen["@deepseek-ai/dsh-client-ui-directory-picker-native"] {
-		t.Fatal("native face must stay skipped (no OS-chooser backend)")
+	if seen["@deepseek-ai/dsh-client-ui-directory-picker-browse"] {
+		t.Fatal("browse face must stay skipped (slot collision with the native face)")
 	}
 }

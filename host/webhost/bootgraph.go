@@ -196,13 +196,14 @@ var clientModuleSkips = map[string]bool{
 	// Inspector requires __DSH_INSPECTOR__ from the unported Inspector
 	// Worker host face.
 	"@deepseek-ai/dsh-experimental-inspector": true,
-	// The NATIVE picker face drives directoryPicker/pick (the launcher's OS
-	// chooser), which no Go backend serves — the mount would render a dead
-	// button. The BROWSE face is served: the Go DirectoryPickerController
-	// implements the browse primitives (list / createDirectory) the
-	// in-app dialog drives, and the official auto chooser mounts browse
-	// whenever no native chooser exists (remote bind / missing launcher).
-	"@deepseek-ai/dsh-client-ui-directory-picker-native": true,
+	// The BROWSE picker face stays skipped: the Go DirectoryPickerController
+	// now serves the NATIVE pick (Windows FolderBrowserDialog / macOS
+	// osascript / Linux zenity — the official localhost resolution), and
+	// the two faces collide on the single directoryFlow slot (the official
+	// auto chooser mounts exactly one). The native face drives
+	// directoryPicker/pick, which the Go controller answers with a real
+	// OS chooser on every supported platform.
+	"@deepseek-ai/dsh-client-ui-directory-picker-browse": true,
 }
 
 // scanClientPackages reads every node_modules package declaring
