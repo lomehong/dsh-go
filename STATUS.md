@@ -112,8 +112,8 @@
 
 <!-- BEGIN GENERATED: do not edit -->
 - 工具链：go1.25.0 / windows/amd64
-- 包：125（含测试 118，cmd 入口不计测试）
-- 行为测试函数：1601
+- 包：125（含测试 119，cmd 入口不计测试）
+- 行为测试函数：1607
 - catalog 接线键：104（boot/catalog.go 顶层 builder 键，@deepseek-ai/ 前缀）
 - 官方 base 名册：85 行 / 84 唯一名（boot/testdata 逐字随上游 bundle 同步）
 - 生成时间：见 git log（由 `go run ./scripts/genstatus` 生成）

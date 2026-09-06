@@ -90,8 +90,6 @@ var Dispositions = map[string]string{
 	// with warns instead.
 	"@deepseek-ai/dsh-acp":                        "T3-planned (ACP provider surface; subagent provider packs)",
 	"@deepseek-ai/dsh-acp-app":                    "T3-planned (ACP app startup over the ACP provider)",
-	"@deepseek-ai/dsh-sdk-app":                    "T3-planned (SDK JSON-RPC app startup; sdk/server ported, composition round pending)",
-	"@deepseek-ai/dsh-sdk-jsonrpc-server":         "T3-planned (SDK JSON-RPC server row; sdk/server ported, composition round pending)",
 	"@deepseek-ai/dsh-sdk-minimal":                "T3-planned (the sdk-minimal bundle's own startup row)",
 	"@deepseek-ai/dsh-fs-local":                   "T3-planned (bare local fs row — Go ships fs through dsh-fs-sandbox)",
 	"@deepseek-ai/dsh-terminal":                   "T3-planned (terminal/pty primitives — documented deferral)",
