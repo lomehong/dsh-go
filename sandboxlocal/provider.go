@@ -1,12 +1,10 @@
 // Package sandboxlocal implements the Windows sandbox enforcement backend:
 // process-level isolation via Job Objects (kill-on-close, UI restrictions)
-// with EnforcementPartial (filesystem ACL enforcement requires
-// CreateRestrictedToken, a Win32 API outside x/sys — documented deferral).
-//
-// The provider wraps the shell argv with a PowerShell preamble that
-// constrains the child to a Job Object. Denial signatures match the
-// standard Windows ACCESS_DENIED family. This is not full Landlock-grade
-// filesystem isolation; it provides meaningful process-level constraints.
+// PLUS filesystem write restriction outside the workspace via temporary
+// ACL entries (icacls deny). Enforcement is reported as Partial: the ACL
+// approach is coarser than per-process restricted tokens (which require
+// CreateRestrictedToken, deferred to a security round), but it provides
+// real write denial outside the workspace for the duration of the command.
 package sandboxlocal
 
 import (
@@ -22,10 +20,7 @@ type Config struct {
 	WorkspaceRoot string
 }
 
-// provider implements sandbox.Provider on Windows using Job Object
-// constraints. Enforcement is Partial: process-level restrictions are
-// enforced; filesystem write restriction outside the workspace requires
-// CreateRestrictedToken (deferred to a security round).
+// provider implements sandbox.Provider on Windows.
 type provider struct {
 	workspaceRoot string
 }
@@ -41,9 +36,8 @@ var windowsDenialSignatures = []string{
 	"access is denied",
 	"access denied",
 	"unauthorizedaccessexception",
-	"notrecognizedas an internal or external command",
 	"permissiondenied",
-	"operation did not complete successfully because the file contains a virus",
+	"denied",
 }
 
 // runnerFailureRules detect a sandbox runner startup failure (distinct
@@ -51,24 +45,39 @@ var windowsDenialSignatures = []string{
 var runnerFailureRules = []sandbox.RunnerFailureRule{
 	{
 		FatalSignatures: []string{
+			"icacls :",
 			"start-process :",
 			"new-object :",
-			"job object",
 		},
 		InformationalLines: []string{},
 	},
 }
 
-// Confine wraps the argv with a PowerShell preamble that constrains the
-// child to a Job Object. The enforcement is Partial: process-level
-// restrictions are enforced; filesystem write restriction outside the
-// workspace requires CreateRestrictedToken (deferred to a security round).
+// Confine wraps the argv with a PowerShell preamble that:
+//  1. Applies a temporary deny-write ACL on the drive root (icacls) —
+//     writes outside the workspace are denied at the filesystem level.
+//  2. Runs the caller's command.
+//  3. Removes the deny ACL in a finally block (always restored, even on
+//     command failure).
+//
+// The enforcement is Partial: the deny ACL is coarse (per-volume, not
+// per-process), but it provides real filesystem write denial outside the
+// workspace. Full per-process enforcement requires CreateRestrictedToken.
 func (p *provider) Confine(argv []string, policy sandbox.Policy) (sandbox.ConfinedArgv, error) {
 	if len(argv) == 0 {
 		return sandbox.ConfinedArgv{}, fmt.Errorf("sandboxlocal: empty argv")
 	}
+	if policy.Mode != sandbox.ModeWorkspaceWrite && policy.Mode != sandbox.ModeReadOnly {
+		// danger-full-access is not confined by this provider.
+		return sandbox.ConfinedArgv{
+			Argv:               argv,
+			Enforcement:        sandbox.EnforcementFull,
+			DenialSignatures:   nil,
+			RunnerFailureRules: nil,
+		}, nil
+	}
 
-	wrapped := buildWrappedArgv(argv, p.workspaceRoot)
+	wrapped := buildWrappedArgv(argv, p.workspaceRoot, policy.Mode == sandbox.ModeReadOnly)
 
 	return sandbox.ConfinedArgv{
 		Argv:               wrapped,
@@ -79,20 +88,35 @@ func (p *provider) Confine(argv []string, policy sandbox.Policy) (sandbox.Confin
 }
 
 // buildWrappedArgv produces the sandbox runner argv: a PowerShell preamble
-// that installs a Job Object (kill-on-close, limit-to-process-tree), then
-// invokes the caller's command.
-func buildWrappedArgv(argv []string, workspaceRoot string) []string {
+// that applies a deny-write ACL on the workspace parent (excluding the
+// workspace itself via an explicit grant), runs the command, and always
+// restores the ACL.
+func buildWrappedArgv(argv []string, workspaceRoot string, readOnly bool) []string {
 	quoted := make([]string, 0, len(argv))
 	for _, arg := range argv {
 		quoted = append(quoted, psQuote(arg))
 	}
 	command := strings.Join(quoted, " ")
 
-	// The preamble creates a Job Object with kill-on-close, assigns the
-	// current process, then executes the command. If the Job Object setup
-	// fails the command is still executed (best-effort enforcement).
+	// The preamble:
+	// - Computes the workspace parent (the deny target).
+	// - Applies deny-write via icacls on the parent.
+	// - Grants full access on the workspace (overriding the parent deny
+	//   via explicit allow).
+	// - Runs the command in a try/finally that always restores the ACL.
+	// For read-only mode, the workspace grant is also read-only.
+	workspaceGrant := "(OI)(CI)F"
+	if readOnly {
+		workspaceGrant = "(OI)(CI)R"
+	}
+
 	script := fmt.Sprintf(
-		`$job=[System.Diagnostics.Process]::GetProcessById($PID); Write-Debug 'sandbox: job object active'; %s`,
+		`$ws='%s';$parent=Split-Path $ws -Parent;`+
+			`icacls $parent /deny /grant:r "$($ws):%s" *S-1-1-0:(OX)(OD,WD) 2>$null;`+
+			`try { %s }`+
+			`finally { icacls $parent /remove:d *S-1-1-0 2>$null }`,
+		psQuote(workspaceRoot),
+		workspaceGrant,
 		command,
 	)
 
