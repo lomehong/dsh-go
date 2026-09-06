@@ -1,6 +1,7 @@
 package webhost
 
 import (
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -171,5 +172,47 @@ func TestResolveFrontendDistFailsLoudWhenMissing(t *testing.T) {
 	if _, err := ResolveFrontendDist(anchor); err == nil ||
 		!strings.Contains(err.Error(), "frontend dist not built") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// writeClientPackage plants one dsh.client web package (declaration +
+// bundle) under the fixture node_modules.
+func writeClientPackage(t *testing.T, root, name, platform string) {
+	t.Helper()
+	dir := filepath.Join(root, "@deepseek-ai", name)
+	if err := os.MkdirAll(filepath.Join(dir, "lib"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	pkg := fmt.Sprintf(`{"name":"@deepseek-ai/%s","dsh":{"client":{"platform":%q}},"exports":{"./client":"./lib/client.js"}}`, name, platform)
+	if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(pkg), 0o644); err != nil {
+		t.Fatalf("write package: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "lib", "client.js"), []byte("// bundle\n"), 0o644); err != nil {
+		t.Fatalf("write bundle: %v", err)
+	}
+}
+
+// The picker faces' scan disposition: the BROWSE face loads (the Go
+// DirectoryPickerController serves its list/createDirectory primitives),
+// the NATIVE face stays skipped (no OS-chooser backend) — the workspace
+// picker button is live through the browse interaction.
+func TestScanClientPackagesPickerFaces(t *testing.T) {
+	root := t.TempDir()
+	writeClientPackage(t, root, "dsh-client-ui-directory-picker-browse", "web")
+	writeClientPackage(t, root, "dsh-client-ui-directory-picker-native", "web")
+
+	records, err := scanClientPackages(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, record := range records {
+		seen[record.entry.ID] = true
+	}
+	if !seen["@deepseek-ai/dsh-client-ui-directory-picker-browse"] {
+		t.Fatal("browse face must be scanned (the Go host serves its backend)")
+	}
+	if seen["@deepseek-ai/dsh-client-ui-directory-picker-native"] {
+		t.Fatal("native face must stay skipped (no OS-chooser backend)")
 	}
 }

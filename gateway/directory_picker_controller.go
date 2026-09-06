@@ -22,9 +22,13 @@ const maxPickerEntries = 1000
 
 // DirectoryPickerController hosts the directoryPicker Remote namespace
 // (official DirectoryPickerController): the in-app browser listing and
-// child-directory creation over the host filesystem. The OS chooser (pick)
-// needs the native capability, which the Go web profile does not compose, so
-// it answers the unavailable diagnostic.
+// child-directory creation over the host filesystem — the browse
+// interaction's host half (official dsh-host-directory-picker-browse), the
+// interaction the official auto chooser mounts whenever no native chooser
+// exists. The OS chooser (pick) needs the launcher's native capability,
+// which the Go web profile does not compose, so it answers the unavailable
+// diagnostic; the served browse client face (ui-directory-picker-browse)
+// drives only List/CreateDirectory.
 type DirectoryPickerController struct{}
 
 // NewDirectoryPickerController builds the namespace host.
