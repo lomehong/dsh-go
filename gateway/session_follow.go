@@ -98,6 +98,12 @@ func (g *Gateway) projections() *projection.Registry {
 // (header, cursor, message-aligned records, projection baseline) then an
 // open, quiet hold until the caller's signal ends.
 func (g *Gateway) openSessionFollow(args map[string]any, signal context.Context) (<-chan any, func(), error) {
+	// The official client keys stream args by the method's parameter name
+	// (follow(request, signal)): the fields ride under one "request"
+	// object. Unwrap it before reading; the bare form stays tolerated.
+	if wrapped, ok := args["request"].(map[string]any); ok {
+		args = wrapped
+	}
 	sessionID, err := parseSessionAddress(args, sessionFollowEndpoint)
 	if err != nil {
 		return nil, nil, err
@@ -158,6 +164,15 @@ func (g *Gateway) openSessionFollow(args map[string]any, signal context.Context)
 				"asOfSeq": cursor,
 				"values":  values,
 			},
+		}
+		// The official client opts in via follow(request).assistantStream and
+		// then fails the whole open when the snapshot omits the opening
+		// baseline. Assistant frames are process-local presentation — a
+		// fresh follow sees no active attempt, so the baseline is the empty
+		// revision 0 (an activeAttempt reconnect prefix stays deferred until
+		// the multi-client domain round).
+		if requested, _ := args["assistantStream"].(bool); requested {
+			snapshot["assistantStream"] = map[string]any{"revision": 0}
 		}
 		select {
 		case frames <- snapshot:

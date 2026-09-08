@@ -21,9 +21,12 @@ type WireFrame struct {
 	AgentID string `json:"agentId,omitempty"`
 	// Request is the projected waterfall request payload.
 	Request map[string]any `json:"request,omitempty"`
-	// ClientID and Host are on the ready frame.
+	// ClientID and Host are on the ready frame. Host is a pointer: the
+	// official event-frame parser validates exact key sets per frame type,
+	// so a zero-value struct here would stamp a stray "host" onto every
+	// emit/waterfall frame and get the whole stream rejected.
 	ClientID string              `json:"clientId,omitempty"`
-	Host     RemoteEventHostInfo `json:"host,omitempty"`
+	Host     *RemoteEventHostInfo `json:"host,omitempty"`
 }
 
 // RemoteEventQueue is one forwarding queue with a single waiting consumer.

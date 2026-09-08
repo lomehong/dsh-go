@@ -262,10 +262,16 @@ func (c *SessionController) Rename(ctx context.Context, request map[string]any) 
 // namespace stays unregistered until its domain round.
 func (c *SessionController) Contribution() typert.Contribution {
 	jsonCodec := typert.Codec{Mode: typert.CodecSrcJSON}
-	requestParam := typert.InvocationParameterDescriptor{
-		// Wire name is "_request" (official generated descriptor): the
-		// browser sends the SessionListRequest under that field.
+	// Parameter names are per-method, copied from the official controller
+	// signatures (api/session-controller src/index.ts): the generated
+	// client keys the args object by the exact TS parameter name, and the
+	// strict args validation rejects any other key. Only list's parameter
+	// is named "_request"; every other method names it "request".
+	listParam := typert.InvocationParameterDescriptor{
 		Name: "_request", Wire: "_request", Source: typert.SourceJSON, Codec: jsonCodec,
+	}
+	requestParam := typert.InvocationParameterDescriptor{
+		Name: "request", Wire: "request", Source: typert.SourceJSON, Codec: jsonCodec,
 	}
 	inv := typert.InvocationReceiver{Kind: typert.ReceiverDirect}
 	descriptor := func(id, method, implementation string, params ...typert.InvocationParameterDescriptor) typert.InvocationDescriptor {
@@ -287,7 +293,7 @@ func (c *SessionController) Contribution() typert.Contribution {
 		Invocations: func() []typert.InvocationDescriptor {
 			invocations := []typert.InvocationDescriptor{
 				descriptor("session.modelCatalog", "modelCatalog", "ModelCatalog"),
-				descriptor("session.list", "list", "List", requestParam),
+				descriptor("session.list", "list", "List", listParam),
 				descriptor("session.page", "page", "Page", requestParam),
 			}
 			if c.createDeps != nil {
